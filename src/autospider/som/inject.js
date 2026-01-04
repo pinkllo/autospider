@@ -153,7 +153,7 @@
       // 1. ID（最稳定，但排除随机 ID）
       const id = element.getAttribute('id');
       if (id && !CONFIG.randomIdPattern.test(id)) {
-        const xpath = `//*[@id="${this.escapeXPath(id)}"]`;
+        const xpath = `//*[@id='${id}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({
             xpath,
@@ -168,7 +168,7 @@
       for (const attr of ['data-testid', 'data-test', 'data-qa', 'data-cy']) {
         const value = element.getAttribute(attr);
         if (value) {
-          const xpath = `//*[@${attr}="${this.escapeXPath(value)}"]`;
+          const xpath = `//*[@${attr}='${value}']`;
           if (this.isUnique(xpath, element)) {
             candidates.push({
               xpath,
@@ -183,7 +183,7 @@
       // 3. aria-label
       const ariaLabel = element.getAttribute('aria-label');
       if (ariaLabel) {
-        const xpath = `//*[@aria-label="${this.escapeXPath(ariaLabel)}"]`;
+        const xpath = `//*[@aria-label='${ariaLabel}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({
             xpath,
@@ -198,7 +198,7 @@
       const name = element.getAttribute('name');
       if (name) {
         const tag = element.tagName.toLowerCase();
-        const xpath = `//${tag}[@name="${this.escapeXPath(name)}"]`;
+        const xpath = `//${tag}[@name='${name}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({
             xpath,
@@ -213,7 +213,7 @@
       const placeholder = element.getAttribute('placeholder');
       if (placeholder) {
         const tag = element.tagName.toLowerCase();
-        const xpath = `//${tag}[@placeholder="${this.escapeXPath(placeholder)}"]`;
+        const xpath = `//${tag}[@placeholder='${placeholder}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({
             xpath,
@@ -228,8 +228,24 @@
       const text = this.getVisibleText(element);
       if (text && text.length <= 30) {
         const tag = element.tagName.toLowerCase();
-        // 使用 normalize-space 处理空白
-        const xpath = `//${tag}[normalize-space(.)="${this.escapeXPath(text)}"]`;
+        
+        // 6a. 精确匹配直接文本内容
+        const directText = element.textContent?.trim() || '';
+        if (directText === text) {
+          // 使用 text() 精确匹配
+          const xpathDirect = `//${tag}[text()='${text}']`;
+          if (this.isUnique(xpathDirect, element)) {
+            candidates.push({
+              xpath: xpathDirect,
+              priority: 4,
+              strategy: 'text-direct',
+              confidence: 0.75,
+            });
+          }
+        }
+        
+        // 6b. 使用 normalize-space 处理空白
+        const xpath = `//${tag}[normalize-space(text())='${text}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({
             xpath,
@@ -239,9 +255,9 @@
           });
         }
 
-        // 备选：contains 方式
-        const xpathContains = `//${tag}[contains(normalize-space(.), "${this.escapeXPath(text)}")]`;
-        if (candidates.length === 0 || !this.isUnique(candidates[0].xpath, element)) {
+        // 6c. 备选：contains 方式（匹配包含该文本的元素）
+        const xpathContains = `//${tag}[contains(text(), '${text}')]`;
+        if (this.isUnique(xpathContains, element)) {
           candidates.push({
             xpath: xpathContains,
             priority: 4,
@@ -251,12 +267,23 @@
         }
       }
 
-      // 7. 相对路径（兜底）
-      const relativePath = this.getRelativePath(element);
-      if (relativePath) {
+      // 7. 基于最近 ID 祖先的相对路径（更稳定）
+      const idBasedPath = this.getIdBasedPath(element);
+      if (idBasedPath && this.isUnique(idBasedPath, element)) {
+        candidates.push({
+          xpath: idBasedPath,
+          priority: 5,
+          strategy: 'id-relative',
+          confidence: 0.8,
+        });
+      }
+
+      // 8. 完整相对路径（兜底）
+      const relativePath = this.getFullRelativePath(element);
+      if (relativePath && this.isUnique(relativePath, element)) {
         candidates.push({
           xpath: relativePath,
-          priority: 5,
+          priority: 6,
           strategy: 'relative',
           confidence: 0.4,
         });
@@ -269,65 +296,125 @@
     },
 
     /**
-     * 获取元素的相对路径 XPath
+     * 基于最近的有 ID 祖先元素生成路径
+     * 例如: //*[@id="app"]/main/div[2]/div/div/div[2]/div/div[1]/div[1]
      */
-    getRelativePath(element) {
-      const parts = [];
-      let current = element;
-      let depth = 0;
-      const maxDepth = 6;
-
-      while (current && current !== document.body && depth < maxDepth) {
-        const tag = current.tagName.toLowerCase();
-
-        // 尝试找到稳定锚点
+    getIdBasedPath(element) {
+      // 1. 找到最近的有 ID 的祖先元素
+      let idAncestor = null;
+      let current = element.parentElement;
+      
+      while (current && current !== document.documentElement) {
         const id = current.getAttribute('id');
         if (id && !CONFIG.randomIdPattern.test(id)) {
-          parts.unshift(`//*[@id="${this.escapeXPath(id)}"]`);
+          idAncestor = current;
           break;
         }
-
-        // 计算同级索引
+        current = current.parentElement;
+      }
+      
+      if (!idAncestor) {
+        return null;
+      }
+      
+      // 2. 从 ID 祖先到目标元素构建路径
+      const parts = [];
+      current = element;
+      
+      while (current && current !== idAncestor) {
+        const tag = current.tagName.toLowerCase();
+        
+        // 计算同标签兄弟元素的索引
         let index = 1;
         let sibling = current.previousElementSibling;
         while (sibling) {
-          if (sibling.tagName === current.tagName) {
+          if (sibling.tagName.toLowerCase() === tag) {
+            index++;
+          }
+          sibling = sibling.previousElementSibling;
+        }
+        
+        // 检查是否需要索引（有同名兄弟时需要）
+        let needsIndex = index > 1;
+        if (!needsIndex) {
+          sibling = current.nextElementSibling;
+          while (sibling) {
+            if (sibling.tagName.toLowerCase() === tag) {
+              needsIndex = true;
+              break;
+            }
+            sibling = sibling.nextElementSibling;
+          }
+        }
+        
+        parts.unshift(needsIndex ? `${tag}[${index}]` : tag);
+        current = current.parentElement;
+      }
+      
+      // 3. 组合路径（使用单引号避免 JSON 转义问题）
+      const ancestorId = idAncestor.getAttribute('id');
+      return `//*[@id='${ancestorId}']/${parts.join('/')}`;
+    },
+
+    /**
+     * 获取从根元素开始的完整相对路径
+     * 包含所有语义标签（html, body, main, article, section 等）
+     */
+    getFullRelativePath(element) {
+      const parts = [];
+      let current = element;
+
+      while (current && current !== document.documentElement) {
+        const tag = current.tagName.toLowerCase();
+        
+        // 跳过 html 标签
+        if (tag === 'html') {
+          current = current.parentElement;
+          continue;
+        }
+
+        // 计算同标签兄弟元素的索引
+        let index = 1;
+        let sibling = current.previousElementSibling;
+        while (sibling) {
+          if (sibling.tagName.toLowerCase() === tag) {
             index++;
           }
           sibling = sibling.previousElementSibling;
         }
 
         // 检查是否需要索引
-        let needsIndex = false;
-        sibling = current.nextElementSibling;
-        while (sibling) {
-          if (sibling.tagName === current.tagName) {
-            needsIndex = true;
-            break;
+        let needsIndex = index > 1;
+        if (!needsIndex) {
+          sibling = current.nextElementSibling;
+          while (sibling) {
+            if (sibling.tagName.toLowerCase() === tag) {
+              needsIndex = true;
+              break;
+            }
+            sibling = sibling.nextElementSibling;
           }
-          sibling = sibling.nextElementSibling;
-        }
-        if (index > 1) {
-          needsIndex = true;
         }
 
         const part = needsIndex ? `${tag}[${index}]` : tag;
         parts.unshift(part);
 
         current = current.parentElement;
-        depth++;
       }
 
       if (parts.length === 0) {
         return null;
       }
 
-      // 如果没有找到锚点，从 body 开始
-      if (!parts[0].startsWith('//*[@id')) {
-        parts.unshift('//body');
-      }
+      return '//' + parts.join('/');
+    },
 
-      return parts.join('/');
+    /**
+     * 获取元素的相对路径 XPath（旧版本，保留兼容）
+     * @deprecated 使用 getIdBasedPath 或 getFullRelativePath 代替
+     */
+    getRelativePath(element) {
+      return this.getIdBasedPath(element) || this.getFullRelativePath(element);
     },
 
     /**

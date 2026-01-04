@@ -283,7 +283,28 @@ class ActionExecutor:
             xpaths = mark_id_to_xpath.get(action.mark_id, [])
             locator, used_xpath = await self._find_element_by_xpath_list(xpaths)
             if locator:
-                extracted_text = await locator.inner_text()
+                element_text = await locator.inner_text()
+                
+                # 智能提取：如果是表格标题（th），尝试获取同行的值（td）
+                tag_name = await locator.evaluate("el => el.tagName.toLowerCase()")
+                if tag_name == "th":
+                    # 获取父 tr 元素
+                    parent_tr = locator.locator("xpath=..")
+                    # 尝试获取下一个兄弟 td
+                    try:
+                        next_td = parent_tr.locator("td").first
+                        if await next_td.count() > 0:
+                            extracted_text = await next_td.inner_text()
+                            # 更新 xpath 指向 td
+                            if used_xpath:
+                                # 将 /th 替换为 /td 或 /following-sibling::td[1]
+                                used_xpath = used_xpath.replace("/th", "/following-sibling::td[1]")
+                        else:
+                            extracted_text = element_text
+                    except Exception:
+                        extracted_text = element_text
+                else:
+                    extracted_text = element_text
             else:
                 # 尝试用 data-som-id
                 locator = self.page.locator(f'[data-som-id="{action.mark_id}"]')
