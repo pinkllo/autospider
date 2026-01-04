@@ -38,19 +38,7 @@ SYSTEM_PROMPT = """你是网页自动化Agent。分析截图中标注了红色�
 1. 一次只做一个操作
 2. 优先使用截图中的数字编号
 3. thinking要简短（50字内）
-4. 找到目标内容后用extract提取，再用done结束
-
-## ⚠️ 重要：避免重复操作
-1. **仔细检查历史操作**：如果某个元素在历史中已经被点击过，且没有找到目标，**不要再次点击它**
-2. 如果被告知某些操作被禁止，你**必须**选择其他不同的操作
-3. 陷入循环时，尝试：点击其他Tab/按钮、查看附件或相关链接
-4. 避免在同一页面上反复点击相同的元素
-
-## ⚠️ 滚动限制
-1. 如果历史显示已连续滚动多次，**停止滚动**，尝试点击其他元素（如Tab、附件、链接）
-2. 如果被告知"scroll_blocked"或"页面已到底"，**禁止再滚动**，必须选择其他操作
-3. 如果页面已探索完毕但未找到目标，检查是否有其他Tab或链接可以点击
-4. 若确认目标内容不存在于当前页面，使用done结束并说明情况"""
+4. 找到目标内容后用extract提取，再用done结束"""
 
 
 # ============================================================================
@@ -87,8 +75,6 @@ class LLMDecider:
         state: "AgentState",
         screenshot_base64: str,
         marks_text: str,
-        action_history: list[dict] | None = None,
-        blocked_actions: list[str] | None = None,
     ) -> Action:
         """
         根据当前状态和截图决定下一步操作
@@ -97,19 +83,12 @@ class LLMDecider:
             state: Agent 状态
             screenshot_base64: 带 SoM 标注的截图（Base64）
             marks_text: 格式化的 marks 文本描述
-            action_history: 历史操作记录列表
-            blocked_actions: 被禁止的操作签名列表
         
         Returns:
             下一步操作
         """
         # 构建用户消息
-        user_content = self._build_user_message(
-            state, 
-            marks_text,
-            action_history=action_history or [],
-            blocked_actions=blocked_actions or [],
-        )
+        user_content = self._build_user_message(state, marks_text)
 
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
@@ -138,13 +117,7 @@ class LLMDecider:
         action = self._parse_response(response_text)
         return action
 
-    def _build_user_message(
-        self, 
-        state: "AgentState", 
-        marks_text: str,
-        action_history: list[dict] | None = None,
-        blocked_actions: list[str] | None = None,
-    ) -> str:
+    def _build_user_message(self, state: "AgentState", marks_text: str) -> str:
         """构建用户消息"""
         parts = []
 
@@ -155,36 +128,6 @@ class LLMDecider:
         # 当前状态
         parts.append(f"## 当前页面\n- URL: {state.page_url}\n- 标题: {state.page_title}")
         parts.append(f"## 当前步骤\n第 {state.step_index + 1} 步（最多 {state.input.max_steps} 步）")
-
-        # 历史操作记录（滑动窗口，最近 8 步）
-        if action_history:
-            recent_history = action_history[-8:]
-            history_lines = ["## 📜 最近操作历史（请仔细检查，避免重复！）"]
-            for h in recent_history:
-                step = h.get("step", "?")
-                action = h.get("action", "?")
-                target = h.get("target_text", "")
-                mark_id = h.get("mark_id", "")
-                success = "✓" if h.get("success") else "✗"
-                
-                if action == "click":
-                    history_lines.append(f"- Step {step}: [Click] 「{target or f'编号{mark_id}'}」 {success}")
-                elif action == "scroll":
-                    history_lines.append(f"- Step {step}: [Scroll] 向下滚动 {success}")
-                elif action == "type":
-                    history_lines.append(f"- Step {step}: [Type] 输入文本 {success}")
-                else:
-                    history_lines.append(f"- Step {step}: [{action}] {target} {success}")
-            
-            parts.append("\n".join(history_lines))
-        
-        # 禁止操作列表
-        if blocked_actions:
-            blocked_info = "## 🚫 以下操作已被禁止（死循环检测）\n"
-            blocked_info += "**不要再执行这些操作，必须选择其他方式！**\n"
-            for sig in blocked_actions[-5:]:  # 最多显示 5 个
-                blocked_info += f"- {sig}\n"
-            parts.append(blocked_info)
 
         # 上一步结果
         if state.last_action and state.last_result:
@@ -203,7 +146,7 @@ class LLMDecider:
         parts.append(f"## 可交互元素列表\n{marks_text}")
 
         # 提示
-        parts.append("## 请分析截图并决定下一步操作\n以 JSON 格式输出你的决策。\n\n**重要提醒**：检查历史记录，不要重复点击已经尝试过的元素！")
+        parts.append("## 请分析截图并决定下一步操作\n以 JSON 格式输出你的决策。")
 
         return "\n\n".join(parts)
 

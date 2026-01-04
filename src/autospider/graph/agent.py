@@ -66,12 +66,6 @@ class GraphState(TypedDict):
     # 脚本沉淀
     script_steps: list[dict]
     
-    # 历史记录（用于防止死循环）
-    action_history: list[dict]  # 存储历史操作: [{step, action, mark_id, target_text, url, success}]
-    blocked_actions: list[str]  # 被禁止的操作签名列表
-    consecutive_scroll_count: int  # 连续滚动次数
-    last_marks_hash: str  # 上一次 marks 的哈希，用于检测页面是否变化
-    
     # 状态标志
     done: bool
     success: bool
@@ -121,10 +115,6 @@ class SoMAgent:
             "current_action": None,
             "action_result": None,
             "script_steps": [],
-            "action_history": [],  # 历史操作记录
-            "blocked_actions": [],  # 被禁止的操作签名
-            "consecutive_scroll_count": 0,  # 连续滚动次数
-            "last_marks_hash": "",  # 上一次页面内容哈希
             "done": False,
             "success": False,
             "error": None,
@@ -201,24 +191,6 @@ class SoMAgent:
 
             # 格式化 marks 供 LLM 使用
             marks_text = format_marks_for_llm(snapshot)
-            
-            # 计算页面内容哈希（用于检测滚动后页面是否变化）
-            import hashlib
-            current_marks_hash = hashlib.md5(marks_text.encode()).hexdigest()[:16]
-            
-            # 检测滚动循环：如果上一步是滚动且页面内容未变化
-            if state["action_history"]:
-                last_action = state["action_history"][-1]
-                if last_action.get("action") == "scroll":
-                    if current_marks_hash == state["last_marks_hash"]:
-                        state["consecutive_scroll_count"] += 1
-                        print(f"[Observe] ⚠️ 滚动后页面无变化 (连续 {state['consecutive_scroll_count']} 次)")
-                    else:
-                        state["consecutive_scroll_count"] = 0
-                else:
-                    state["consecutive_scroll_count"] = 0
-            
-            state["last_marks_hash"] = current_marks_hash
 
             state["screenshot_base64"] = screenshot_base64
             state["marks_text"] = marks_text
@@ -232,116 +204,36 @@ class SoMAgent:
 
     async def _decide(self, state: GraphState) -> GraphState:
         """决策节点：调用 LLM"""
-        max_retry = 3  # 最多重试 3 次以获取非重复操作
-        
-        for attempt in range(max_retry):
-            try:
-                # 构建简化的 AgentState 供 LLM 使用
-                agent_state = AgentState(
-                    input=self.run_input,
-                    step_index=state["step_index"],
-                    page_url=state["page_url"],
-                    page_title=state["page_title"],
-                    last_action=Action(**state["current_action"]) if state["current_action"] else None,
-                    last_result=ActionResult(**state["action_result"]) if state["action_result"] else None,
-                )
+        try:
+            # 构建简化的 AgentState 供 LLM 使用
+            agent_state = AgentState(
+                input=self.run_input,
+                step_index=state["step_index"],
+                page_url=state["page_url"],
+                page_title=state["page_title"],
+                last_action=Action(**state["current_action"]) if state["current_action"] else None,
+                last_result=ActionResult(**state["action_result"]) if state["action_result"] else None,
+            )
 
-                # 调用 LLM 决策，传入历史记录和禁止操作
-                action = await self.decider.decide(
-                    agent_state,
-                    state["screenshot_base64"],
-                    state["marks_text"],
-                    action_history=state["action_history"],
-                    blocked_actions=state["blocked_actions"],
-                )
+            # 调用 LLM 决策
+            action = await self.decider.decide(
+                agent_state,
+                state["screenshot_base64"],
+                state["marks_text"],
+            )
 
-                # 生成操作签名用于死循环检测
-                action_sig = self._get_action_signature(action, state["page_url"])
-                
-                # 检查是否为重复操作（仅针对 click 操作）
-                if action.action == ActionType.CLICK and action_sig:
-                    # 检查是否在禁止列表中
-                    if action_sig in state["blocked_actions"]:
-                        print(f"[Decide] ⚠️ 操作被禁止（死循环检测）: {action_sig}")
-                        if attempt < max_retry - 1:
-                            # 告知 LLM 需要重新决策
-                            state["blocked_actions"].append(action_sig)
-                            continue
-                        else:
-                            # 超过重试次数，强制滚动
-                            print(f"[Decide] 重试次数耗尽，强制执行滚动操作")
-                            action = Action(
-                                action=ActionType.SCROLL,
-                                scroll_delta=(0, 500),
-                                thinking="多次尝试无效操作，执行大幅滚动探索新区域"
-                            )
-                    
-                    # 检查近期历史中是否已执行过相同操作（在相同 URL）
-                    recent_sigs = [
-                        self._get_action_signature(Action(**h), h.get("url", ""))
-                        for h in state["action_history"][-5:]  # 检查最近 5 步
-                        if h.get("action") == "click"
-                    ]
-                    if action_sig in recent_sigs:
-                        print(f"[Decide] ⚠️ 检测到重复操作: {action_sig}")
-                        # 添加到禁止列表
-                        if action_sig not in state["blocked_actions"]:
-                            state["blocked_actions"].append(action_sig)
-                        if attempt < max_retry - 1:
-                            continue
-                        else:
-                            print(f"[Decide] 重试次数耗尽，强制执行滚动操作")
-                            action = Action(
-                                action=ActionType.SCROLL,
-                                scroll_delta=(0, 500),
-                                thinking="检测到重复点击循环，执行大幅滚动探索新区域"
-                            )
-                
-                # 检查滚动循环：连续多次滚动但页面无变化
-                if action.action == ActionType.SCROLL:
-                    if state["consecutive_scroll_count"] >= 3:
-                        print(f"[Decide] ⚠️ 检测到滚动循环（连续 {state['consecutive_scroll_count']} 次滚动无变化）")
-                        print(f"[Decide] 禁止继续滚动，要求 LLM 尝试其他操作")
-                        # 添加滚动禁止提示
-                        if "scroll_blocked" not in state["blocked_actions"]:
-                            state["blocked_actions"].append("scroll_blocked:页面已到底或无法滚动")
-                        if attempt < max_retry - 1:
-                            continue
-                        else:
-                            # 强制返回上一页或点击第一个可点击元素
-                            print(f"[Decide] 重试次数耗尽，强制执行返回操作")
-                            action = Action(
-                                action=ActionType.DONE,
-                                thinking="页面已探索完毕，无法找到目标内容，在当前详情页中不存在统一交易标识码"
-                            )
+            print(f"[Decide] LLM 决策: {action.action.value}")
+            print(f"[Decide] 思考: {action.thinking[:200] if action.thinking else 'N/A'}...")
+            if action.mark_id:
+                print(f"[Decide] 目标元素: [{action.mark_id}] {action.target_text or ''}")
 
-                print(f"[Decide] LLM 决策: {action.action.value}")
-                print(f"[Decide] 思考: {action.thinking[:200] if action.thinking else 'N/A'}...")
-                if action.mark_id:
-                    print(f"[Decide] 目标元素: [{action.mark_id}] {action.target_text or ''}")
+            state["current_action"] = action.model_dump()
 
-                state["current_action"] = action.model_dump()
-                break  # 成功获取有效操作，退出重试循环
-
-            except Exception as e:
-                state["error"] = f"Decide failed: {str(e)}"
-                print(f"[Decide] 错误: {e}")
-                break
+        except Exception as e:
+            state["error"] = f"Decide failed: {str(e)}"
+            print(f"[Decide] 错误: {e}")
 
         return state
-    
-    def _get_action_signature(self, action: Action, url: str) -> str | None:
-        """生成操作签名，用于死循环检测"""
-        if action.action == ActionType.CLICK:
-            # 对于 click 操作，使用 (action_type, target_text, url_path) 作为签名
-            from urllib.parse import urlparse
-            url_path = urlparse(url).path if url else ""
-            target = action.target_text or f"mark_{action.mark_id}"
-            return f"click:{target}:{url_path}"
-        elif action.action == ActionType.TYPE:
-            return f"type:{action.text}:{action.mark_id}"
-        return None
-
 
     async def _act(self, state: GraphState) -> GraphState:
         """执行节点：执行动作"""
@@ -401,17 +293,6 @@ class SoMAgent:
                 state["fail_count"] += 1
             else:
                 state["fail_count"] = 0
-            
-            # 记录历史操作（用于死循环检测和 LLM 历史回顾）
-            history_entry = {
-                "step": state["step_index"],
-                "action": action.action.value,
-                "mark_id": action.mark_id,
-                "target_text": action.target_text,
-                "url": state["page_url"],
-                "success": result.success,
-            }
-            state["action_history"].append(history_entry)
 
             # 等待页面响应
             await asyncio.sleep(0.5)
