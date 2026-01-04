@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..types import BoundingBox, ElementMark, SoMSnapshot, XPathCandidate
+from ..types import BoundingBox, ElementMark, ScrollInfo, SoMSnapshot, XPathCandidate
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -77,6 +77,21 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
         )
         marks.append(mark)
     
+    # 解析滚动信息
+    scroll_info = None
+    if "scroll_info" in result and result["scroll_info"]:
+        scroll_data = result["scroll_info"]
+        scroll_info = ScrollInfo(
+            scroll_top=scroll_data.get("scroll_top", 0),
+            scroll_height=scroll_data.get("scroll_height", 0),
+            client_height=scroll_data.get("client_height", 0),
+            scroll_percent=scroll_data.get("scroll_percent", 0),
+            is_at_top=scroll_data.get("is_at_top", True),
+            is_at_bottom=scroll_data.get("is_at_bottom", False),
+            can_scroll_down=scroll_data.get("can_scroll_down", True),
+            can_scroll_up=scroll_data.get("can_scroll_up", False),
+        )
+    
     # 创建快照
     snapshot = SoMSnapshot(
         url=result["url"],
@@ -85,6 +100,7 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
         viewport_height=result["viewport_height"],
         marks=marks,
         timestamp=result["timestamp"],
+        scroll_info=scroll_info,
     )
     
     return snapshot

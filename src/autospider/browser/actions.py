@@ -45,6 +45,8 @@ class ActionExecutor:
                 return await self._execute_wait(action, step_index)
             elif action.action == ActionType.EXTRACT:
                 return await self._execute_extract(action, mark_id_to_xpath, step_index)
+            elif action.action == ActionType.GO_BACK:
+                return await self._execute_go_back(action, step_index)
             elif action.action == ActionType.DONE:
                 return ActionResult(success=True), None
             elif action.action == ActionType.RETRY:
@@ -304,3 +306,18 @@ class ActionExecutor:
         )
 
         return ActionResult(success=True, extracted_text=extracted_text), script_step
+
+    async def _execute_go_back(
+        self,
+        action: Action,
+        step_index: int,
+    ) -> tuple[ActionResult, ScriptStep | None]:
+        """执行返回上一页动作"""
+        try:
+            await self.page.go_back(wait_until="domcontentloaded", timeout=action.timeout_ms)
+            await asyncio.sleep(0.5)  # 等待页面稳定
+            
+            # go_back 不需要沉淀到脚本中（一般是用户导航的临时操作）
+            return ActionResult(success=True, new_url=self.page.url), None
+        except Exception as e:
+            return ActionResult(success=False, error=f"无法返回: {str(e)}"), None

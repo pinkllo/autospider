@@ -73,6 +73,19 @@ class ElementMark(BaseModel):
     z_index: int = Field(default=0, description="Z 轴层级")
 
 
+class ScrollInfo(BaseModel):
+    """页面滚动状态信息"""
+    
+    scroll_top: int = Field(default=0, description="当前滚动位置（像素）")
+    scroll_height: int = Field(default=0, description="页面总高度（像素）")
+    client_height: int = Field(default=0, description="可视区域高度（像素）")
+    scroll_percent: int = Field(default=0, description="滚动百分比 0-100")
+    is_at_top: bool = Field(default=True, description="是否在页面顶部")
+    is_at_bottom: bool = Field(default=False, description="是否在页面底部")
+    can_scroll_down: bool = Field(default=True, description="是否可以向下滚动")
+    can_scroll_up: bool = Field(default=False, description="是否可以向上滚动")
+
+
 class SoMSnapshot(BaseModel):
     """SoM 快照（一次观察的完整结果）"""
 
@@ -83,6 +96,7 @@ class SoMSnapshot(BaseModel):
     marks: list[ElementMark]
     screenshot_base64: str = Field(default="", description="带标注的截图（Base64）")
     timestamp: float
+    scroll_info: ScrollInfo | None = Field(default=None, description="页面滚动状态")
 
 
 # ============================================================================
@@ -100,6 +114,7 @@ class ActionType(str, Enum):
     NAVIGATE = "navigate"
     WAIT = "wait"
     EXTRACT = "extract"
+    GO_BACK = "go_back"  # 返回上一页
     DONE = "done"
     RETRY = "retry"
 

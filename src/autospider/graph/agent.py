@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict
@@ -14,6 +15,7 @@ from playwright.async_api import Page
 from ..browser import ActionExecutor
 from ..config import config
 from ..llm import LLMDecider
+from ..llm.planner import TaskPlanner
 from ..som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
@@ -29,6 +31,7 @@ from ..types import (
     AgentState,
     RunInput,
     ScriptStep,
+    ScrollInfo,
     SoMSnapshot,
     XPathScript,
 )
@@ -58,6 +61,7 @@ class GraphState(TypedDict):
     screenshot_base64: str
     marks_text: str
     mark_id_to_xpath: dict[int, list[str]]
+    scroll_info: dict | None  # 页面滚动状态
     
     # 动作
     current_action: dict | None
@@ -91,14 +95,41 @@ class SoMAgent:
         self.run_input = run_input
         self.executor = ActionExecutor(page)
         self.decider = LLMDecider()
+        self.planner = TaskPlanner()
         
         # 确保输出目录存在
         self.output_dir = Path(run_input.output_dir)
         self.screenshots_dir = self.output_dir / "screenshots"
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 目标文本匹配结果
+        self.target_found_in_page = False
+        self.target_element_info: dict | None = None
 
     async def run(self) -> XPathScript:
         """运行 Agent 并返回 XPath 脚本"""
+        # 0. 任务规划
+        print("[Agent] 正在分析任务并生成执行计划...")
+        try:
+            plan = await self.planner.plan(
+                self.run_input.start_url,
+                self.run_input.task,
+                self.run_input.target_text,
+            )
+            print(f"[Plan] 任务分析: {plan.task_analysis}")
+            print(f"[Plan] 执行步骤:")
+            for i, step in enumerate(plan.steps, 1):
+                print(f"  {i}. {step}")
+            print(f"[Plan] 成功标准: {plan.success_criteria}")
+            
+            # 将计划传递给决策器
+            plan_text = f"任务分析: {plan.task_analysis}\n"
+            plan_text += "执行步骤:\n" + "\n".join(f"  {i}. {s}" for i, s in enumerate(plan.steps, 1))
+            plan_text += f"\n成功标准: {plan.success_criteria}"
+            self.decider.task_plan = plan_text
+        except Exception as e:
+            print(f"[Plan] 规划失败，继续执行: {e}")
+        
         # 初始化状态
         state: GraphState = {
             "start_url": self.run_input.start_url,
@@ -112,6 +143,7 @@ class SoMAgent:
             "screenshot_base64": "",
             "marks_text": "",
             "mark_id_to_xpath": {},
+            "scroll_info": None,
             "current_action": None,
             "action_result": None,
             "script_steps": [],
@@ -123,7 +155,7 @@ class SoMAgent:
         }
 
         # 1. 导航到起始页面
-        print(f"[Agent] 导航到 {self.run_input.start_url}")
+        print(f"\n[Agent] 导航到 {self.run_input.start_url}")
         await self.page.goto(
             self.run_input.start_url,
             wait_until="domcontentloaded",
@@ -139,6 +171,9 @@ class SoMAgent:
             state = await self._observe(state)
             if state["error"]:
                 break
+            
+            # 2.5 检查页面中是否存在目标文本（精确匹配）
+            await self._check_target_text_in_page(state)
 
             # 3. Decide: 调用 LLM 决策
             state = await self._decide(state)
@@ -195,12 +230,53 @@ class SoMAgent:
             state["screenshot_base64"] = screenshot_base64
             state["marks_text"] = marks_text
             state["mark_id_to_xpath"] = mark_id_to_xpath
+            
+            # 保存滚动信息
+            if snapshot.scroll_info:
+                state["scroll_info"] = snapshot.scroll_info.model_dump()
+                print(f"[Observe] 滚动状态: {snapshot.scroll_info.scroll_percent}% | 底部: {snapshot.scroll_info.is_at_bottom}")
+            else:
+                state["scroll_info"] = None
 
         except Exception as e:
             state["error"] = f"Observe failed: {str(e)}"
             print(f"[Observe] 错误: {e}")
 
         return state
+
+    async def _check_target_text_in_page(self, state: GraphState) -> None:
+        """检查页面中是否存在目标文本（精确匹配）"""
+        target_text = state["target_text"]
+        try:
+            # 获取页面全部文本内容
+            page_text = await self.page.evaluate("document.body.innerText")
+            
+            # 精确匹配（区分大小写）
+            if target_text in page_text:
+                self.target_found_in_page = True
+                print(f"[Check] ✓ 页面中发现目标文本「{target_text}」")
+                
+                # 尝试定位包含目标文本的元素
+                try:
+                    # 使用 XPath 查找包含目标文本的元素
+                    locator = self.page.locator(f"text={target_text}").first
+                    if await locator.count() > 0:
+                        # 获取元素信息
+                        bbox = await locator.bounding_box()
+                        text = await locator.inner_text()
+                        self.target_element_info = {
+                            "text": text[:200] if text else "",
+                            "bbox": bbox,
+                        }
+                        print(f"[Check] 目标元素内容: {text[:100] if text else 'N/A'}...")
+                except Exception:
+                    pass
+            else:
+                self.target_found_in_page = False
+                
+        except Exception as e:
+            print(f"[Check] 检查目标文本时出错: {e}")
+            self.target_found_in_page = False
 
     async def _decide(self, state: GraphState) -> GraphState:
         """决策节点：调用 LLM"""
@@ -214,12 +290,19 @@ class SoMAgent:
                 last_action=Action(**state["current_action"]) if state["current_action"] else None,
                 last_result=ActionResult(**state["action_result"]) if state["action_result"] else None,
             )
+            
+            # 解析滚动信息
+            scroll_info = None
+            if state.get("scroll_info"):
+                scroll_info = ScrollInfo(**state["scroll_info"])
 
-            # 调用 LLM 决策
+            # 调用 LLM 决策（传入目标文本是否已找到和滚动信息）
             action = await self.decider.decide(
                 agent_state,
                 state["screenshot_base64"],
                 state["marks_text"],
+                target_found_in_page=self.target_found_in_page,
+                scroll_info=scroll_info,
             )
 
             print(f"[Decide] LLM 决策: {action.action.value}")
@@ -313,13 +396,16 @@ class SoMAgent:
             print("[Check] 失败次数过多，终止")
             return state
 
-        # 检查是否已提取到目标文本
+        # 检查是否已提取到目标文本（精确匹配）
         if state["extracted_text"]:
             target = state["target_text"]
-            if target.lower() in state["extracted_text"].lower():
+            # 精确匹配（区分大小写）
+            if target in state["extracted_text"]:
                 state["done"] = True
                 state["success"] = True
-                print(f"[Check] 已提取到目标文本: {target}")
+                print(f"[Check] ✓ 已精确匹配到目标文本: {target}")
+            else:
+                print(f"[Check] 提取的内容中未精确匹配到「{target}」")
 
         return state
 

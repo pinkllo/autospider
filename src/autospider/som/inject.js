@@ -688,6 +688,9 @@
       SoMOverlay.drawMark(container, mark);
     }
 
+    // 计算页面滚动状态
+    const scrollInfo = getScrollInfo();
+
     return {
       url: window.location.href,
       title: document.title,
@@ -695,6 +698,44 @@
       viewport_height: window.innerHeight,
       marks: marks,
       timestamp: Date.now() / 1000,
+      scroll_info: scrollInfo,
+    };
+  }
+
+  /**
+   * 获取页面滚动状态信息
+   */
+  function getScrollInfo() {
+    const scrollTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    const scrollHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.offsetHeight,
+      document.body.clientHeight,
+      document.documentElement.clientHeight
+    );
+    const clientHeight = window.innerHeight || document.documentElement.clientHeight;
+    
+    // 计算滚动百分比
+    const maxScroll = scrollHeight - clientHeight;
+    const scrollPercent = maxScroll > 0 ? Math.round((scrollTop / maxScroll) * 100) : 100;
+    
+    // 判断滚动位置
+    const isAtTop = scrollTop <= 10;
+    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+    const canScrollDown = !isAtBottom;
+    const canScrollUp = !isAtTop;
+    
+    return {
+      scroll_top: Math.round(scrollTop),
+      scroll_height: Math.round(scrollHeight),
+      client_height: Math.round(clientHeight),
+      scroll_percent: scrollPercent,
+      is_at_top: isAtTop,
+      is_at_bottom: isAtBottom,
+      can_scroll_down: canScrollDown,
+      can_scroll_up: canScrollUp,
     };
   }
 
