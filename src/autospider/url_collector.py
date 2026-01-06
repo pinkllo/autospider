@@ -33,6 +33,7 @@ from .som import (
     inject_and_scan,
     set_overlay_visibility,
 )
+from .mark_id_validator import MarkIdValidator, convert_mark_ids_to_map
 from .types import (
     Action,
     ActionType,
@@ -124,6 +125,58 @@ class URLCollectorResult:
 # ============================================================================
 # URL 收集器
 # ============================================================================
+
+
+# ============================================================================
+# 辅助函数
+# ============================================================================
+
+
+async def is_at_page_bottom(page: "Page", threshold: int = 50) -> bool:
+    """检测页面是否已经滚动到底部
+    
+    Args:
+        page: Playwright 页面对象
+        threshold: 距离底部的阈值（像素），默认 50
+        
+    Returns:
+        是否已经到达页面底部
+    """
+    try:
+        result = await page.evaluate("""
+            () => {
+                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = window.innerHeight;
+                return {
+                    scrollTop: scrollTop,
+                    scrollHeight: scrollHeight,
+                    clientHeight: clientHeight,
+                    distanceToBottom: scrollHeight - scrollTop - clientHeight
+                };
+            }
+        """)
+        return result["distanceToBottom"] <= threshold
+    except Exception:
+        return False
+
+
+async def smart_scroll(page: "Page", distance: int = 500) -> bool:
+    """智能滚动页面，如果已到达底部则不滚动
+    
+    Args:
+        page: Playwright 页面对象
+        distance: 滚动距离（像素）
+        
+    Returns:
+        是否成功滚动（False 表示已到达底部，无法继续滚动）
+    """
+    if await is_at_page_bottom(page):
+        return False
+    
+    await page.evaluate(f"window.scrollBy(0, {distance})")
+    await asyncio.sleep(0.5)
+    return True
 
 
 class URLCollector:
@@ -461,6 +514,8 @@ class URLCollector:
         explored = 0
         max_attempts = self.explore_count * 5  # 增加尝试次数
         attempts = 0
+        consecutive_bottom_hits = 0  # 连续到达底部的次数
+        max_bottom_hits = 3  # 连续到达底部超过此次数后停止
         
         while explored < self.explore_count and attempts < max_attempts:
             attempts += 1
@@ -483,8 +538,14 @@ class URLCollector:
             
             if llm_decision is None:
                 print(f"[Explore] LLM 决策失败，尝试滚动...")
-                await self.page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(0.5)
+                if await smart_scroll(self.page):
+                    consecutive_bottom_hits = 0  # 成功滚动，重置计数
+                else:
+                    consecutive_bottom_hits += 1
+                    print(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
+                    if consecutive_bottom_hits >= max_bottom_hits:
+                        print(f"[Explore] ⚠ 连续到达页面底部，停止探索")
+                        break
                 continue
             
             decision_type = llm_decision.get("action")
@@ -520,27 +581,156 @@ class URLCollector:
                     await asyncio.sleep(1)
                 else:
                     print(f"[Explore] 当前页面已访问，滚动查找更多...")
-                    await self.page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(0.5)
+                    if not await smart_scroll(self.page):
+                        consecutive_bottom_hits += 1
+                        print(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
+                        if consecutive_bottom_hits >= max_bottom_hits:
+                            print(f"[Explore] ⚠ 连续到达页面底部，停止探索")
+                            break
+                    else:
+                        consecutive_bottom_hits = 0
                 continue
             
-            # 情况 2: 选择了详情链接的 mark_ids
+            # 情况 2: 选择了详情链接的 mark_ids（支持新旧两种格式）
             if decision_type == "select_detail_links":
-                mark_ids = llm_decision.get("mark_ids", [])
                 reasoning = llm_decision.get("reasoning", "")
-                print(f"[Explore] LLM 选择了 {len(mark_ids)} 个详情链接: {mark_ids}")
-                print(f"[Explore] 理由: {reasoning[:100]}...")
                 
-                if not mark_ids:
+                # 支持新格式: mark_id_text_map
+                mark_id_text_map = llm_decision.get("mark_id_text_map", {})
+                # 兼容旧格式: mark_ids
+                old_mark_ids = llm_decision.get("mark_ids", [])
+                
+                if mark_id_text_map:
+                    print(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
+                    
+                    # 验证 mark_id 与文本的匹配
+                    if config.url_collector.validate_mark_id:
+                        validator = MarkIdValidator()
+                        valid_mark_ids, validation_results = validator.validate_mark_id_text_map(
+                            mark_id_text_map, snapshot
+                        )
+                        
+                        # 统计验证结果
+                        total = len(validation_results)
+                        passed = len([r for r in validation_results if r.is_valid])
+                        failed_results = [r for r in validation_results if not r.is_valid]
+                        print(f"[Explore] mark_id 验证: {passed}/{total} 通过")
+                        
+                        # 如果有验证失败的 mark_id，构造反馈信息让 LLM 重新选择
+                        if failed_results and not valid_mark_ids:
+                            print(f"[Explore] ⚠ 所有 mark_id 验证失败，将反馈给 LLM 重新选择")
+                            
+                            # 构造验证错误信息
+                            error_lines = ["以下 mark_id 与其实际元素文本不匹配：", ""]
+                            for result in failed_results:
+                                error_lines.append(
+                                    f"| mark_id={result.mark_id} | 你选择的文本: \"{result.llm_text[:50]}\" | "
+                                    f"实际元素文本: \"{result.actual_text[:50]}\" |"
+                                )
+                            validation_errors = "\n".join(error_lines)
+                            
+                            # 使用模板加载重试 prompt
+                            retry_user_message = render_template(
+                                PROMPT_TEMPLATE_PATH,
+                                section="retry_after_validation_failure_user_message",
+                                variables={
+                                    "validation_errors": validation_errors,
+                                }
+                            )
+                            
+                            # 重新调用 LLM（带反馈信息）
+                            print(f"[Explore] 重新调用 LLM 决策（要求分析错误原因）...")
+                            retry_decision = await self._ask_llm_for_decision(
+                                snapshot, screenshot_base64, retry_user_message
+                            )
+                            
+                            if retry_decision:
+                                # 打印 LLM 的错误分析
+                                error_analysis = retry_decision.get("error_analysis", "")
+                                correction_strategy = retry_decision.get("correction_strategy", "")
+                                if error_analysis:
+                                    print(f"[Explore] LLM 错误分析: {error_analysis[:100]}...")
+                                if correction_strategy:
+                                    print(f"[Explore] LLM 修正策略: {correction_strategy[:100]}...")
+                                
+                                if retry_decision.get("action") == "select_detail_links":
+                                    retry_map = retry_decision.get("mark_id_text_map", {})
+                                    if retry_map:
+                                        # 再次验证
+                                        valid_mark_ids, retry_results = validator.validate_mark_id_text_map(
+                                            retry_map, snapshot
+                                        )
+                                        retry_passed = len([r for r in retry_results if r.is_valid])
+                                        print(f"[Explore] 重试后验证: {retry_passed}/{len(retry_results)} 通过")
+                                        
+                                        if valid_mark_ids:
+                                            print(f"[Explore] ✓ 重试后验证通过 {len(valid_mark_ids)} 个 mark_id")
+                                            mark_ids = valid_mark_ids
+                                        else:
+                                            print(f"[Explore] ✗ 重试后仍然验证失败，滚动后继续...")
+                                            if not await smart_scroll(self.page):
+                                                consecutive_bottom_hits += 1
+                                                if consecutive_bottom_hits >= max_bottom_hits:
+                                                    break
+                                            else:
+                                                consecutive_bottom_hits = 0
+                                            continue
+                                    else:
+                                        print(f"[Explore] 重试后 LLM 未返回有效映射，滚动后继续...")
+                                        if not await smart_scroll(self.page):
+                                            consecutive_bottom_hits += 1
+                                            if consecutive_bottom_hits >= max_bottom_hits:
+                                                break
+                                        else:
+                                            consecutive_bottom_hits = 0
+                                        continue
+                                else:
+                                    print(f"[Explore] 重试后决策类型改变为 {retry_decision.get('action')}，滚动后继续...")
+                                    if not await smart_scroll(self.page):
+                                        consecutive_bottom_hits += 1
+                                        if consecutive_bottom_hits >= max_bottom_hits:
+                                            break
+                                    else:
+                                        consecutive_bottom_hits = 0
+                                    continue
+                            else:
+                                print(f"[Explore] 重试后决策失败，滚动后继续...")
+                                if not await smart_scroll(self.page):
+                                    consecutive_bottom_hits += 1
+                                    if consecutive_bottom_hits >= max_bottom_hits:
+                                        break
+                                else:
+                                    consecutive_bottom_hits = 0
+                                continue
+                        else:
+                            mark_ids = valid_mark_ids
+                    else:
+                        # 不验证，直接使用所有 mark_id
+                        mark_ids = [int(k) for k in mark_id_text_map.keys()]
+                elif old_mark_ids:
+                    # 兼容旧格式
+                    print(f"[Explore] LLM 使用旧格式返回了 {len(old_mark_ids)} 个 mark_ids: {old_mark_ids}")
+                    mark_ids = old_mark_ids
+                else:
                     print(f"[Explore] 没有选中任何链接，尝试滚动...")
-                    await self.page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(0.5)
+                    if not await smart_scroll(self.page):
+                        consecutive_bottom_hits += 1
+                        if consecutive_bottom_hits >= max_bottom_hits:
+                            print(f"[Explore] ⚠ 连续到达页面底部，停止探索")
+                            break
+                    else:
+                        consecutive_bottom_hits = 0
                     continue
                 
+                print(f"[Explore] 理由: {reasoning[:100]}...")
+                
                 # 根据 mark_id 获取元素
-                print(f"[Explore] 从 {len(snapshot.marks)} 个元素中查找 mark_ids...")
+                print(f"[Explore] 从 {len(snapshot.marks)} 个元素中查找 {len(mark_ids)} 个 mark_ids...")
                 candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
                 print(f"[Explore] 找到 {len(candidates)} 个候选元素")
+                
+                # 记录这一轮开始时的探索数量
+                explored_before_this_round = explored
                 
                 # 遍历候选，获取未访问的 URL
                 for i, candidate in enumerate(candidates, 1):
@@ -573,11 +763,21 @@ class URLCollector:
                         if explored >= self.explore_count:
                             break
                 
-                # 如果这一轮没有新的 URL，滚动
-                if explored < self.explore_count:
-                    print(f"[Explore] 滚动查找更多...")
-                    await self.page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(0.5)
+                # 只有当这一轮没有获取到任何新 URL 时，才滚动查找更多
+                new_urls_this_round = explored - explored_before_this_round
+                if new_urls_this_round == 0 and explored < self.explore_count:
+                    print(f"[Explore] 这一轮未获取到新 URL，滚动查找更多...")
+                    if not await smart_scroll(self.page):
+                        consecutive_bottom_hits += 1
+                        print(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
+                        if consecutive_bottom_hits >= max_bottom_hits:
+                            print(f"[Explore] ⚠ 连续到达页面底部，停止探索")
+                            break
+                    else:
+                        consecutive_bottom_hits = 0
+                else:
+                    # 成功获取到 URL，重置底部计数
+                    consecutive_bottom_hits = 0
                 continue
             
             # 情况 3: 需要点击进入详情页
@@ -615,15 +815,27 @@ class URLCollector:
             
             # 其他情况：滚动
             print(f"[Explore] 未知决策类型，滚动...")
-            await self.page.evaluate("window.scrollBy(0, 500)")
-            await asyncio.sleep(0.5)
+            if not await smart_scroll(self.page):
+                consecutive_bottom_hits += 1
+                if consecutive_bottom_hits >= max_bottom_hits:
+                    print(f"[Explore] ⚠ 连续到达页面底部，停止探索")
+                    break
+            else:
+                consecutive_bottom_hits = 0
     
     async def _ask_llm_for_decision(
         self, 
         snapshot: SoMSnapshot,
-        screenshot_base64: str = ""
+        screenshot_base64: str = "",
+        validation_feedback: str = "",
     ) -> dict | None:
-        """让视觉 LLM 决定如何获取详情页 URL"""
+        """让视觉 LLM 决定如何获取详情页 URL
+        
+        Args:
+            snapshot: SoM 快照
+            screenshot_base64: 截图的 base64 编码
+            validation_feedback: 验证失败的反馈信息（用于让 LLM 重新选择）
+        """
         # 重要：这里应该使用视觉 LLM（decider 使用的模型），需要传入截图
         
         current_url = self.page.url
@@ -631,6 +843,8 @@ class URLCollector:
         print(f"[LLM] 当前页面: {current_url[:80]}...")
         print(f"[LLM] 可交互元素数量: {len(snapshot.marks)}")
         print(f"[LLM] 截图大小: {len(screenshot_base64)} 字符")
+        if validation_feedback:
+            print(f"[LLM] 包含验证反馈信息（重新选择）")
         
         # 使用模板引擎加载 system_prompt
         system_prompt = render_template(
@@ -652,6 +866,10 @@ class URLCollector:
                 "collected_urls_str": collected_urls_str,
             }
         )
+        
+        # 如果有验证反馈，追加到用户消息中
+        if validation_feedback:
+            user_message += f"\n\n## ⚠️ 上一次选择的 mark_id 验证失败\n{validation_feedback}\n\n请仔细核对截图中红色边框右上角的白色数字编号，重新选择正确的 mark_id。"
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -1250,9 +1468,10 @@ class URLCollector:
                     print(f"[Collect-XPath] ✓ 当前已收集 {current_count} 个 URL（新增 {current_count - last_url_count} 个）")
                     last_url_count = current_count
                 
-                # 滚动页面
-                await self.page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(0.5)
+                # 滚动页面（智能滚动，到达底部时停止）
+                if not await smart_scroll(self.page):
+                    print(f"[Collect-XPath] 已到达页面底部，尝试翻页...")
+                    break  # 跳出滚动循环，进入翻页逻辑
                 scroll_count += 1
             
             # 当前页收集完成，尝试翻页
@@ -1579,9 +1798,10 @@ class URLCollector:
                     print(f"[Collect] ✓ 当前已收集 {current_count} 个 URL（新增 {current_count - last_url_count} 个）")
                     last_url_count = current_count
                 
-                # 滚动页面
-                await self.page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(0.5)
+                # 滚动页面（智能滚动，到达底部时停止）
+                if not await smart_scroll(self.page):
+                    print(f"[Collect] 已到达页面底部，尝试翻页...")
+                    break  # 跳出滚动循环，进入翻页逻辑
                 scroll_count += 1
             
             # 当前页收集完成，尝试翻页

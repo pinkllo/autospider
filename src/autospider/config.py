@@ -106,6 +106,24 @@ class URLCollectorConfig(BaseModel):
     debug_delay: bool = Field(
         default_factory=lambda: os.getenv("DEBUG_DELAY", "true").lower() == "true"
     )
+    
+    # ===== mark_id 验证配置 =====
+    # 是否启用 mark_id 与文本的验证
+    validate_mark_id: bool = Field(
+        default_factory=lambda: os.getenv("VALIDATE_MARK_ID", "true").lower() == "true"
+    )
+    # 文本匹配相似度阈值（0-1，使用模糊匹配）
+    mark_id_match_threshold: float = Field(
+        default_factory=lambda: float(os.getenv("MARK_ID_MATCH_THRESHOLD", "0.6"))
+    )
+    # 调试：打印验证信息
+    debug_mark_id_validation: bool = Field(
+        default_factory=lambda: os.getenv("DEBUG_MARK_ID_VALIDATION", "true").lower() == "true"
+    )
+    # 验证失败后的最大重试次数（将反馈给 LLM 重新选择）
+    max_validation_retries: int = Field(
+        default_factory=lambda: int(os.getenv("MAX_VALIDATION_RETRIES", "1"))
+    )
 
 
 class Config(BaseModel):

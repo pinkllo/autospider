@@ -1,9 +1,10 @@
 /**
- * SoM (Set-of-Mark) 注入脚本 v2.3
+ * SoM (Set-of-Mark) 注入脚本 v2.4
  * 
- * v2.3 改进：
- * - 新增祖先可交互元素检查
- * - 如果元素在可点击的父元素内，跳过子元素，标记父元素
+ * v2.4 改进：
+ * - 新增事件委托目标检测（li[data-val] 等）
+ * - 优化祖先可交互元素检查（li 不会被提升到 ul/ol）
+ * - 修复尺寸限制硬编码问题
  * - 避免重复标记同一个交互区域
  */
 
@@ -37,8 +38,24 @@
       '[@click]',
     ],
 
+    // 事件委托常用的标识属性
+    delegateIdentifiers: [
+      'data-val', 'data-id', 'data-index', 'data-key',
+      'data-type', 'data-value', 'data-item', 'data-tab',
+      'data-action', 'data-target', 'data-code', 'data-name'
+    ],
+
+    // 交互性 ARIA 角色
+    interactiveRoles: [
+      'button', 'link', 'menuitem', 'tab', 'checkbox',
+      'radio', 'switch', 'option', 'combobox', 'listbox',
+      'slider', 'treeitem'
+    ],
+
     minWidth: 20,
     minHeight: 16,
+    maxWidth: Math.max(window.innerWidth * 0.95, 1200),
+    maxHeight: Math.max(window.innerHeight * 0.95, 800),
     maxMarks: 200,
 
     labelStyle: {
@@ -63,7 +80,7 @@
   };
 
   // ========================================================================
-  // 祖先元素检查器（核心新增）
+  // 祖先元素检查器
   // ========================================================================
   const AncestorChecker = {
     /**
@@ -72,26 +89,35 @@
      */
     findClickableAncestor(element) {
       let current = element.parentElement;
-      
+      const childTag = element.tagName.toLowerCase();
+
       while (current && current !== document.body && current !== document.documentElement) {
+        const tag = current.tagName.toLowerCase();
+
+        // 特殊规则：列表项 li 不提升到 ul/ol/nav/menu 上，避免把多个 tab 合并成一个交互区
+        if (childTag === 'li' && ['ul', 'ol', 'nav', 'menu'].includes(tag)) {
+          current = current.parentElement;
+          continue;
+        }
+
         // 检查是否是原生可交互元素
         if (this.isNativeClickable(current)) {
           return current;
         }
-        
+
         // 检查是否有明确的事件属性
         if (this.hasExplicitClickHandler(current)) {
           return current;
         }
-        
+
         // 检查是否有交互性 ARIA 角色
         if (this.hasInteractiveRole(current)) {
           return current;
         }
-        
+
         current = current.parentElement;
       }
-      
+
       return null;
     },
 
@@ -100,28 +126,28 @@
      */
     isNativeClickable(element) {
       const tag = element.tagName.toLowerCase();
-      
+
       // 链接
       if (tag === 'a') {
         const href = element.getAttribute('href');
         return href && href !== '#' && !href.startsWith('javascript:');
       }
-      
+
       // 按钮
       if (tag === 'button') return true;
-      
+
       // 可点击的输入类型
       if (tag === 'input') {
         const type = element.getAttribute('type');
         return ['button', 'submit', 'reset', 'checkbox', 'radio'].includes(type);
       }
-      
+
       // summary
       if (tag === 'summary') return true;
-      
+
       // label with for
       if (tag === 'label' && element.getAttribute('for')) return true;
-      
+
       return false;
     },
 
@@ -133,19 +159,19 @@
         'onclick', 'onmousedown', 'ontouchstart',
         'ng-click', 'v-on:click', '@click', '(click)'
       ];
-      
+
       for (const attr of clickAttrs) {
         if (element.hasAttribute(attr)) return true;
       }
-      
-      // 检查 data 属性
+
+      // 检查 data 属性中带 click/action 的
       for (const attr of element.attributes) {
-        if (attr.name.startsWith('data-') && 
+        if (attr.name.startsWith('data-') &&
             (attr.name.includes('click') || attr.name.includes('action'))) {
           return true;
         }
       }
-      
+
       return false;
     },
 
@@ -155,13 +181,7 @@
     hasInteractiveRole(element) {
       const role = element.getAttribute('role');
       if (!role) return false;
-      
-      const interactiveRoles = [
-        'button', 'link', 'menuitem', 'tab', 'checkbox', 
-        'radio', 'switch', 'option', 'treeitem'
-      ];
-      
-      return interactiveRoles.includes(role.toLowerCase());
+      return CONFIG.interactiveRoles.includes(role.toLowerCase());
     },
 
     /**
@@ -174,24 +194,19 @@
 
     /**
      * 获取元素或其可点击祖先
-     * 如果元素本身可点击，返回元素本身
-     * 如果元素在可点击祖先内，返回祖先
-     * 否则返回 null
      */
     getClickableElement(element) {
-      // 先检查元素本身是否是原生可点击的
-      if (this.isNativeClickable(element) || 
+      if (this.isNativeClickable(element) ||
           this.hasExplicitClickHandler(element) ||
           this.hasInteractiveRole(element)) {
         return element;
       }
-      
-      // 检查是否有可点击的祖先
+
       const ancestor = this.findClickableAncestor(element);
       if (ancestor) {
         return ancestor;
       }
-      
+
       return null;
     },
   };
@@ -201,8 +216,6 @@
   // ========================================================================
   const ClickabilityValidator = {
     isClickable(element) {
-      const tag = element.tagName.toLowerCase();
-
       // 1. 原生可交互元素
       if (this.isNativeInteractive(element)) {
         return { clickable: true, reason: 'native-interactive', confidence: 1.0 };
@@ -224,14 +237,19 @@
         return { clickable: true, reason: 'focusable', confidence: 0.85 };
       }
 
-      // 5. cursor:pointer + 内容 + 合理尺寸 + 不在可点击祖先内
+      // 5. 事件委托目标（如 li[data-val]）
+      if (this.isDelegatedClickTarget(element)) {
+        return { clickable: true, reason: 'delegated-target', confidence: 0.85 };
+      }
+
+      // 6. cursor:pointer + 内容 + 合理尺寸 + 不在可点击祖先内
       if (this.hasCursorPointer(element)) {
         // 关键检查：是否在可点击的祖先元素内
         if (AncestorChecker.shouldSkipForAncestor(element)) {
           return { clickable: false, reason: 'inside-clickable-ancestor', confidence: 0 };
         }
-        
-        if (this.hasValidContent(element) && 
+
+        if (this.hasValidContent(element) &&
             this.hasReasonableSize(element) &&
             !this.isPureContainer(element)) {
           return { clickable: true, reason: 'cursor-pointer', confidence: 0.7 };
@@ -273,14 +291,62 @@
     hasInteractiveRole(element) {
       const role = element.getAttribute('role');
       if (!role) return false;
+      return CONFIG.interactiveRoles.includes(role.toLowerCase());
+    },
 
-      const interactiveRoles = [
-        'button', 'link', 'menuitem', 'tab', 'checkbox', 
-        'radio', 'switch', 'option', 'combobox', 'listbox', 
-        'slider', 'treeitem'
-      ];
+    /**
+     * 检测元素是否可能是事件委托的目标
+     * 场景：父元素绑定 onclick，子元素通过 data-* 区分
+     */
+    isDelegatedClickTarget(element) {
+      const tag = element.tagName.toLowerCase();
 
-      return interactiveRoles.includes(role.toLowerCase());
+      // 主要针对 li / div / span / a / p / dd / dt 这类容器
+      if (!['li', 'div', 'span', 'a', 'p', 'dd', 'dt'].includes(tag)) return false;
+
+      // 检查是否有标识性 data 属性
+      let hasIdentifier = false;
+      for (const attr of CONFIG.delegateIdentifiers) {
+        if (element.hasAttribute(attr)) {
+          hasIdentifier = true;
+          break;
+        }
+      }
+      if (!hasIdentifier) return false;
+
+      // 检查是否有可见文本
+      const text = (element.innerText || element.textContent || '').trim();
+      if (text.length === 0 || text.length > 200) return false;
+
+      // 检查自身是否有 cursor: pointer
+      try {
+        if (window.getComputedStyle(element).cursor === 'pointer') return true;
+      } catch (e) {}
+
+      // 检查父元素
+      const parent = element.parentElement;
+      if (parent) {
+        // 检查父元素是否有 cursor: pointer
+        try {
+          if (window.getComputedStyle(parent).cursor === 'pointer') return true;
+        } catch (e) {}
+
+        // 检查父元素是否有事件
+        const clickAttrs = ['onclick', 'onmousedown', 'ng-click', 'v-on:click', '@click', '(click)'];
+        for (const attr of clickAttrs) {
+          if (parent.hasAttribute(attr)) return true;
+        }
+      }
+
+      // 兜底：li[data-xxx] 在 ul/ol/nav/menu 里就认为可能可点击
+      if (tag === 'li') {
+        const parentTag = parent?.tagName?.toLowerCase();
+        if (['ul', 'ol', 'nav', 'menu'].includes(parentTag)) {
+          return true;
+        }
+      }
+
+      return false;
     },
 
     hasCursorPointer(element) {
@@ -302,7 +368,7 @@
       }
 
       // 有图片或图标
-      if (element.querySelector('img, svg, [class*="icon"]')) {
+      if (element.querySelector('img, svg, [class*="icon"], [class*="Icon"]')) {
         return true;
       }
 
@@ -312,8 +378,8 @@
     hasReasonableSize(element) {
       try {
         const rect = element.getBoundingClientRect();
-        return rect.width >= 16 && rect.height >= 16 && 
-               rect.width <= 800 && rect.height <= 600;
+        return rect.width >= CONFIG.minWidth && rect.height >= CONFIG.minHeight &&
+               rect.width <= CONFIG.maxWidth && rect.height <= CONFIG.maxHeight;
       } catch (e) {
         return false;
       }
@@ -326,7 +392,7 @@
 
       let interactiveCount = 0;
       for (const child of children) {
-        if (this.isNativeInteractive(child) || 
+        if (this.isNativeInteractive(child) ||
             this.hasEventAttributes(child) ||
             this.hasInteractiveRole(child)) {
           interactiveCount++;
@@ -344,6 +410,7 @@
     generateCandidates(element) {
       const candidates = [];
 
+      // 1. ID 选择器
       const id = element.getAttribute('id');
       if (id && !CONFIG.randomIdPattern.test(id)) {
         const xpath = `//*[@id='${id}']`;
@@ -352,6 +419,7 @@
         }
       }
 
+      // 2. 测试 ID
       for (const attr of ['data-testid', 'data-test', 'data-qa', 'data-cy']) {
         const value = element.getAttribute(attr);
         if (value) {
@@ -362,40 +430,44 @@
         }
       }
 
+      // 3. ARIA label
       const ariaLabel = element.getAttribute('aria-label');
       if (ariaLabel && ariaLabel !== 'false') {
-        const xpath = `//*[@aria-label='${ariaLabel}']`;
+        const xpath = `//*[@aria-label='${this.escapeXPath(ariaLabel)}']`;
         if (this.isUnique(xpath, element)) {
           candidates.push({ xpath, priority: 3, strategy: 'aria', confidence: 0.9 });
         }
       }
 
+      // 4. href
       const href = element.getAttribute('href');
       if (href && element.tagName.toLowerCase() === 'a') {
-        // 使用 href 的一部分作为定位
         const hrefPart = href.split('?')[0].split('/').pop();
         if (hrefPart && hrefPart.length > 5) {
-          const xpath = `//a[contains(@href, '${hrefPart}')]`;
+          const xpath = `//a[contains(@href, '${this.escapeXPath(hrefPart)}')]`;
           if (this.isUnique(xpath, element)) {
             candidates.push({ xpath, priority: 3, strategy: 'href', confidence: 0.85 });
           }
         }
       }
 
+      // 5. 文本内容
       const text = this.getVisibleText(element);
       if (text && text.length > 0 && text.length <= 30) {
         const tag = element.tagName.toLowerCase();
-        const xpath = `//${tag}[contains(., '${text.substring(0, 20)}')]`;
+        const xpath = `//${tag}[contains(., '${this.escapeXPath(text.substring(0, 20))}')]`;
         if (this.isUnique(xpath, element)) {
           candidates.push({ xpath, priority: 4, strategy: 'text', confidence: 0.6 });
         }
       }
 
+      // 6. 基于祖先 ID 的相对路径
       const idBasedPath = this.getIdBasedPath(element);
       if (idBasedPath && this.isUnique(idBasedPath, element)) {
         candidates.push({ xpath: idBasedPath, priority: 5, strategy: 'id-relative', confidence: 0.8 });
       }
 
+      // 7. 完整相对路径
       const relativePath = this.getFullRelativePath(element);
       if (relativePath && this.isUnique(relativePath, element)) {
         candidates.push({ xpath: relativePath, priority: 6, strategy: 'relative', confidence: 0.4 });
@@ -403,6 +475,17 @@
 
       candidates.sort((a, b) => a.priority - b.priority);
       return candidates;
+    },
+
+    escapeXPath(str) {
+      if (!str.includes("'")) {
+        return str;
+      }
+      if (!str.includes('"')) {
+        return str;
+      }
+      // 包含单引号和双引号，使用 concat
+      return str.replace(/'/g, "\\'");
     },
 
     getIdBasedPath(element) {
@@ -499,7 +582,6 @@
 
     getVisibleText(element) {
       const text = (element.innerText || element.textContent || '').trim();
-      // 对于长文本，取前50个字符
       return text.substring(0, CONFIG.maxTextLength).replace(/\n+/g, ' ').trim();
     },
   };
@@ -520,10 +602,20 @@
         return { visible: false, reason: 'outside-viewport' };
       }
 
-      const style = window.getComputedStyle(element);
+      let style;
+      try {
+        style = window.getComputedStyle(element);
+      } catch (e) {
+        return { visible: false, reason: 'style-error' };
+      }
+
       if (style.display === 'none' || style.visibility === 'hidden' ||
           parseFloat(style.opacity) < 0.1) {
         return { visible: false, reason: 'css-hidden' };
+      }
+
+      if (style.pointerEvents === 'none') {
+        return { visible: false, reason: 'pointer-events-none' };
       }
 
       // 检查是否被裁剪
@@ -544,12 +636,19 @@
       let parent = element.parentElement;
 
       while (parent && parent !== document.body) {
-        const parentStyle = window.getComputedStyle(parent);
+        let parentStyle;
+        try {
+          parentStyle = window.getComputedStyle(parent);
+        } catch (e) {
+          parent = parent.parentElement;
+          continue;
+        }
+
         const overflow = parentStyle.overflow + parentStyle.overflowX + parentStyle.overflowY;
-        
+
         if (overflow.includes('hidden') || overflow.includes('scroll') || overflow.includes('auto')) {
           const parentRect = parent.getBoundingClientRect();
-          
+
           const visibleWidth = Math.min(rect.right, parentRect.right) - Math.max(rect.left, parentRect.left);
           const visibleHeight = Math.min(rect.bottom, parentRect.bottom) - Math.max(rect.top, parentRect.top);
           const visibleArea = Math.max(0, visibleWidth) * Math.max(0, visibleHeight);
@@ -602,8 +701,10 @@
       let zIndex = 0;
       let current = element;
       while (current && current !== document.body) {
-        const z = parseInt(window.getComputedStyle(current).zIndex, 10);
-        if (!isNaN(z)) zIndex = Math.max(zIndex, z);
+        try {
+          const z = parseInt(window.getComputedStyle(current).zIndex, 10);
+          if (!isNaN(z)) zIndex = Math.max(zIndex, z);
+        } catch (e) {}
         current = current.parentElement;
       }
       return zIndex;
@@ -722,8 +823,8 @@
         const style = window.getComputedStyle(el);
         if (style.cursor === 'pointer') {
           const rect = el.getBoundingClientRect();
-          if (rect.width >= CONFIG.minWidth && rect.width <= 800 &&
-              rect.height >= CONFIG.minHeight && rect.height <= 600) {
+          if (rect.width >= CONFIG.minWidth && rect.width <= CONFIG.maxWidth &&
+              rect.height >= CONFIG.minHeight && rect.height <= CONFIG.maxHeight) {
             if (!collectedElements.has(el)) {
               collectedElements.set(el, 'cursor');
             }
@@ -732,13 +833,34 @@
       } catch (e) {}
     });
 
-    // 3. 处理元素：如果在可点击祖先内，替换为祖先
+    // 3. 收集事件委托目标元素（如 li[data-val]）
+    for (const attr of CONFIG.delegateIdentifiers) {
+      try {
+        document.querySelectorAll(`li[${attr}], div[${attr}], span[${attr}]`).forEach(el => {
+          if (!collectedElements.has(el)) {
+            // 检查是否有内容
+            const text = (el.innerText || el.textContent || '').trim();
+            if (text.length > 0 && text.length < 200) {
+              collectedElements.set(el, 'delegated');
+            }
+          }
+        });
+      } catch (e) {}
+    }
+
+    // 4. 处理元素：如果在可点击祖先内，替换为祖先
     const processedElements = new Set();
-    
+
     for (const [element, source] of collectedElements) {
+      // 对于事件委托目标，不要提升到祖先
+      if (source === 'delegated') {
+        processedElements.add(element);
+        continue;
+      }
+
       // 检查是否应该被替换为祖先元素
       const clickableAncestor = AncestorChecker.findClickableAncestor(element);
-      
+
       if (clickableAncestor) {
         // 使用祖先元素代替
         processedElements.add(clickableAncestor);
@@ -748,7 +870,7 @@
       }
     }
 
-    // 4. 验证和生成标注
+    // 5. 验证和生成标注
     const marks = [];
     let markId = 1;
     const markedBboxes = [];
@@ -816,8 +938,8 @@
         role: element.getAttribute('role'),
         text: text,
         aria_label: element.getAttribute('aria-label'),
-        href: element.tagName === 'A' ? element.getAttribute('href') : null,
-        input_type: element.tagName === 'INPUT' ? element.getAttribute('type') : null,
+        href: element.tagName.toLowerCase() === 'a' ? element.getAttribute('href') : null,
+        input_type: element.tagName.toLowerCase() === 'input' ? element.getAttribute('type') : null,
         bbox: newBbox,
         center_normalized: [
           (rect.left + rect.width / 2) / window.innerWidth,
@@ -870,7 +992,9 @@
     };
   }
 
+  // ========================================================================
   // 暴露 API
+  // ========================================================================
   window.__SOM__ = {
     scan: scanAndMark,
     clear: () => SoMOverlay.clear(),
@@ -879,12 +1003,12 @@
       const c = document.getElementById(SoMOverlay.containerId);
       if (c) c.style.display = v ? 'block' : 'none';
     },
-    _debug: { 
-      ClickabilityValidator, 
-      OcclusionDetector, 
-      XPathGenerator, 
+    _debug: {
+      ClickabilityValidator,
+      OcclusionDetector,
+      XPathGenerator,
       AncestorChecker,
-      CONFIG 
+      CONFIG
     },
   };
 
