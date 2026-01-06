@@ -61,12 +61,38 @@ class AgentConfig(BaseModel):
     output_dir: str = "output"
 
 
+class URLCollectorConfig(BaseModel):
+    """URL 收集器配置"""
+
+    # 探索阶段进入的详情页数量
+    explore_count: int = Field(
+        default_factory=lambda: int(os.getenv("EXPLORE_COUNT", "3"))
+    )
+    # 最大滚动次数
+    max_scrolls: int = Field(
+        default_factory=lambda: int(os.getenv("MAX_SCROLLS", "20"))
+    )
+    # 连续无新 URL 的滚动次数后停止
+    no_new_url_threshold: int = Field(
+        default_factory=lambda: int(os.getenv("NO_NEW_URL_THRESHOLD", "3"))
+    )
+    # 目标 URL 数量（达到后停止收集）
+    target_url_count: int = Field(
+        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "5"))
+    )
+    # 最大翻页次数（分页收集）
+    max_pages: int = Field(
+        default_factory=lambda: int(os.getenv("MAX_PAGES", "10"))
+    )
+
+
 class Config(BaseModel):
     """全局配置"""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
 
     @classmethod
     def load(cls) -> "Config":
