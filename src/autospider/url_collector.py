@@ -22,6 +22,7 @@ from langchain_openai import ChatOpenAI
 from .browser import ActionExecutor
 from .config import config
 from .llm import LLMDecider
+from .llm.prompt_template import render_template
 from .persistence import CollectionConfig, ConfigPersistence
 from .script_generator import ScriptGenerator
 from .som import (
@@ -44,6 +45,13 @@ from .types import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+# ============================================================================
+# Prompt 模板文件路径
+# ============================================================================
+
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "url_collector.yaml")
 
 
 # ============================================================================
@@ -624,50 +632,26 @@ class URLCollector:
         print(f"[LLM] 可交互元素数量: {len(snapshot.marks)}")
         print(f"[LLM] 截图大小: {len(screenshot_base64)} 字符")
         
-        # 构建提示词
-        system_prompt = """你是一个网页爬虫专家。你需要帮助用户获取详情页的 URL。
-
-你有以下工具可以使用：
-
-1. **select_detail_links**: 选择页面上的详情链接
-   - 只选择列表中**项目标题/公告标题**类的链接
-   - 不要选择：筛选标签、分页按钮、导航菜单、"查看更多"等
-   - 返回: {"action": "select_detail_links", "mark_ids": [40, 41, 42], "reasoning": "..."}
-   - mark_ids 是你认为是详情页链接的元素编号列表
-
-2. **current_is_detail**: 当前页面就是详情页
-   - 当你判断当前页面已经是一个详情页（而不是列表页）时使用
-   - 返回: {"action": "current_is_detail", "reasoning": "..."}
-
-3. **scroll_down**: 需要滚动查看更多
-   - 当前视图没有新的详情链接时使用
-   - 返回: {"action": "scroll_down", "reasoning": "..."}
-
-重要提示：
-- 只选择**列表项目的标题**，通常是较长的项目名称或公告标题
-- 不要选择筛选条件、分类标签、按钮等
-- 如果元素文本很短（如"查看"、"详情"等），通常不是标题链接
-
-你只能看到“可交互元素列表”（marks），没有截图。
-
-输出格式：严格 JSON，不要 markdown 代码块。"""
+        # 使用模板引擎加载 system_prompt
+        system_prompt = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="ask_llm_decision_system_prompt",
+        )
         
         # 已收集的 URL（用于避免重复）
         collected_urls_str = "\n".join([f"- {url}" for url in list(self.collected_urls)[:10]]) if self.collected_urls else "暂无"
         
-        user_message = f"""## 任务描述
-{self.task_description}
-
-## 当前页面 URL
-{current_url}
-
-## 已探索的详情页数量
-{len(self.visited_detail_urls)}
-
-## 已收集的 URL 示例（避免重复）
-{collected_urls_str}
-
-请观察截图中红色边框标注的元素（每个元素有编号），**只选择列表中的项目标题链接**，不要选择筛选标签或其他按钮。"""
+        # 使用模板引擎加载 user_message
+        user_message = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="ask_llm_decision_user_message",
+            variables={
+                "task_description": self.task_description,
+                "current_url": current_url,
+                "visited_count": len(self.visited_detail_urls),
+                "collected_urls_str": collected_urls_str,
+            }
+        )
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -1113,24 +1097,22 @@ class URLCollector:
             screenshot_path = self.screenshots_dir / "pagination_extract.png"
             screenshot_path.write_bytes(screenshot_bytes)
             
-            system_prompt = """你是一个网页爬虫专家。请帮我找到页面上的"下一页"分页按钮。
-
-观察截图中红色边框标注的元素（每个元素有编号），找到分页区域的"下一页"按钮。
-
-返回格式（严格 JSON）：
-{"found": true, "mark_id": 123, "reasoning": "在页面底部找到了下一页按钮，编号为123"}
-或
-{"found": false, "reasoning": "页面没有分页按钮"}
-
-注意：
-- 只找"下一页"按钮或">"箭头，不要找页码数字
-- 分页按钮通常在页面底部
-- 不要返回 markdown 代码块，只返回纯 JSON"""
+            # 使用模板引擎加载 system_prompt
+            system_prompt = render_template(
+                PROMPT_TEMPLATE_PATH,
+                section="pagination_llm_system_prompt",
+            )
+            
+            # 使用模板引擎加载 user_message
+            user_message = render_template(
+                PROMPT_TEMPLATE_PATH,
+                section="pagination_llm_user_message",
+            )
             
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=[
-                    {"type": "text", "text": "请找到下一页按钮的元素编号"},
+                    {"type": "text", "text": user_message},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
                 ]),
             ]

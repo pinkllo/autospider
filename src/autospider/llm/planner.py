@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,6 +12,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from ..config import config
+from .prompt_template import render_template
 
 if TYPE_CHECKING:
     pass
@@ -26,32 +28,8 @@ class TaskPlan(BaseModel):
     potential_challenges: list[str] = Field(default_factory=list, description="潜在挑战")
 
 
-PLANNER_PROMPT = """你是一个网页自动化任务规划专家。根据用户的任务描述和目标，分析任务并制定执行计划。
-
-## 输入
-- 起始URL: {start_url}
-- 任务描述: {task}
-- 提取目标文本: {target_text}（需要在页面中精确匹配此文本）
-
-## 输出要求
-以JSON格式输出任务规划：
-{{
-    "task_analysis": "对任务的理解和分析",
-    "steps": [
-        "步骤1: 具体操作描述",
-        "步骤2: 具体操作描述",
-        ...
-    ],
-    "target_description": "目标文本「{target_text}」的含义和可能出现的位置",
-    "success_criteria": "任务完成的判断标准",
-    "potential_challenges": ["可能遇到的挑战1", "挑战2"]
-}}
-
-## 注意事项
-1. 步骤要具体明确，每一步对应一个操作
-2. 考虑网页可能的结构和交互方式
-3. 目标文本「{target_text}」必须在页面中精确出现才算找到
-4. 考虑可能需要的筛选、点击、滚动等操作"""
+# Prompt模板文件路径
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent / "prompts" / "planner.yaml")
 
 
 class TaskPlanner:
@@ -96,15 +74,25 @@ class TaskPlanner:
         Returns:
             TaskPlan: 执行计划
         """
-        prompt = PLANNER_PROMPT.format(
-            start_url=start_url,
-            task=task,
-            target_text=target_text,
+        # 使用模板引擎加载和渲染 prompt
+        system_prompt = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="system_prompt",
+        )
+        
+        user_prompt = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="user_prompt",
+            variables={
+                "start_url": start_url,
+                "task": task,
+                "target_text": target_text,
+            }
         )
         
         messages = [
-            SystemMessage(content="你是一个专业的网页自动化任务规划专家。"),
-            HumanMessage(content=prompt),
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
         ]
         
         response = await self.llm.ainvoke(messages)

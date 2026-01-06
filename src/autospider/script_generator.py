@@ -1,12 +1,13 @@
 """爬虫脚本生成器
 
-从探索记录中分析共同模式，生成 Scrapy + scrapy-playwright 爬虫脚本
+从探索记录中分析共同模式,生成 Scrapy + scrapy-playwright 爬虫脚本
 """
 
 from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, parse_qs
 
@@ -14,10 +15,18 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from .config import config
+from .llm.prompt_template import render_template
 from .persistence import ConfigPersistence
 
 if TYPE_CHECKING:
     from typing import Any
+
+
+# ============================================================================
+# Prompt 模板文件路径
+# ============================================================================
+
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "script_generator.yaml")
 
 
 class ScriptGenerator:
@@ -465,86 +474,14 @@ if __name__ == "__main__":
         
         return analysis
     
+    
     def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
-        return """你是一个 Python 爬虫专家，擅长 Scrapy + scrapy-playwright。你需要分析用户提供的探索记录，生成一个**完整的 Scrapy + scrapy-playwright 爬虫脚本**。
-
-## 重要：这是一个 SPA 网站，必须使用 scrapy-playwright 渲染 JavaScript
-
-## 你的任务
-
-### 1. 分析探索记录
-- 从 XPath 候选中找出详情链接的选择器（优先选择 priority 最小的）
-- 分析导航步骤，理解筛选条件的点击流程
-
-### 2. 生成 Scrapy + scrapy-playwright 爬虫
-
-爬虫必须包含以下功能：
-
-1. **scrapy-playwright 配置**：
-   - DOWNLOAD_HANDLERS 配置
-   - TWISTED_REACTOR 配置
-   - playwright 相关设置
-
-2. **start_requests()**：
-   - 访问列表页 URL
-   - 使用 playwright 渲染页面
-
-3. **parse() - 列表页解析**：
-   - **先执行筛选操作**（根据导航步骤点击筛选条件）
-   - 使用 page.click() 点击筛选按钮
-   - 等待页面更新
-   - 提取详情页链接（使用分析出的 XPath/CSS 选择器）
-   - **处理分页**：点击下一页或滚动加载更多
-   - yield Request 到 parse_detail
-
-4. **parse_detail() - 详情页解析**：
-   - 提取详情页内容（标题、正文、表格等）
-   - yield item
-
-5. **分页/滚动处理**：
-   - 检测是否有下一页按钮
-   - 或使用 page.evaluate() 滚动加载更多
-   - 设置合理的终止条件
-
-## 输出格式
-直接输出 Python 代码，不要用 markdown 代码块包裹。
-
-代码开头添加注释：
-```
-# Scrapy + scrapy-playwright 爬虫
-# 
-# 安装依赖：
-# pip install scrapy scrapy-playwright
-# playwright install chromium
-#
-# 运行命令：
-# scrapy runspider spider.py -o results.json
-#
-# URL 模式分析：
-# - 列表页选择器：...
-# - 详情页 URL 模式：...
-# - 分页方式：...
-```
-
-关键代码示例（供参考）：
-```python
-# 在 parse 中执行点击筛选
-page = response.meta['playwright_page']
-await page.click('text=已中标')
-await page.wait_for_timeout(1000)
-
-# 提取链接
-items = await page.query_selector_all('//section//ul/li')
-for item in items:
-    await item.click()
-    # 等待新页面...
-
-# 滚动加载
-await page.evaluate('window.scrollBy(0, 500)')
-```
-
-代码应该可以通过 `scrapy runspider spider.py -o results.json` 直接运行。"""
+        """构建系统提示词（从模板文件加载）"""
+        return render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="system_prompt",
+        )
+    
     
     def _build_user_message(
         self,
@@ -555,40 +492,21 @@ await page.evaluate('window.scrollBy(0, 500)')
         url_samples: list[str],
         url_pattern_analysis: dict,
     ) -> str:
-        """构建用户消息"""
-        return f"""## 任务描述
-{task_description}
-
-## 列表页 URL
-{list_url}
-
-## 导航步骤（筛选条件点击流程）
-这些是探索时点击的筛选条件，爬虫需要复现这些操作：
-{json.dumps(nav_summary, ensure_ascii=False, indent=2)}
-
-## 探索记录（{len(visits_summary)} 个详情页）
-从这里提取详情链接的选择器：
-{json.dumps(visits_summary, ensure_ascii=False, indent=2)}
-
-## 收集到的 URL 样本（共 {len(url_samples)} 个）
-{json.dumps(url_samples, ensure_ascii=False, indent=2)}
-
-## URL 模式分析（自动检测）
-{json.dumps(url_pattern_analysis, ensure_ascii=False, indent=2)}
-
-请生成一个完整的 Scrapy + scrapy-playwright 爬虫脚本：
-
-1. 从列表页 {list_url} 开始
-2. 执行筛选操作（参考导航步骤）
-3. 提取详情链接（从 XPath 候选中选择最稳定的选择器）
-4. 处理分页/滚动（这个网站是滚动加载）
-5. 爬取详情页内容
-
-重点：
-- 必须使用 scrapy-playwright，因为是 SPA 网站
-- 在 parse() 中先点击筛选条件，再提取链接
-- 使用 page.evaluate() 滚动加载更多内容
-- 输出直接可运行的 Python 代码（不要 markdown 包裹）"""
+        """构建用户消息（从模板文件加载）"""
+        return render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="user_prompt",
+            variables={
+                "task_description": task_description,
+                "list_url": list_url,
+                "nav_summary": json.dumps(nav_summary, ensure_ascii=False, indent=2),
+                "visits_count": len(visits_summary),
+                "visits_summary": json.dumps(visits_summary, ensure_ascii=False, indent=2),
+                "urls_count": len(url_samples),
+                "url_samples": json.dumps(url_samples, ensure_ascii=False, indent=2),
+                "url_pattern_analysis": json.dumps(url_pattern_analysis, ensure_ascii=False, indent=2),
+            }
+        )
     
     def _validate_script(self, script: str) -> None:
         """验证生成的脚本结构"""
