@@ -733,9 +733,26 @@ class URLCollector:
             # 隐藏覆盖层
             await set_overlay_visibility(self.page, False)
             
-            # 点击元素
+            # 策略1: 优先使用 data-som-id
             locator = self.page.locator(f'[data-som-id="{element.mark_id}"]')
-            if await locator.count() > 0:
+            element_found = await locator.count() > 0
+            
+            # 策略2: 如果 data-som-id 失效(DOM更新/滚动导致),使用 XPath 后备
+            if not element_found and element.xpath_candidates:
+                print(f"[Click] data-som-id失效,尝试XPath后备...")
+                # 按优先级尝试xpath
+                for candidate in sorted(element.xpath_candidates, key=lambda x: x.priority):
+                    try:
+                        xpath_locator = self.page.locator(f"xpath={candidate.xpath}")
+                        if await xpath_locator.count() > 0:
+                            locator = xpath_locator
+                            element_found = True
+                            print(f"[Click] ✓ XPath成功: {candidate.xpath[:60]}...")
+                            break
+                    except Exception as e:
+                        continue
+            
+            if element_found:
                 print(f"[Click] 点击元素 [{element.mark_id}]...")
                 
                 # 尝试监听新标签页

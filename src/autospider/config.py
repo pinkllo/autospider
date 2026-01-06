@@ -68,21 +68,43 @@ class URLCollectorConfig(BaseModel):
     explore_count: int = Field(
         default_factory=lambda: int(os.getenv("EXPLORE_COUNT", "3"))
     )
-    # 最大滚动次数
+    # 最大滚动次数（单页）
     max_scrolls: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_SCROLLS", "20"))
+        default_factory=lambda: int(os.getenv("MAX_SCROLLS", "5"))
     )
     # 连续无新 URL 的滚动次数后停止
     no_new_url_threshold: int = Field(
-        default_factory=lambda: int(os.getenv("NO_NEW_URL_THRESHOLD", "3"))
+        default_factory=lambda: int(os.getenv("NO_NEW_URL_THRESHOLD", "2"))
     )
     # 目标 URL 数量（达到后停止收集）
     target_url_count: int = Field(
-        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "5"))
+        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "50"))
     )
     # 最大翻页次数（分页收集）
     max_pages: int = Field(
         default_factory=lambda: int(os.getenv("MAX_PAGES", "10"))
+    )
+    
+    # ===== 爬取间隔配置（反爬虫） =====
+    # 页面操作基础延迟（秒）
+    action_delay_base: float = Field(
+        default_factory=lambda: float(os.getenv("ACTION_DELAY_BASE", "1.0"))
+    )
+    # 页面操作延迟随机波动范围（秒）
+    action_delay_random: float = Field(
+        default_factory=lambda: float(os.getenv("ACTION_DELAY_RANDOM", "0.5"))
+    )
+    # 页面加载等待时间（秒）
+    page_load_delay: float = Field(
+        default_factory=lambda: float(os.getenv("PAGE_LOAD_DELAY", "1.5"))
+    )
+    # 滚动操作延迟（秒）
+    scroll_delay: float = Field(
+        default_factory=lambda: float(os.getenv("SCROLL_DELAY", "0.5"))
+    )
+    # 调试：打印延迟信息
+    debug_delay: bool = Field(
+        default_factory=lambda: os.getenv("DEBUG_DELAY", "true").lower() == "true"
     )
 
 

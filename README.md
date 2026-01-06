@@ -10,6 +10,7 @@
 - **遮挡检测**：只标注视口内且 Z 轴可见的元素
 - **稳定 XPath 生成**：优先级降级策略（ID > data-testid > aria-label > text > relative path）
 - **详情页 URL 收集**：自动探索、分析模式、批量收集
+- **自动分页爬取** ⭐：智能识别分页按钮，支持多页自动翻页收集
 
 ## 安装
 
@@ -27,12 +28,40 @@ playwright install chromium
 
 ## 配置
 
-复制 `.env.example` 为 `.env` 并填写 OpenAI API Key：
+### 环境变量
+
+复制 `.env.example` 为 `.env` 并填写配置：
 
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填写 OPENAI_API_KEY
+# 编辑 .env 文件
 ```
+
+**关键配置项**：
+
+- `AIPING_API_KEY` - LLM API Key（必填）
+- `AIPING_API_BASE` - API 基础 URL
+- `AIPING_MODEL` - 使用的模型名称
+
+**爬取间隔配置（反爬虫）** ⭐：
+
+```bash
+# 页面操作基础延迟（秒），默认 1.0
+ACTION_DELAY_BASE=1.0
+
+# 延迟随机波动范围（秒），默认 0.5
+# 实际延迟在 [BASE - RANDOM/2, BASE + RANDOM/2] 之间
+ACTION_DELAY_RANDOM=0.5
+
+# 页面加载等待时间（秒），默认 1.5
+PAGE_LOAD_DELAY=1.5
+
+# 滚动操作延迟（秒），默认 0.5
+SCROLL_DELAY=0.5
+```
+
+📖 详细配置说明请参考：[爬取间隔配置文档](docs/crawl_delay_config.md)
+
 
 ## 使用
 
@@ -62,8 +91,10 @@ autospider collect-urls \
 
 1. **导航阶段**：LLM 根据你的任务描述，**先点击筛选条件**（如"已中标"、"交通运输"等标签）
 2. **探索阶段**：进入 N 个不同的详情页，记录每次进入的操作步骤
-3. **分析阶段**：分析这 N 次操作的共同模式，提取公共脚本
-4. **收集阶段**：使用公共脚本遍历列表页，收集所有详情页的 URL
+3. **分析阶段**：分析这 N 次操作的共同模式，提取公共 XPath
+4. **分页识别** ⭐：自动识别"下一页"按钮，提取分页控件 XPath
+5. **收集阶段** ⭐：使用公共 XPath 遍历列表页，**自动翻页**收集所有详情页的 URL
+6. **配置持久化** ⭐：保存导航步骤、详情链接 XPath、分页 XPath 到配置文件
 
 #### 参数说明
 
@@ -97,8 +128,10 @@ autospider collect-urls \
 ### collect-urls 命令输出
 
 1. **URL 列表** (`output/urls.txt`)：收集到的所有详情页 URL（纯文本）
-2. **详细结果** (`output/collected_urls.json`)：包含探索记录、公共模式、URL 列表的 JSON 文件
-3. **截图序列** (`output/screenshots/`)：探索过程中的截图
+2. **配置文件** ⭐ (`output/collection_config.json`)：导航步骤、详情链接 XPath、分页 XPath 等配置
+3. **详细结果** (`output/collected_urls.json`)：包含探索记录、公共模式、URL 列表的 JSON 文件
+4. **爬虫脚本** (`output/spider.py`)：生成的详情页爬虫脚本
+5. **截图序列** (`output/screenshots/`)：探索过程中的截图
 
 ## 架构
 
