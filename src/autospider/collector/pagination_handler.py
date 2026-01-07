@@ -32,6 +32,7 @@ class PaginationHandler:
         self.llm_decision_maker = llm_decision_maker
         self.pagination_xpath: str | None = None
         self.current_page_num = 1
+        self.jump_widget_xpath: dict[str, str] | None = None  # {"input": "...", "button": "..."}"
     
     async def extract_pagination_xpath(self) -> str | None:
         """
@@ -152,6 +153,106 @@ class PaginationHandler:
         
         print(f"[Extract-Pagination] ⚠ 所有策略均失败，未能提取分页控件")
         return None
+    
+    async def extract_jump_widget_xpath(self) -> dict[str, str] | None:
+        """
+        提取页码跳转控件的 xpath（输入框 + 确定按钮）
+        
+        用于断点恢复的第二阶段策略（控件直达）
+        
+        Returns:
+            {"input": "输入框xpath", "button": "按钮xpath"} 或 None
+        """
+        print(f"[Extract-JumpWidget] 开始提取页码跳转控件...")
+        
+        # 常见的页码输入框选择器
+        input_selectors = [
+            # 输入框类型
+            'input[type="text"][placeholder*="页" i]',
+            'input[type="number"][placeholder*="页" i]',
+            'input[type="text"][placeholder*="page" i]',
+            'input[type="number"][placeholder*="page" i]',
+            
+            # 类名匹配
+            'input[class*="page-input"]',
+            'input[class*="pageInput"]',
+            'input[class*="jump"]',
+            'input[class*="go-input"]',
+            
+            # ID匹配
+            'input[id*="page" i]',
+            'input[id*="jump" i]',
+            
+            # 分页容器中的输入框
+            '[class*="pagination"] input[type="text"]',
+            '[class*="pagination"] input[type="number"]',
+            '[class*="pager"] input[type="text"]',
+            '[class*="pager"] input[type="number"]',
+            '.pagination input',
+            '.pager input',
+        ]
+        
+        # 常见的确定/跳转按钮选择器
+        button_selectors = [
+            # 文本匹配
+            'button:has-text("确定")',
+            'button:has-text("确认")',
+            'button:has-text("跳转")',
+            'button:has-text("GO")',
+            'button:has-text("Go")',
+            'button:has-text("go")',
+            'a:has-text("确定")',
+            'a:has-text("GO")',
+            
+            # 类名匹配
+            'button[class*="page-go"]',
+            'button[class*="jump"]',
+            'button[class*="confirm"]',
+            'a[class*="page-go"]',
+            
+            # ID匹配
+            'button[id*="go" i]',
+            'button[id*="jump" i]',
+            'button[id*="confirm" i]',
+            
+            # 分页容器中的按钮
+            '[class*="pagination"] button',
+            '[class*="pager"] button',
+        ]
+        
+        input_xpath = None
+        button_xpath = None
+        
+        # 尝试找到输入框
+        for selector in input_selectors:
+            try:
+                locator = self.page.locator(selector)
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    input_xpath = selector
+                    print(f"[Extract-JumpWidget] ✓ 找到输入框: {selector}")
+                    break
+            except:
+                continue
+        
+        # 尝试找到按钮
+        if input_xpath:
+            for selector in button_selectors:
+                try:
+                    locator = self.page.locator(selector)
+                    if await locator.count() > 0 and await locator.first.is_visible():
+                        button_xpath = selector
+                        print(f"[Extract-JumpWidget] ✓ 找到按钮: {selector}")
+                        break
+                except:
+                    continue
+        
+        if input_xpath and button_xpath:
+            self.jump_widget_xpath = {"input": input_xpath, "button": button_xpath}
+            print(f"[Extract-JumpWidget] ✓ 成功提取跳转控件")
+            return self.jump_widget_xpath
+        else:
+            print(f"[Extract-JumpWidget] ⚠ 未能提取完整的跳转控件")
+            return None
     
     async def extract_pagination_xpath_with_llm(self) -> str | None:
         """使用 LLM 视觉识别分页控件并提取 xpath"""

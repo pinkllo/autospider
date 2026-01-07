@@ -24,6 +24,9 @@ class CollectionConfig:
 
     # 分页控件 xpath
     pagination_xpath: str | None = None
+    
+    # 跳转控件 xpath (用于断点恢复第二阶段)
+    jump_widget_xpath: dict[str, str] | None = None
 
     # 任务信息
     list_url: str = ""
@@ -39,6 +42,7 @@ class CollectionConfig:
             "nav_steps": self.nav_steps,
             "common_detail_xpath": self.common_detail_xpath,
             "pagination_xpath": self.pagination_xpath,
+            "jump_widget_xpath": self.jump_widget_xpath,
             "list_url": self.list_url,
             "task_description": self.task_description,
             "created_at": self.created_at,
@@ -52,6 +56,7 @@ class CollectionConfig:
             nav_steps=data.get("nav_steps", []),
             common_detail_xpath=data.get("common_detail_xpath"),
             pagination_xpath=data.get("pagination_xpath"),
+            jump_widget_xpath=data.get("jump_widget_xpath"),
             list_url=data.get("list_url", ""),
             task_description=data.get("task_description", ""),
             created_at=data.get("created_at", ""),

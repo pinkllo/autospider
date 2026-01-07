@@ -160,17 +160,18 @@ class WidgetJumpStrategy(ResumeStrategy):
             return False, 1
         
         try:
-            # 定位输入框
-            input_locator = page.locator(f"xpath={input_xpath}")
+            # 定位输入框（CSS选择器，不需要xpath=前缀）
+            input_locator = page.locator(input_xpath)
             if await input_locator.count() == 0:
                 print(f"[{self.name}] 未找到页码输入框")
                 return False, 1
             
             # 清空并输入页码
             await input_locator.first.fill(str(target_page))
+            print(f"[{self.name}] 已输入页码: {target_page}")
             
-            # 定位并点击确定按钮
-            button_locator = page.locator(f"xpath={button_xpath}")
+            # 定位并点击确定按钮（CSS选择器，不需要xpath=前缀）
+            button_locator = page.locator(button_xpath)
             if await button_locator.count() == 0:
                 print(f"[{self.name}] 未找到确定按钮")
                 return False, 1

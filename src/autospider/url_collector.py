@@ -23,6 +23,7 @@ from .llm.prompt_template import render_template
 from .persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
 from .script_generator import ScriptGenerator
 from .checkpoint import AdaptiveRateController
+from .checkpoint.resume_strategy import ResumeCoordinator
 from .som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
@@ -145,6 +146,32 @@ class URLCollector:
                 self.collected_urls.extend(urls)
                 self.visited_detail_urls.update(urls)
         
+        # 0.5 加载历史进度和配置信息
+        previous_progress = self.progress_persistence.load_progress()
+        previous_config = self.config_persistence.load()
+        target_page_num = 1  # 默认从第1页开始
+        is_resume = False  # 是否是断点恢复
+        
+        if previous_progress and previous_progress.current_page_num > 1:
+            print(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
+            print(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")
+            target_page_num = previous_progress.current_page_num
+            is_resume = True
+            
+            # 恢复速率控制器状态
+            self.rate_controller.current_level = previous_progress.backoff_level
+            self.rate_controller.consecutive_success_count = previous_progress.consecutive_success_pages
+            print(f"[断点恢复] 恢复速率控制状态: 等级={previous_progress.backoff_level}, 连续成功={previous_progress.consecutive_success_pages}")
+        
+        # 加载历史配置（导航步骤、XPath等）
+        if previous_config:
+            if previous_config.nav_steps:
+                self.nav_steps = previous_config.nav_steps
+                print(f"[断点恢复] 已加载 {len(self.nav_steps)} 个导航步骤")
+            if previous_config.common_detail_xpath:
+                self.common_detail_xpath = previous_config.common_detail_xpath
+                print(f"[断点恢复] 已加载公共详情页 XPath")
+        
         # 1. 导航到列表页
         print(f"\n[Phase 1] 导航到列表页...")
         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
@@ -154,37 +181,86 @@ class URLCollector:
         self._initialize_handlers()
         
         # 2. 导航阶段
-        print(f"\n[Phase 2] 导航阶段：根据任务描述进行筛选操作...")
-        nav_success = await self.navigation_handler.run_navigation_phase()
-        if not nav_success:
-            print(f"[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
-        
-        # 保存导航步骤
-        self.nav_steps = self.navigation_handler.nav_steps
+        if is_resume and self.nav_steps:
+            # 断点恢复：直接重放已保存的导航步骤，无需LLM决策
+            print(f"\n[Phase 2] 导航阶段：重放已保存的 {len(self.nav_steps)} 个导航步骤（跳过LLM决策）...")
+            nav_success = await self.navigation_handler.replay_nav_steps(self.nav_steps)
+            if not nav_success:
+                print(f"[Warning] 导航步骤重放失败，将直接在当前页面探索")
+        else:
+            # 首次运行：让LLM进行决策并保存导航步骤
+            print(f"\n[Phase 2] 导航阶段：根据任务描述进行筛选操作（LLM决策）...")
+            nav_success = await self.navigation_handler.run_navigation_phase()
+            if not nav_success:
+                print(f"[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
+            # 保存导航步骤
+            self.nav_steps = self.navigation_handler.nav_steps
         
         # 3. 探索阶段
-        print(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
-        await self._explore_phase()
-        
-        if len(self.detail_visits) < 2:
-            print(f"[Warning] 只探索到 {len(self.detail_visits)} 个详情页，需要至少 2 个才能提取模式")
-            return self._create_result()
-        
-        # 3.5 提取公共 xpath
-        print(f"\n[Phase 3.5] 提取公共 xpath...")
-        self.common_detail_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
-        if self.common_detail_xpath:
-            print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
+        if is_resume and self.common_detail_xpath:
+            # 断点恢复且已有 common_detail_xpath：跳过探索阶段
+            print(f"\n[Phase 3] 探索阶段：跳过（已有公共 XPath）")
+            print(f"[Phase 3] 使用已保存的公共详情页 XPath: {self.common_detail_xpath}")
         else:
-            print(f"[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
+            # 首次运行：需要探索并提取 XPath
+            print(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
+            await self._explore_phase()
+            
+            if len(self.detail_visits) < 2:
+                print(f"[Warning] 只探索到 {len(self.detail_visits)} 个详情页，需要至少 2 个才能提取模式")
+                return self._create_result()
+            
+            # 3.5 提取公共 xpath
+            print(f"\n[Phase 3.5] 提取公共 xpath...")
+            self.common_detail_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
+            if self.common_detail_xpath:
+                print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
+            else:
+                print(f"[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
         
         # 3.6 提取分页控件
-        print(f"\n[Phase 3.6] 提取分页控件 xpath...")
-        pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
-        if pagination_xpath:
-            print(f"[Phase 3.6] ✓ 提取到分页控件 xpath: {pagination_xpath}")
+        if is_resume and previous_config and previous_config.pagination_xpath:
+            # 断点恢复：使用已保存的分页控件 XPath
+            pagination_xpath = previous_config.pagination_xpath
+            self.pagination_handler.pagination_xpath = pagination_xpath
+            print(f"\n[Phase 3.6] 提取分页控件 xpath：使用已保存配置")
+            print(f"[Phase 3.6] ✓ 分页控件 xpath: {pagination_xpath}")
         else:
-            print(f"[Phase 3.6] ⚠ 未找到分页控件，将只收集当前页")
+            # 首次运行：提取分页控件 XPath
+            print(f"\n[Phase 3.6] 提取分页控件 xpath...")
+            pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
+            if pagination_xpath:
+                print(f"[Phase 3.6] ✓ 提取到分页控件 xpath: {pagination_xpath}")
+            else:
+                print(f"[Phase 3.6] ⚠ 未找到分页控件，将只收集当前页")
+        
+        # 3.6.1 提取跳转控件（用于断点恢复第二阶段）
+        if is_resume and previous_config and previous_config.jump_widget_xpath:
+            # 断点恢复：使用已保存的跳转控件 XPath
+            jump_widget_xpath = previous_config.jump_widget_xpath
+            self.pagination_handler.jump_widget_xpath = jump_widget_xpath
+            print(f"\n[Phase 3.6.1] 提取跳转控件：使用已保存配置")
+            print(f"[Phase 3.6.1] ✓ 跳转控件已加载")
+        else:
+            # 首次运行：提取跳转控件 XPath
+            print(f"\n[Phase 3.6.1] 提取跳转控件...")
+            jump_widget_xpath = await self.pagination_handler.extract_jump_widget_xpath()
+            if jump_widget_xpath:
+                print(f"[Phase 3.6.1] ✓ 提取到跳转控件")
+            else:
+                print(f"[Phase 3.6.1] ⚠ 未找到跳转控件，第二阶段策略不可用")
+        
+        # 3.7 断点恢复：跳转到目标页
+        if target_page_num > 1:
+            print(f"\n[Phase 3.7] 断点恢复：尝试跳转到第 {target_page_num} 页...")
+            actual_page = await self._resume_to_target_page(
+                target_page_num=target_page_num,
+                jump_widget_xpath=jump_widget_xpath,
+                pagination_xpath=pagination_xpath
+            )
+            # 更新分页处理器的当前页码
+            self.pagination_handler.current_page_num = actual_page
+            print(f"[Phase 3.7] ✓ 已定位到第 {actual_page} 页，继续收集")
         
         # 4. 收集阶段
         if self.common_detail_xpath:
@@ -467,6 +543,36 @@ class URLCollector:
                 return True
         return False
     
+    async def _resume_to_target_page(
+        self,
+        target_page_num: int,
+        jump_widget_xpath: dict[str, str] | None = None,
+        pagination_xpath: str | None = None
+    ) -> int:
+        """使用三阶段策略恢复到目标页
+        
+        Args:
+            target_page_num: 目标页码
+            jump_widget_xpath: 跳转控件xpath（用于第二阶段）
+            pagination_xpath: 分页控件xpath（用于第三阶段）
+            
+        Returns:
+            实际到达的页码
+        """
+        # 组装恢复协调器
+        coordinator = ResumeCoordinator(
+            list_url=self.list_url,
+            collected_urls=set(self.collected_urls),
+            jump_widget_xpath=jump_widget_xpath,
+            detail_xpath=self.common_detail_xpath,
+            pagination_xpath=pagination_xpath,
+        )
+        
+        # 执行恢复
+        actual_page = await coordinator.resume_to_page(self.page, target_page_num)
+        
+        return actual_page
+    
     async def _collect_phase_with_xpath(self) -> None:
         """收集阶段：使用公共 xpath 直接提取 URL"""
         if not self.common_detail_xpath:
@@ -675,6 +781,7 @@ class URLCollector:
             nav_steps=self.nav_steps,
             common_detail_xpath=self.common_detail_xpath,
             pagination_xpath=self.pagination_handler.pagination_xpath if self.pagination_handler else None,
+            jump_widget_xpath=self.pagination_handler.jump_widget_xpath if self.pagination_handler else None,
             list_url=self.list_url,
             task_description=self.task_description,
         )
