@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from langchain_openai import ChatOpenAI
 
 from ..common.config import config
+from ..common.logger import get_logger
 from ..common.storage.redis_manager import RedisManager
 from ..extractor.llm.decider import LLMDecider
 from ..extractor.llm.prompt_template import render_template
@@ -42,18 +43,24 @@ from ..extractor.collector import (
     PaginationHandler,
     smart_scroll,
 )
+from .base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..common.types import SoMSnapshot
 
+# 日志器
+logger = get_logger(__name__)
 
 # Prompt 模板文件路径
 PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "url_collector.yaml")
 
 
-class URLCollector:
-    """详情页 URL 收集器（协调器）"""
+class URLCollector(BaseCollector):
+    """详情页 URL 收集器（协调器）
+    
+    继承 BaseCollector，增加探索阶段功能。
+    """
     
     def __init__(
         self,
@@ -64,42 +71,27 @@ class URLCollector:
         max_nav_steps: int = 10,
         output_dir: str = "output",
     ):
-        self.page = page
-        self.list_url = list_url
-        self.task_description = task_description
+        # 调用基类初始化
+        super().__init__(
+            page=page,
+            list_url=list_url,
+            task_description=task_description,
+            output_dir=output_dir,
+        )
+        
         self.explore_count = explore_count
         self.max_nav_steps = max_nav_steps
         
-        # 输出目录
-        self.output_dir = Path(output_dir)
-        self.screenshots_dir = self.output_dir / "screenshots"
-        self.screenshots_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 状态
+        # 探索阶段特有状态
         self.detail_visits: list[DetailPageVisit] = []
-        self.collected_urls: list[str] = []
         self.step_index = 0
-        self.nav_steps: list[dict] = []
-        self.common_detail_xpath: str | None = None
         self.visited_detail_urls: set[str] = set()
         
-        # 初始化各个组件
+        # 初始化额外组件
         self.decider = LLMDecider()
         self.script_generator = ScriptGenerator(output_dir)
         self.config_persistence = ConfigPersistence(output_dir)
-        self.progress_persistence = ProgressPersistence(output_dir)
-        
-        # 自适应速率控制器
-        self.rate_controller = AdaptiveRateController()
-        print(f"[速率控制] 已初始化速率控制器")
-        print(f"[速率控制] 基础延迟: {self.rate_controller.base_delay}秒, 退避因子: {self.rate_controller.backoff_factor}")
-        
-        # 初始化处理器
         self.xpath_extractor = XPathExtractor()
-        self.llm_decision_maker: LLMDecisionMaker | None = None  # 延迟初始化
-        self.url_extractor = URLExtractor(page, list_url)
-        self.navigation_handler: NavigationHandler | None = None  # 延迟初始化
-        self.pagination_handler: PaginationHandler | None = None  # 延迟初始化
         
         # LLM（用于决策）
         self.llm = ChatOpenAI(
@@ -109,27 +101,6 @@ class URLCollector:
             temperature=0.1,
             max_tokens=4096,
         )
-        
-        # Redis 管理器（用于持久化 URL）
-        self.redis_manager: RedisManager | None = None
-        if config.redis.enabled:
-            import logging
-            # 创建一个logger以保持日志风格
-            redis_logger = logging.getLogger("autospider.redis")
-            if not redis_logger.handlers:
-                handler = logging.StreamHandler()
-                handler.setFormatter(logging.Formatter("[Redis] %(message)s"))
-                redis_logger.addHandler(handler)
-                redis_logger.setLevel(logging.INFO)
-            
-            self.redis_manager = RedisManager(
-                host=config.redis.host,
-                port=config.redis.port,
-                password=config.redis.password,
-                db=config.redis.db,
-                key_prefix=config.redis.key_prefix,
-                logger=redis_logger,
-            )
     
     async def run(self) -> URLCollectorResult:
         """运行 URL 收集流程"""
@@ -288,8 +259,9 @@ class URLCollector:
         
         return result
     
-    def _initialize_handlers(self):
-        """初始化各个处理器"""
+    def _initialize_handlers(self) -> None:
+        """初始化各个处理器（覆盖基类方法，添加探索阶段所需组件）"""
+        # 先初始化 LLM 决策器（需要在基类初始化之前，因为 pagination_handler 依赖它）
         self.llm_decision_maker = LLMDecisionMaker(
             page=self.page,
             decider=self.decider,
@@ -299,6 +271,10 @@ class URLCollector:
             list_url=self.list_url,
         )
         
+        # 调用基类初始化（初始化 url_extractor 和 pagination_handler）
+        super()._initialize_handlers()
+        
+        # URLCollector 特有的 NavigationHandler
         self.navigation_handler = NavigationHandler(
             page=self.page,
             list_url=self.list_url,
@@ -306,13 +282,6 @@ class URLCollector:
             max_nav_steps=self.max_nav_steps,
             decider=self.decider,
             screenshots_dir=self.screenshots_dir,
-        )
-        
-        self.pagination_handler = PaginationHandler(
-            page=self.page,
-            list_url=self.list_url,
-            screenshots_dir=self.screenshots_dir,
-            llm_decision_maker=self.llm_decision_maker,
         )
 
     

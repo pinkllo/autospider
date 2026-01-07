@@ -20,7 +20,7 @@ from autospider.extractor.llm.prompt_template import (
 )
 
 
-def test_template(template_name: str, template_path: str):
+def _test_single_template(template_name: str, template_path: str):
     """测试单个模板文件"""
     print(f"\n{'='*80}")
     print(f"测试模板: {template_name}")
@@ -129,7 +129,7 @@ def main():
             results[template_name] = False
             continue
         
-        results[template_name] = test_template(template_name, str(template_path))
+        results[template_name] = _test_single_template(template_name, str(template_path))
     
     # 输出测试总结
     print("\n" + "="*80)

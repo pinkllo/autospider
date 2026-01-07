@@ -1,4 +1,8 @@
 # URL 收集器的 Prompt 模板
+# Version: 1.0.0
+# Last Updated: 2026-01-07
+# Changelog:
+#   - 1.0.0 (2026-01-07): 初始版本，包含 LLM 决策、分页识别、跳转控件识别等 prompt
 
 # 询问 LLM 决定如何获取详情页 URL
 ask_llm_decision_system_prompt: |
