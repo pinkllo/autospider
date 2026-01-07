@@ -124,6 +124,20 @@ class URLCollectorConfig(BaseModel):
     max_validation_retries: int = Field(
         default_factory=lambda: int(os.getenv("MAX_VALIDATION_RETRIES", "1"))
     )
+    
+    # ===== 自适应速率控制配置（反爬虫） =====
+    # 退避因子（遭遇反爬时延迟倍增因子）
+    backoff_factor: float = Field(
+        default_factory=lambda: float(os.getenv("BACKOFF_FACTOR", "1.5"))
+    )
+    # 最大降速等级
+    max_backoff_level: int = Field(
+        default_factory=lambda: int(os.getenv("MAX_BACKOFF_LEVEL", "3"))
+    )
+    # 连续成功多少页后恢复一级速度
+    credit_recovery_pages: int = Field(
+        default_factory=lambda: int(os.getenv("CREDIT_RECOVERY_PAGES", "5"))
+    )
 
 
 class Config(BaseModel):

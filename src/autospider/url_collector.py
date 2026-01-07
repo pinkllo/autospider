@@ -19,8 +19,9 @@ from langchain_openai import ChatOpenAI
 from .config import config
 from .llm import LLMDecider
 from .llm.prompt_template import render_template
-from .persistence import CollectionConfig, ConfigPersistence
+from .persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
 from .script_generator import ScriptGenerator
+from .checkpoint import AdaptiveRateController
 from .som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
@@ -84,6 +85,12 @@ class URLCollector:
         self.decider = LLMDecider()
         self.script_generator = ScriptGenerator(output_dir)
         self.config_persistence = ConfigPersistence(output_dir)
+        self.progress_persistence = ProgressPersistence(output_dir)
+        
+        # 自适应速率控制器
+        self.rate_controller = AdaptiveRateController()
+        print(f"[速率控制] 已初始化速率控制器")
+        print(f"[速率控制] 基础延迟: {self.rate_controller.base_delay}秒, 退避因子: {self.rate_controller.backoff_factor}")
         
         # 初始化处理器
         self.xpath_extractor = XPathExtractor()
@@ -457,7 +464,16 @@ class URLCollector:
                 print(f"[Collect] ✓ 已达到目标数量 {target_url_count}")
                 break
             
+            # 应用速率控制延迟
+            delay = self.rate_controller.get_delay()
+            if config.url_collector.debug_delay:
+                print(f"[速率控制] 等待 {delay:.2f}秒 (等级: {self.rate_controller.current_level})")
+            await asyncio.sleep(delay)
+            
             # 使用 xpath 提取 URL
+            page_success = False
+            urls_before = len(self.collected_urls)
+            
             try:
                 locators = self.page.locator(f"xpath={self.common_detail_xpath}")
                 count = await locators.count()
@@ -487,9 +503,22 @@ class URLCollector:
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
                         print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
+                
+                # 如果成功收集到URL，标记为成功
+                if len(self.collected_urls) > urls_before:
+                    page_success = True
             
             except Exception as e:
                 print(f"[Collect-XPath] 提取失败: {e}")
+                # 应用惩罚
+                self.rate_controller.apply_penalty()
+            
+            # 记录成功
+            if page_success:
+                self.rate_controller.record_success()
+            
+            # 保存进度
+            self._save_progress()
             
             # 翻页
             if len(self.collected_urls) >= target_url_count:
@@ -525,51 +554,72 @@ class URLCollector:
                 print(f"[Collect] ✓ 已达到目标数量")
                 break
             
+            # 应用速率控制延迟
+            delay = self.rate_controller.get_delay()
+            if config.url_collector.debug_delay:
+                print(f"[速率控制] 等待 {delay:.2f}秒 (等级: {self.rate_controller.current_level})")
+            await asyncio.sleep(delay)
+            
             scroll_count = 0
             last_url_count = len(self.collected_urls)
             no_new_urls_count = 0
+            page_success = False
             
             # 滚动收集
-            while scroll_count < max_scrolls and no_new_urls_count < no_new_threshold:
-                if len(self.collected_urls) >= target_url_count:
-                    break
-                
-                print(f"\n[Collect] ----- 第 {self.pagination_handler.current_page_num} 页，滚动 {scroll_count + 1}/{max_scrolls} -----")
-                
-                # 扫描页面
-                await clear_overlay(self.page)
-                snapshot = await inject_and_scan(self.page)
-                screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-                
-                # LLM 识别
-                llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
-                
-                if llm_decision and llm_decision.get("action") == "select_detail_links":
-                    mark_ids = llm_decision.get("mark_ids", [])
-                    print(f"[Collect] LLM 识别到 {len(mark_ids)} 个详情链接")
+            try:
+                while scroll_count < max_scrolls and no_new_urls_count < no_new_threshold:
+                    if len(self.collected_urls) >= target_url_count:
+                        break
                     
-                    candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
+                    print(f"\n[Collect] ----- 第 {self.pagination_handler.current_page_num} 页，滚动 {scroll_count + 1}/{max_scrolls} -----")
                     
-                    for candidate in candidates:
-                        url = await self.url_extractor.extract_from_element(candidate, snapshot)
-                        if url and url not in self.collected_urls:
-                            self.collected_urls.append(url)
+                    # 扫描页面
+                    await clear_overlay(self.page)
+                    snapshot = await inject_and_scan(self.page)
+                    screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
+                    
+                    # LLM 识别
+                    llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
+                    
+                    if llm_decision and llm_decision.get("action") == "select_detail_links":
+                        mark_ids = llm_decision.get("mark_ids", [])
+                        print(f"[Collect] LLM 识别到 {len(mark_ids)} 个详情链接")
+                        
+                        candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
+                        
+                        for candidate in candidates:
+                            url = await self.url_extractor.extract_from_element(candidate, snapshot)
+                            if url and url not in self.collected_urls:
+                                self.collected_urls.append(url)
+                    
+                    # 检查是否有新 URL
+                    current_count = len(self.collected_urls)
+                    if current_count == last_url_count:
+                        no_new_urls_count += 1
+                        print(f"[Collect] 连续 {no_new_urls_count} 次无新 URL")
+                    else:
+                        no_new_urls_count = 0
+                        print(f"[Collect] ✓ 当前已收集 {current_count} 个 URL")
+                        last_url_count = current_count
+                        page_success = True
+                    
+                    # 滚动
+                    if not await smart_scroll(self.page):
+                        print(f"[Collect] 已到达页面底部")
+                        break
+                    scroll_count += 1
                 
-                # 检查是否有新 URL
-                current_count = len(self.collected_urls)
-                if current_count == last_url_count:
-                    no_new_urls_count += 1
-                    print(f"[Collect] 连续 {no_new_urls_count} 次无新 URL")
-                else:
-                    no_new_urls_count = 0
-                    print(f"[Collect] ✓ 当前已收集 {current_count} 个 URL")
-                    last_url_count = current_count
-                
-                # 滚动
-                if not await smart_scroll(self.page):
-                    print(f"[Collect] 已到达页面底部")
-                    break
-                scroll_count += 1
+            except Exception as e:
+                print(f"[Collect-LLM] 收集过程出错: {e}")
+                # 应用惩罚
+                self.rate_controller.apply_penalty()
+            
+            # 记录成功
+            if page_success:
+                self.rate_controller.record_success()
+            
+            # 保存进度
+            self._save_progress()
             
             # 翻页
             if len(self.collected_urls) >= target_url_count:
@@ -593,6 +643,22 @@ class URLCollector:
         )
         self.config_persistence.save(collection_config)
         print(f"[Phase 4.5] ✓ 配置已持久化")
+    
+    def _save_progress(self):
+        """保存收集进度"""
+        progress = CollectionProgress(
+            status="RUNNING",
+            current_page_num=self.pagination_handler.current_page_num if self.pagination_handler else 1,
+            collected_count=len(self.collected_urls),
+            backoff_level=self.rate_controller.current_level,
+            consecutive_success_pages=self.rate_controller.consecutive_success_count,
+        )
+        self.progress_persistence.save_progress(progress)
+        
+        # 追加新收集到的URL
+        if self.collected_urls:
+            self.progress_persistence.append_urls(self.collected_urls)
+
     
     async def _generate_crawler_script(self) -> str:
         """生成爬虫脚本"""

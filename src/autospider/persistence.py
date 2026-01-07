@@ -117,3 +117,152 @@ class ConfigPersistence:
             配置文件是否存在
         """
         return self.config_file.exists()
+
+
+@dataclass
+class CollectionProgress:
+    """URL收集进度信息"""
+    
+    # 状态：RUNNING, PAUSED, COMPLETED, FAILED
+    status: str = "RUNNING"
+    
+    # 暂停原因（如果状态为 PAUSED）
+    pause_reason: str | None = None
+    
+    # 当前页码
+    current_page_num: int = 1
+    
+    # 已收集的URL数量
+    collected_count: int = 0
+    
+    # 降速等级
+    backoff_level: int = 0
+    
+    # 连续成功页数
+    consecutive_success_pages: int = 0
+    
+    # 最后更新时间
+    last_updated: str = ""
+    
+    def to_dict(self) -> dict[str, Any]:
+        """转换为字典"""
+        return {
+            "status": self.status,
+            "pause_reason": self.pause_reason,
+            "current_page_num": self.current_page_num,
+            "collected_count": self.collected_count,
+            "backoff_level": self.backoff_level,
+            "consecutive_success_pages": self.consecutive_success_pages,
+            "last_updated": self.last_updated,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CollectionProgress":
+        """从字典创建"""
+        return cls(
+            status=data.get("status", "RUNNING"),
+            pause_reason=data.get("pause_reason"),
+            current_page_num=data.get("current_page_num", 1),
+            collected_count=data.get("collected_count", 0),
+            backoff_level=data.get("backoff_level", 0),
+            consecutive_success_pages=data.get("consecutive_success_pages", 0),
+            last_updated=data.get("last_updated", ""),
+        )
+
+
+class ProgressPersistence:
+    """进度持久化管理器"""
+    
+    def __init__(self, output_dir: str | Path = "output"):
+        """初始化
+        
+        Args:
+            output_dir: 输出目录
+        """
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.progress_file = self.output_dir / "progress.json"
+        self.urls_file = self.output_dir / "urls.txt"
+    
+    def save_progress(self, progress: CollectionProgress) -> None:
+        """保存进度
+        
+        Args:
+            progress: 进度信息
+        """
+        # 更新时间戳
+        progress.last_updated = datetime.now().isoformat()
+        
+        # 保存到文件
+        data = progress.to_dict()
+        self.progress_file.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+    
+    def load_progress(self) -> CollectionProgress | None:
+        """加载进度
+        
+        Returns:
+            进度信息，如果文件不存在则返回 None
+        """
+        if not self.progress_file.exists():
+            return None
+        
+        try:
+            data = json.loads(self.progress_file.read_text(encoding="utf-8"))
+            return CollectionProgress.from_dict(data)
+        except Exception as e:
+            print(f"[进度] 加载进度失败: {e}")
+            return None
+    
+    def append_urls(self, urls: list[str]) -> None:
+        """追加URL到文件
+        
+        Args:
+            urls: URL列表
+        """
+        if not urls:
+            return
+        
+        # 读取已有URL（去重）
+        existing_urls = set()
+        if self.urls_file.exists():
+            existing_urls = set(self.urls_file.read_text(encoding="utf-8").strip().split("\n"))
+            existing_urls.discard("")  # 移除空字符串
+        
+        # 追加新URL
+        new_urls = [url for url in urls if url not in existing_urls]
+        if new_urls:
+            with open(self.urls_file, "a", encoding="utf-8") as f:
+                for url in new_urls:
+                    f.write(url + "\n")
+    
+    def load_collected_urls(self) -> list[str]:
+        """加载已收集的URL
+        
+        Returns:
+            URL列表
+        """
+        if not self.urls_file.exists():
+            return []
+        
+        urls = self.urls_file.read_text(encoding="utf-8").strip().split("\n")
+        return [url for url in urls if url]  # 过滤空字符串
+    
+    def has_checkpoint(self) -> bool:
+        """检查是否存在checkpoint
+        
+        Returns:
+            是否存在checkpoint
+        """
+        return self.progress_file.exists()
+    
+    def clear(self) -> None:
+        """清除所有进度数据"""
+        if self.progress_file.exists():
+            self.progress_file.unlink()
+        if self.urls_file.exists():
+            self.urls_file.unlink()
+
