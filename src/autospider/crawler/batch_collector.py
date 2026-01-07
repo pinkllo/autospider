@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
+from ..common.logger import get_logger
 from ..common.storage.redis_manager import RedisManager
 from ..common.storage.persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
 from .checkpoint import AdaptiveRateController
@@ -31,19 +32,19 @@ from ..common.som import (
     inject_and_scan,
 )
 from ..extractor.llm import LLMDecider
+from .base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+# 日志器
+logger = get_logger(__name__)
 
-class BatchCollector:
+
+class BatchCollector(BaseCollector):
     """批量爬取器
     
-    基于配置文件执行批量 URL 收集，支持：
-    - 基于 XPath 的快速收集
-    - 基于 LLM 的备用收集
-    - 断点续爬
-    - 速率控制
+    继承 BaseCollector，基于配置文件执行批量 URL 收集。
     """
     
     def __init__(
@@ -59,57 +60,46 @@ class BatchCollector:
             config_path: 配置文件路径
             output_dir: 输出目录
         """
-        self.page = page
         self.config_path = Path(config_path)
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 截图目录
-        self.screenshots_dir = self.output_dir / "screenshots"
-        self.screenshots_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 加载配置
+        # 加载配置以获取 list_url 和 task_description
         self.collection_config: CollectionConfig | None = None
-        self.list_url: str = ""
-        self.task_description: str = ""
-        self.nav_steps: list[dict] = []
-        self.common_detail_xpath: str | None = None
+        self._preload_config()
         
-        # 收集的数据
-        self.collected_urls: list[str] = []
+        # 调用基类初始化
+        super().__init__(
+            page=page,
+            list_url=getattr(self, 'list_url', ''),
+            task_description=getattr(self, 'task_description', ''),
+            output_dir=output_dir,
+        )
         
-        # 处理器（延迟初始化）
-        self.url_extractor: URLExtractor | None = None
-        self.llm_decision_maker: LLMDecisionMaker | None = None
-        self.navigation_handler: NavigationHandler | None = None
-        self.pagination_handler: PaginationHandler | None = None
-        
-        # 速率控制
-        self.rate_controller = AdaptiveRateController()
-        
-        # 持久化管理器
+        # 配置持久化管理器
         self.config_persistence = ConfigPersistence(config_dir=output_dir)
-        self.progress_persistence = ProgressPersistence(output_dir=output_dir)
+    
+    def _preload_config(self) -> None:
+        """预加载配置文件以获取基本信息"""
+        if self.config_path.exists():
+            try:
+                data = json.loads(self.config_path.read_text(encoding="utf-8"))
+                self.collection_config = CollectionConfig.from_dict(data)
+                self.list_url = self.collection_config.list_url
+                self.task_description = self.collection_config.task_description
+                self.nav_steps = self.collection_config.nav_steps
+                self.common_detail_xpath = self.collection_config.common_detail_xpath
+            except Exception:
+                self.list_url = ""
+                self.task_description = ""
+    
+    async def run(self) -> URLCollectorResult:
+        """运行收集流程（实现基类抽象方法）
         
-        # Redis 管理器（用于持久化 URL）
-        self.redis_manager: RedisManager | None = None
-        if config.redis.enabled:
-            import logging
-            redis_logger = logging.getLogger("autospider.redis")
-            if not redis_logger.handlers:
-                handler = logging.StreamHandler()
-                handler.setFormatter(logging.Formatter("[Redis] %(message)s"))
-                redis_logger.addHandler(handler)
-                redis_logger.setLevel(logging.INFO)
-            
-            self.redis_manager = RedisManager(
-                host=config.redis.host,
-                port=config.redis.port,
-                password=config.redis.password,
-                db=config.redis.db,
-                key_prefix=config.redis.key_prefix,
-                logger=redis_logger,
-            )
+        代理到 collect_from_config() 方法。
+        
+        Returns:
+            收集结果
+        """
+        return await self.collect_from_config()
     
     async def collect_from_config(self) -> URLCollectorResult:
         """从配置文件执行批量收集（主流程）
@@ -131,13 +121,8 @@ class BatchCollector:
         print(f"  - 导航步骤: {len(self.nav_steps)} 个")
         print(f"  - 公共 XPath: {'已配置' if self.common_detail_xpath else '未配置'}")
         
-        # 0.5 连接 Redis 并加载历史 URL（断点续爬）
-        if self.redis_manager:
-            await self.redis_manager.connect()
-            urls = await self.redis_manager.load_items()
-            if urls:
-                self.collected_urls.extend(urls)
-                print(f"[Redis] 已加载 {len(urls)} 个历史 URL")
+        # 0.5 连接 Redis 并加载历史 URL（使用基类方法）
+        await self._load_previous_urls()
         
         # 0.6 加载历史进度
         previous_progress = self.progress_persistence.load_progress()
@@ -219,11 +204,11 @@ class BatchCollector:
             print(f"[Error] 加载配置失败: {e}")
             return False
     
-    def _initialize_handlers(self):
-        """初始化各个处理器"""
-        self.url_extractor = URLExtractor(self.page, self.list_url)
+    def _initialize_handlers(self) -> None:
+        """初始化各个处理器（覆盖基类方法以添加 LLM 支持）"""
+        super()._initialize_handlers()
         
-        # LLM 决策器（仅在需要时初始化）
+        # BatchCollector 特有：LLM 模式下需要初始化决策器
         if not self.common_detail_xpath:
             decider = LLMDecider()
             self.llm_decision_maker = LLMDecisionMaker(
@@ -235,6 +220,7 @@ class BatchCollector:
                 list_url=self.list_url,
             )
         
+        # NavigationHandler
         self.navigation_handler = NavigationHandler(
             page=self.page,
             list_url=self.list_url,
@@ -244,254 +230,39 @@ class BatchCollector:
             screenshots_dir=self.screenshots_dir,
         )
         
-        self.pagination_handler = PaginationHandler(
-            page=self.page,
-            list_url=self.list_url,
-            screenshots_dir=self.screenshots_dir,
-            llm_decision_maker=self.llm_decision_maker,
+        # 更新 pagination_handler 配置
+        if self.pagination_handler:
+            self.pagination_handler.llm_decision_maker = self.llm_decision_maker
+            
+            if self.collection_config:
+                if self.collection_config.pagination_xpath:
+                    self.pagination_handler.pagination_xpath = self.collection_config.pagination_xpath
+                if self.collection_config.jump_widget_xpath:
+                    self.pagination_handler.jump_widget_xpath = self.collection_config.jump_widget_xpath
+    
+    async def _resume_to_target_page(
+        self,
+        target_page_num: int,
+        jump_widget_xpath: dict[str, str] | None = None,
+        pagination_xpath: str | None = None,
+    ) -> int:
+        """使用三阶段策略恢复到目标页（覆盖基类以使用配置中的 xpath）"""
+        # 使用配置中的 xpath
+        jump_xpath = jump_widget_xpath or (
+            self.collection_config.jump_widget_xpath if self.collection_config else None
         )
-        
-        # 加载分页配置
-        if self.collection_config:
-            if self.collection_config.pagination_xpath:
-                self.pagination_handler.pagination_xpath = self.collection_config.pagination_xpath
-            if self.collection_config.jump_widget_xpath:
-                self.pagination_handler.jump_widget_xpath = self.collection_config.jump_widget_xpath
-    
-    async def _resume_to_target_page(self, target_page_num: int) -> int:
-        """使用三阶段策略恢复到目标页
-        
-        Args:
-            target_page_num: 目标页码
-            
-        Returns:
-            实际到达的页码
-        """
-        coordinator = ResumeCoordinator(
-            list_url=self.list_url,
-            collected_urls=set(self.collected_urls),
-            jump_widget_xpath=self.collection_config.jump_widget_xpath if self.collection_config else None,
-            detail_xpath=self.common_detail_xpath,
-            pagination_xpath=self.collection_config.pagination_xpath if self.collection_config else None,
+        pag_xpath = pagination_xpath or (
+            self.collection_config.pagination_xpath if self.collection_config else None
         )
-        
-        actual_page = await coordinator.resume_to_page(self.page, target_page_num)
-        return actual_page
+        return await super()._resume_to_target_page(target_page_num, jump_xpath, pag_xpath)
     
-    async def _collect_phase_with_xpath(self) -> None:
-        """收集阶段：使用公共 xpath 直接提取 URL"""
-        if not self.common_detail_xpath:
-            return
-        
-        # 返回列表页开始位置
-        print(f"[Collect] 返回列表页开始位置...")
-        await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(1)
-        
-        # 重放导航步骤
-        if self.nav_steps:
-            await self.navigation_handler.replay_nav_steps(self.nav_steps)
-        
-        max_pages = config.url_collector.max_pages
-        target_url_count = config.url_collector.target_url_count
-        
-        print(f"[Collect] 目标：收集 {target_url_count} 个 URL")
-        print(f"[Collect] 最大翻页次数: {max_pages}")
-        
-        # 翻页循环
-        while self.pagination_handler.current_page_num <= max_pages:
-            print(f"\n[Collect] ===== 第 {self.pagination_handler.current_page_num} 页 =====")
-            
-            if len(self.collected_urls) >= target_url_count:
-                print(f"[Collect] ✓ 已达到目标数量 {target_url_count}")
-                break
-            
-            # 应用速率控制延迟
-            delay = self.rate_controller.get_delay()
-            if config.url_collector.debug_delay:
-                print(f"[速率控制] 等待 {delay:.2f}秒 (等级: {self.rate_controller.current_level})")
-            await asyncio.sleep(delay)
-            
-            # 使用 xpath 提取 URL
-            page_success = False
-            urls_before = len(self.collected_urls)
-            
-            try:
-                locators = self.page.locator(f"xpath={self.common_detail_xpath}")
-                count = await locators.count()
-                print(f"[Collect-XPath] 找到 {count} 个匹配元素")
-                
-                for i in range(count):
-                    if len(self.collected_urls) >= target_url_count:
-                        break
-                    
-                    locator = locators.nth(i)
-                    
-                    # 尝试从 href 获取
-                    try:
-                        href = await locator.get_attribute("href")
-                        if href:
-                            from urllib.parse import urljoin
-                            url = urljoin(self.list_url, href)
-                            if url not in self.collected_urls:
-                                self.collected_urls.append(url)
-                                if self.redis_manager:
-                                    await self.redis_manager.save_item(url)
-                                print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
-                            continue
-                    except Exception as e:
-                        print(f"[Collect-XPath] 获取 href 失败: {e}")
-                    
-                    # 点击获取
-                    url = await self.url_extractor.click_element_and_get_url(locator, self.nav_steps)
-                    if url and url not in self.collected_urls:
-                        self.collected_urls.append(url)
-                        if self.redis_manager:
-                            await self.redis_manager.save_item(url)
-                        print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
-                
-                # 如果成功收集到URL，标记为成功
-                if len(self.collected_urls) > urls_before:
-                    page_success = True
-            
-            except Exception as e:
-                print(f"[Collect-XPath] 提取失败: {e}")
-                self.rate_controller.apply_penalty()
-            
-            # 记录成功
-            if page_success:
-                self.rate_controller.record_success()
-            
-            # 保存进度
-            self._save_progress()
-            
-            # 翻页
-            if len(self.collected_urls) >= target_url_count:
-                break
-            
-            page_turned = await self.pagination_handler.find_and_click_next_page()
-            if not page_turned:
-                print(f"[Collect] 无法翻页，结束收集")
-                break
-        
-        print(f"\n[Collect] 收集完成! 共收集 {len(self.collected_urls)} 个 URL")
-    
-    async def _collect_phase_with_llm(self) -> None:
-        """收集阶段：使用 LLM 遍历列表页"""
-        # 返回列表页
-        print(f"[Collect] 返回列表页开始位置...")
-        await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(1)
-        
-        max_scrolls = config.url_collector.max_scrolls
-        no_new_threshold = config.url_collector.no_new_url_threshold
-        target_url_count = config.url_collector.target_url_count
-        max_pages = config.url_collector.max_pages
-        
-        print(f"[Collect] 目标：收集 {target_url_count} 个 URL")
-        print(f"[Collect] 最大翻页次数: {max_pages}")
-        
-        # 翻页循环
-        while self.pagination_handler.current_page_num <= max_pages:
-            print(f"\n[Collect] ===== 第 {self.pagination_handler.current_page_num} 页 =====")
-            
-            if len(self.collected_urls) >= target_url_count:
-                print(f"[Collect] ✓ 已达到目标数量")
-                break
-            
-            # 应用速率控制延迟
-            delay = self.rate_controller.get_delay()
-            if config.url_collector.debug_delay:
-                print(f"[速率控制] 等待 {delay:.2f}秒 (等级: {self.rate_controller.current_level})")
-            await asyncio.sleep(delay)
-            
-            scroll_count = 0
-            last_url_count = len(self.collected_urls)
-            no_new_urls_count = 0
-            page_success = False
-            
-            # 滚动收集
-            try:
-                while scroll_count < max_scrolls and no_new_urls_count < no_new_threshold:
-                    if len(self.collected_urls) >= target_url_count:
-                        break
-                    
-                    print(f"\n[Collect] ----- 第 {self.pagination_handler.current_page_num} 页，滚动 {scroll_count + 1}/{max_scrolls} -----")
-                    
-                    # 扫描页面
-                    await clear_overlay(self.page)
-                    snapshot = await inject_and_scan(self.page)
-                    screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-                    
-                    # LLM 识别
-                    llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
-                    
-                    if llm_decision and llm_decision.get("action") == "select_detail_links":
-                        mark_ids = llm_decision.get("mark_ids", [])
-                        print(f"[Collect] LLM 识别到 {len(mark_ids)} 个详情链接")
-                        
-                        candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
-                        
-                        for candidate in candidates:
-                            url = await self.url_extractor.extract_from_element(candidate, snapshot)
-                            if url and url not in self.collected_urls:
-                                self.collected_urls.append(url)
-                                if self.redis_manager:
-                                    await self.redis_manager.save_item(url)
-                    
-                    # 检查是否有新 URL
-                    current_count = len(self.collected_urls)
-                    if current_count == last_url_count:
-                        no_new_urls_count += 1
-                        print(f"[Collect] 连续 {no_new_urls_count} 次无新 URL")
-                    else:
-                        no_new_urls_count = 0
-                        print(f"[Collect] ✓ 当前已收集 {current_count} 个 URL")
-                        last_url_count = current_count
-                        page_success = True
-                    
-                    # 滚动
-                    if not await smart_scroll(self.page):
-                        print(f"[Collect] 已到达页面底部")
-                        break
-                    scroll_count += 1
-                
-            except Exception as e:
-                print(f"[Collect-LLM] 收集过程出错: {e}")
-                self.rate_controller.apply_penalty()
-            
-            # 记录成功
-            if page_success:
-                self.rate_controller.record_success()
-            
-            # 保存进度
-            self._save_progress()
-            
-            # 翻页
-            if len(self.collected_urls) >= target_url_count:
-                break
-            
-            page_turned = await self.pagination_handler.find_and_click_next_page()
-            if not page_turned:
-                print(f"[Collect] 无法翻页，结束收集")
-                break
-        
-        print(f"\n[Collect] 收集完成! 共收集 {len(self.collected_urls)} 个 URL")
-    
-    def _save_progress(self):
-        """保存收集进度"""
-        progress = CollectionProgress(
-            status="RUNNING",
-            current_page_num=self.pagination_handler.current_page_num if self.pagination_handler else 1,
-            collected_count=len(self.collected_urls),
-            backoff_level=self.rate_controller.current_level,
-            consecutive_success_pages=self.rate_controller.consecutive_success_count,
-        )
-        self.progress_persistence.save_progress(progress)
-        
+    def _save_progress(self) -> None:
+        """保存收集进度（覆盖基类以添加 append_urls）"""
+        super()._save_progress()
         # 追加新收集到的URL
         if self.collected_urls:
             self.progress_persistence.append_urls(self.collected_urls)
+
     
     def _create_result(self) -> URLCollectorResult:
         return URLCollectorResult(

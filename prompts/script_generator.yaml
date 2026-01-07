@@ -1,4 +1,8 @@
 # 脚本生成器的 Prompt 模板
+# Version: 1.0.0
+# Last Updated: 2026-01-07
+# Changelog:
+#   - 1.0.0 (2026-01-07): 初始版本，生成 Scrapy + scrapy-playwright 爬虫脚本
 
 system_prompt: |
   你是一个 Python 爬虫专家，擅长 Scrapy + scrapy-playwright。你需要分析用户提供的探索记录，生成一个**完整的 Scrapy + scrapy-playwright 爬虫脚本**。

@@ -5,20 +5,29 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.table import Table
 
 from .common.browser import create_browser_session
 from .common.config import config
+from .common.validators import validate_url, validate_task_description
+from .common.exceptions import ValidationError, URLValidationError
+from .common.logger import get_logger
 from .extractor.graph import run_agent
 from .common.types import RunInput
+
+# 日志器
+logger = get_logger(__name__)
 
 app = typer.Typer(
     name="autospider",
     help="纯视觉 SoM 浏览器 Agent - 使用 LangGraph + 多模态 LLM",
+    add_completion=False,
 )
 console = Console()
 
@@ -346,6 +355,11 @@ def collect_urls_command(
         "-o",
         help="输出目录",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="预览模式，只验证参数不实际执行",
+    ),
 ):
     """
     收集详情页 URL
@@ -359,26 +373,65 @@ def collect_urls_command(
     示例:
         autospider collect-urls --list-url "https://example.com/list" --task "收集招标公告详情页" --explore-count 3
     """
+    # 输入验证
+    try:
+        list_url = validate_url(list_url)
+        task = validate_task_description(task)
+    except (URLValidationError, ValidationError) as e:
+        console.print(Panel(
+            f"[red]{str(e)}[/red]",
+            title="输入验证错误",
+            style="red",
+        ))
+        raise typer.Exit(1)
+    
     # 显示配置
     console.print(Panel(
         f"[bold]列表页 URL:[/bold] {list_url}\n"
         f"[bold]任务描述:[/bold] {task}\n"
         f"[bold]探索数量:[/bold] {explore_count} 个详情页\n"
         f"[bold]无头模式:[/bold] {headless}\n"
-        f"[bold]输出目录:[/bold] {output_dir}",
+        f"[bold]输出目录:[/bold] {output_dir}"
+        + ("\n[bold yellow]模式:[/bold yellow] [yellow]预览模式 (dry-run)[/yellow]" if dry_run else ""),
         title="URL 收集器配置",
         style="cyan",
     ))
-
-    # 运行收集器
-    try:
-        result = asyncio.run(_run_collector(
-            list_url=list_url,
-            task=task,
-            explore_count=explore_count,
-            headless=headless,
-            output_dir=output_dir,
+    
+    # Dry-run 模式：只验证参数，不实际执行
+    if dry_run:
+        console.print(Panel(
+            "[green]✓ 参数验证通过[/green]\n\n"
+            "将执行以下操作：\n"
+            f"  1. 打开浏览器访问 {list_url}\n"
+            f"  2. 探索 {explore_count} 个详情页提取模式\n"
+            f"  3. 收集详情页 URL 并保存到 {output_dir}/\n"
+            f"  4. 生成爬虫脚本 {output_dir}/spider.py\n\n"
+            "使用 [cyan]--no-dry-run[/cyan] 或移除 [cyan]--dry-run[/cyan] 执行实际操作",
+            title="预览完成",
+            style="green",
         ))
+        return
+
+    # 运行收集器（带进度条）
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("[cyan]初始化...", total=None)
+            
+            result = asyncio.run(_run_collector(
+                list_url=list_url,
+                task=task,
+                explore_count=explore_count,
+                headless=headless,
+                output_dir=output_dir,
+            ))
+            
+            progress.update(task_id, completed=True, description="[green]完成")
         
         # 显示结果
         console.print("\n")
@@ -505,6 +558,13 @@ async def _run_collector(
         )
 
 
-if __name__ == "__main__":
+def main():
+    """CLI 入口点
+    
+    供 pyproject.toml 中 [project.scripts] 调用。
+    """
     app()
 
+
+if __name__ == "__main__":
+    main()

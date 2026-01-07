@@ -21,15 +21,22 @@ dependencies = [
     "rich>=13.0.0",
     "typer>=0.9.0",
     "python-dotenv>=1.0.0",
-    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
+redis = [
+    "redis>=5.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "autospider[redis,dev]",
 ]
 
 [project.scripts]
@@ -48,3 +55,13 @@ target-version = "py310"
 [tool.black]
 line-length = 100
 target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
