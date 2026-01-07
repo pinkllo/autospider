@@ -5,7 +5,22 @@
 
 from __future__ import annotations
 
+import random
+
 from ..config import config
+
+
+def get_random_delay(base: float, random_range: float) -> float:
+    """获取随机延迟时间
+    
+    Args:
+        base: 基础延迟时间（秒）
+        random_range: 随机浮动范围（秒）
+        
+    Returns:
+        随机延迟时间（秒）
+    """
+    return base + random.uniform(0, random_range)
 
 
 class AdaptiveRateController:

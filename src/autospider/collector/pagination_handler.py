@@ -37,39 +37,120 @@ class PaginationHandler:
         """
         在探索阶段提取分页控件的 xpath
         
-        通过扫描页面查找下一页按钮，并记录其 xpath
+        策略：先用 LLM 视觉识别，失败则使用增强的规则兜底
         """
         print(f"[Extract-Pagination] 开始提取分页控件 xpath...")
         
-        # 常见的下一页选择器
+        # 策略1: 优先使用 LLM 视觉识别（准确度更高）
+        if self.llm_decision_maker:
+            print(f"[Extract-Pagination] 策略1: 使用 LLM 视觉识别...")
+            result = await self.extract_pagination_xpath_with_llm()
+            if result:
+                print(f"[Extract-Pagination] ✓ LLM 识别成功: {result}")
+                return result
+            print(f"[Extract-Pagination] LLM 识别失败，切换到规则兜底...")
+        
+        # 策略2: 规则兜底 - 增强的分页按钮选择器
+        print(f"[Extract-Pagination] 策略2: 使用规则识别...")
         common_selectors = [
+            # 中文文本匹配
             'a:has-text("下一页")',
             'button:has-text("下一页")',
+            'a:has-text("下页")',
+            'span:has-text("下一页") >> xpath=ancestor::a',
+            'span:has-text("下一页") >> xpath=ancestor::button',
+            
+            # 英文文本匹配
+            'a:has-text("Next")',
+            'button:has-text("Next")',
             'a:has-text("next")',
             'button:has-text("next")',
+            
+            # 符号匹配
             'a:has-text(">")',
-            '[class*="next"]',
-            '[class*="pagination"] a:last-child',
+            'button:has-text(">")',
+            'a:has-text("›")',
+            'a:has-text("»")',
+            
+            # 图标按钮匹配（纯图标，无文本）
+            'button:has(.icon-right):not([disabled])',
+            'button:has([class*="icon-right"]):not([disabled])',
+            'a:has(.icon-right)',
+            'a:has([class*="icon-right"])',
+            'button:has(.icon-next):not([disabled])',
+            'button:has([class*="icon-next"]):not([disabled])',
+            'a:has(.icon-next)',
+            
+            # 常见图标库的右箭头/下一页图标
+            'button:has(.gd-icon.icon-right):not([disabled])',  # GD Design
+            'button:has(.el-icon-arrow-right):not([disabled])',  # Element UI
+            'button:has(.el-icon-d-arrow-right):not([disabled])',
+            'a:has(.el-icon-arrow-right)',
+            'button:has(.anticon-right):not([disabled])',  # Ant Design
+            'button:has(.anticon-double-right):not([disabled])',
+            'a:has(.anticon-right)',
+            'button:has(.fa-chevron-right):not([disabled])',  # Font Awesome
+            'button:has(.fa-angle-right):not([disabled])',
+            'button:has(.fa-arrow-right):not([disabled])',
+            'a:has(.fa-chevron-right)',
+            'button:has(svg[class*="right"]):not([disabled])',  # SVG 图标
+            'a:has(svg[class*="right"])',
+            
+            # 类名匹配（排除disabled状态）
+            '[class*="next"]:not([class*="disabled"]):not([disabled])',
+            '[class*="Next"]:not([class*="disabled"]):not([disabled])',
+            'a[class*="page-next"]:not([class*="disabled"])',
+            'button[class*="page-next"]:not([class*="disabled"])',
+            'button[class*="icon-only"]:has([class*="right"]):not([disabled])',
+            
+            # ID 匹配
+            '#next-page',
+            '#nextPage',
+            'a[id*="next"]',
+            'button[id*="next"]',
+            
+            # aria-label 匹配
+            'a[aria-label*="next" i]',
+            'button[aria-label*="next" i]',
+            'a[aria-label*="下一页"]',
+            'button[aria-label*="下一页"]',
+            'button[aria-label*="右" i]',
+            
+            # 分页容器中的最后一个链接/按钮
+            '[class*="pagination"] a:not([class*="disabled"]):last-child',
+            '[class*="pagination"] button:not([class*="disabled"]):not([disabled]):last-child',
+            '[class*="pager"] a:not([class*="disabled"]):last-child',
+            '[class*="pager"] button:not([class*="disabled"]):not([disabled]):last-child',
+            '.pagination > li:last-child > a',
+            '.pagination > li:last-child > button',
+            '.pager > li:last-child > a',
+            '.pager > li:last-child > button',
+            
+            # rel="next" 属性
+            'a[rel="next"]',
+            
+            # title 属性匹配
+            'a[title*="下一页"]',
+            'button[title*="下一页"]',
+            'a[title*="next" i]',
+            'button[title*="next" i]',
         ]
         
         for selector in common_selectors:
             try:
                 locator = self.page.locator(selector)
-                if await locator.count() > 0:
-                    print(f"[Extract-Pagination] 找到分页按钮: {selector}")
-                    
-                    # 尝试获取 xpath（通过评估）
-                    # 这里简化处理，实际应该从 SoM 中获取
-                    self.pagination_xpath = selector
-                    return selector
-            except Exception:
+                count = await locator.count()
+                if count > 0:
+                    # 验证元素是否可见且可点击
+                    first_elem = locator.first
+                    if await first_elem.is_visible():
+                        print(f"[Extract-Pagination] ✓ 规则识别成功: {selector}")
+                        self.pagination_xpath = selector
+                        return selector
+            except Exception as e:
                 continue
         
-        # 如果常规选择器都失败，尝试用 LLM 视觉识别
-        if self.llm_decision_maker:
-            print(f"[Extract-Pagination] 常规选择器未找到，尝试 LLM 视觉识别...")
-            return await self.extract_pagination_xpath_with_llm()
-        
+        print(f"[Extract-Pagination] ⚠ 所有策略均失败，未能提取分页控件")
         return None
     
     async def extract_pagination_xpath_with_llm(self) -> str | None:
@@ -118,7 +199,10 @@ class PaginationHandler:
         """
         查找并点击下一页按钮
         
-        优先使用探索阶段提取的 pagination_xpath，如果没有则尝试常见选择器
+        策略优先级：
+        1. 使用提取的 pagination_xpath（探索阶段识别的）
+        2. 使用 LLM 实时视觉识别
+        3. 使用增强的规则兜底
         
         Returns:
             是否成功翻页
@@ -132,50 +216,124 @@ class PaginationHandler:
                 else:
                     locator = self.page.locator(self.pagination_xpath)
                 
-                if await locator.count() > 0:
-                    print(f"[Pagination] 使用提取的 xpath 点击下一页...")
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    print(f"[Pagination] 策略1: 使用提取的 xpath...")
                     
                     # 获取随机延迟
-                    from ..utils import get_random_delay
+                    from ..checkpoint.rate_controller import get_random_delay
                     delay = get_random_delay(
-                        config.crawler.action_delay_base,
-                        config.crawler.action_delay_random
+                        config.url_collector.action_delay_base,
+                        config.url_collector.action_delay_random
                     )
                     await asyncio.sleep(delay)
                     
                     await locator.first.click(timeout=5000)
-                    await asyncio.sleep(config.crawler.page_load_delay)
+                    await asyncio.sleep(config.url_collector.page_load_delay)
                     
                     self.current_page_num += 1
                     print(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                     return True
             except Exception as e:
-                print(f"[Pagination] 使用提取的 xpath 失败: {e}")
+                print(f"[Pagination] 策略1 失败: {e}")
         
-        # 策略2: 尝试常见选择器
+        # 策略2: 使用 LLM 实时视觉识别
+        if self.llm_decision_maker:
+            print(f"[Pagination] 策略2: 使用 LLM 视觉识别...")
+            try:
+                result = await self.find_next_page_with_llm()
+                if result:
+                    return True
+                print(f"[Pagination] LLM 识别失败，切换到规则兜底...")
+            except Exception as e:
+                print(f"[Pagination] 策略2 失败: {e}")
+        
+        # 策略3: 增强的规则兜底
+        print(f"[Pagination] 策略3: 使用规则识别...")
         common_selectors = [
+            # 中文文本
             'a:has-text("下一页")',
             'button:has-text("下一页")',
+            'a:has-text("下页")',
+            
+            # 英文文本
+            'a:has-text("Next")',
+            'button:has-text("Next")',
             'a:has-text("next")',
             'button:has-text("next")',
-            '[class*="next"]:not([class*="disabled"])',
+            
+            # 符号
+            'a:has-text(">")',
+            'button:has-text(">")',
+            'a:has-text("›")',
+            'a:has-text("»")',
+            
+            # 图标按钮（纯图标，无文本）
+            'button:has(.icon-right):not([disabled])',
+            'button:has([class*="icon-right"]):not([disabled])',
+            'a:has(.icon-right)',
+            'button:has(.icon-next):not([disabled])',
+            'button:has(.gd-icon.icon-right):not([disabled])',
+            'button:has(.el-icon-arrow-right):not([disabled])',
+            'button:has(.anticon-right):not([disabled])',
+            'button:has(.fa-chevron-right):not([disabled])',
+            'button:has(svg[class*="right"]):not([disabled])',
+            
+            # 类名
+            '[class*="next"]:not([class*="disabled"]):not([disabled])',
+            '[class*="Next"]:not([class*="disabled"]):not([disabled])',
+            'a[class*="page-next"]:not([class*="disabled"])',
+            'button[class*="icon-only"]:has([class*="right"]):not([disabled])',
+            
+            # ID
+            '#next-page',
+            '#nextPage',
+            
+            # aria-label
+            'a[aria-label*="next" i]',
+            'button[aria-label*="next" i]',
+            'a[aria-label*="下一页"]',
+            'button[aria-label*="右" i]',
+            
+            # 分页容器
+            '[class*="pagination"] a:not([class*="disabled"]):last-child',
+            '[class*="pagination"] button:not([class*="disabled"]):not([disabled]):last-child',
+            '.pagination > li:last-child > a',
+            '.pagination > li:last-child > button',
+            
+            # rel 属性
+            'a[rel="next"]',
         ]
         
         for selector in common_selectors:
             try:
                 locator = self.page.locator(selector)
-                if await locator.count() > 0:
-                    print(f"[Pagination] 使用常规选择器点击: {selector}")
-                    await locator.first.click(timeout=5000)
-                    await asyncio.sleep(1)
-                    
-                    self.current_page_num += 1
-                    print(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
-                    return True
-            except Exception:
+                count = await locator.count()
+                if count > 0:
+                    first_elem = locator.first
+                    # 检查可见性
+                    is_visible = await first_elem.is_visible()
+                    if is_visible:
+                        print(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
+                        
+                        from ..checkpoint.rate_controller import get_random_delay
+                        delay = get_random_delay(
+                            config.url_collector.action_delay_base,
+                            config.url_collector.action_delay_random
+                        )
+                        await asyncio.sleep(delay)
+                        
+                        # 尝试点击
+                        await first_elem.click(timeout=5000)
+                        await asyncio.sleep(config.url_collector.page_load_delay)
+                        
+                        self.current_page_num += 1
+                        print(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
+                        return True
+            except Exception as e:
+                print(f"[Pagination] 规则 '{selector}' 失败: {e}")
                 continue
         
-        print(f"[Pagination] ⚠ 未找到下一页按钮")
+        print(f"[Pagination] ⚠ 所有策略均失败，未找到下一页按钮")
         return False
     
     async def find_next_page_with_llm(self, screenshot_base64: str = None) -> bool:
@@ -201,18 +359,30 @@ class PaginationHandler:
             data = await self.llm_decision_maker.extract_pagination_with_llm(snapshot, screenshot_base64)
             
             if data and data.get("found") and data.get("mark_id"):
-                mark_id = data["mark_id"]
+                mark_id = str(data["mark_id"])  # 确保是字符串
                 print(f"[Pagination-LLM] 找到下一页按钮 [{mark_id}]")
                 
-                # 点击
+                # 点击（使用 data-som-id 属性）
                 locator = self.page.locator(f'[data-som-id="{mark_id}"]')
-                if await locator.count() > 0:
+                count = await locator.count()
+                if count > 0:
+                    print(f"[Pagination-LLM] 尝试点击 mark_id={mark_id}...")
+                    
+                    from ..checkpoint.rate_controller import get_random_delay
+                    delay = get_random_delay(
+                        config.url_collector.action_delay_base,
+                        config.url_collector.action_delay_random
+                    )
+                    await asyncio.sleep(delay)
+                    
                     await locator.first.click(timeout=5000)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(config.url_collector.page_load_delay)
                     
                     self.current_page_num += 1
                     print(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                     return True
+                else:
+                    print(f"[Pagination-LLM] 未找到 mark_id={mark_id} 的元素")
             else:
                 print(f"[Pagination-LLM] 未找到下一页: {data.get('reasoning', '') if data else ''}")
         except Exception as e:

@@ -112,12 +112,22 @@ class URLCollector:
         # Redis 管理器（用于持久化 URL）
         self.redis_manager: RedisManager | None = None
         if config.redis.enabled:
+            import logging
+            # 创建一个logger以保持日志风格
+            redis_logger = logging.getLogger("autospider.redis")
+            if not redis_logger.handlers:
+                handler = logging.StreamHandler()
+                handler.setFormatter(logging.Formatter("[Redis] %(message)s"))
+                redis_logger.addHandler(handler)
+                redis_logger.setLevel(logging.INFO)
+            
             self.redis_manager = RedisManager(
                 host=config.redis.host,
                 port=config.redis.port,
                 password=config.redis.password,
                 db=config.redis.db,
                 key_prefix=config.redis.key_prefix,
+                logger=redis_logger,
             )
     
     async def run(self) -> URLCollectorResult:
@@ -130,7 +140,7 @@ class URLCollector:
         # 0. 连接 Redis 并加载历史 URL（断点续爬）
         if self.redis_manager:
             await self.redis_manager.connect()
-            urls = await self.redis_manager.load_urls()
+            urls = await self.redis_manager.load_items()
             if urls:
                 self.collected_urls.extend(urls)
                 self.visited_detail_urls.update(urls)
@@ -515,7 +525,7 @@ class URLCollector:
                             if url not in self.collected_urls:
                                 self.collected_urls.append(url)
                                 if self.redis_manager:
-                                    await self.redis_manager.save_url(url)
+                                    await self.redis_manager.save_item(url)
                                 print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
                             continue
                     except:
@@ -526,7 +536,7 @@ class URLCollector:
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
                         if self.redis_manager:
-                            await self.redis_manager.save_url(url)
+                            await self.redis_manager.save_item(url)
                         print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
                 
                 # 如果成功收集到URL，标记为成功
@@ -617,7 +627,7 @@ class URLCollector:
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
                                 if self.redis_manager:
-                                    await self.redis_manager.save_url(url)
+                                    await self.redis_manager.save_item(url)
                     
                     # 检查是否有新 URL
                     current_count = len(self.collected_urls)

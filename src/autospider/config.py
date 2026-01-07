@@ -62,12 +62,17 @@ class AgentConfig(BaseModel):
 
 
 class RedisConfig(BaseModel):
-    """Redis 配置"""
+    """Redis 配置
+    
+    RedisManager 是一个通用的 Redis 管理工具，支持任何项目使用。
+    通过 key_prefix 可以为不同项目或功能设置独立的命名空间。
+    """
     enabled: bool = Field(default_factory=lambda: os.getenv("REDIS_ENABLED", "false").lower() == "true")
     host: str = Field(default_factory=lambda: os.getenv("REDIS_HOST", "localhost"))
     port: int = Field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))
     password: str | None = Field(default_factory=lambda: os.getenv("REDIS_PASSWORD", None))
     db: int = Field(default_factory=lambda: int(os.getenv("REDIS_DB", "0")))
+    # key_prefix: Redis 键的前缀，用于命名空间隔离（如 "autospider:urls"）
     key_prefix: str = Field(default_factory=lambda: os.getenv("REDIS_KEY_PREFIX", "autospider:urls"))
 
 
@@ -88,11 +93,11 @@ class URLCollectorConfig(BaseModel):
     )
     # 目标 URL 数量（达到后停止收集）
     target_url_count: int = Field(
-        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "50"))
+        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "400"))
     )
     # 最大翻页次数（分页收集）
     max_pages: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_PAGES", "10"))
+        default_factory=lambda: int(os.getenv("MAX_PAGES", "40"))
     )
     
     # ===== 爬取间隔配置（反爬虫） =====
