@@ -1,13 +1,16 @@
 """断点续爬模块单元测试"""
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from autospider.persistence import CollectionProgress, ProgressPersistence
-from autospider.checkpoint import AdaptiveRateController
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from autospider.common.storage.persistence import CollectionProgress, ProgressPersistence
+from autospider.crawler.checkpoint.rate_controller import AdaptiveRateController
 
 
 class TestCollectionProgress:

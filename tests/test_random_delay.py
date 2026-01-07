@@ -7,8 +7,8 @@ from pathlib import Path
 # 添加 src 到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from autospider.config import config
-from autospider.url_collector import get_random_delay
+from autospider.common.config import config
+from autospider.crawler.checkpoint.rate_controller import get_random_delay
 
 
 def test_random_delay():

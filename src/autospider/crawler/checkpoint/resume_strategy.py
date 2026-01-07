@@ -17,6 +17,24 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 
+def _is_xpath_selector(selector: str | None) -> bool:
+    if not selector:
+        return False
+    stripped = selector.strip()
+    return stripped.startswith("xpath=") or stripped.startswith("//") or stripped.startswith("(")
+
+
+def _build_locator(page: "Page", selector: str | None):
+    if not selector:
+        return None
+    stripped = selector.strip()
+    if stripped.startswith("xpath="):
+        return page.locator(stripped)
+    if _is_xpath_selector(stripped):
+        return page.locator(f"xpath={stripped}")
+    return page.locator(stripped)
+
+
 class ResumeStrategy(ABC):
     """恢复策略基类"""
     
@@ -160,9 +178,8 @@ class WidgetJumpStrategy(ResumeStrategy):
             return False, 1
         
         try:
-            # 定位输入框（CSS选择器，不需要xpath=前缀）
-            input_locator = page.locator(input_xpath)
-            if await input_locator.count() == 0:
+            input_locator = _build_locator(page, input_xpath)
+            if not input_locator or await input_locator.count() == 0:
                 print(f"[{self.name}] 未找到页码输入框")
                 return False, 1
             
@@ -170,9 +187,8 @@ class WidgetJumpStrategy(ResumeStrategy):
             await input_locator.first.fill(str(target_page))
             print(f"[{self.name}] 已输入页码: {target_page}")
             
-            # 定位并点击确定按钮（CSS选择器，不需要xpath=前缀）
-            button_locator = page.locator(button_xpath)
-            if await button_locator.count() == 0:
+            button_locator = _build_locator(page, button_xpath)
+            if not button_locator or await button_locator.count() == 0:
                 print(f"[{self.name}] 未找到确定按钮")
                 return False, 1
             
@@ -224,8 +240,8 @@ class SmartSkipStrategy(ResumeStrategy):
             return None
         
         try:
-            locator = page.locator(f"xpath={self.detail_xpath}")
-            if await locator.count() == 0:
+            locator = _build_locator(page, self.detail_xpath)
+            if not locator or await locator.count() == 0:
                 return None
             
             href = await locator.first.get_attribute("href")
@@ -243,8 +259,8 @@ class SmartSkipStrategy(ResumeStrategy):
             return False
         
         try:
-            locator = page.locator(f"xpath={self.pagination_xpath}")
-            if await locator.count() == 0:
+            locator = _build_locator(page, self.pagination_xpath)
+            if not locator or await locator.count() == 0:
                 return False
             
             # 检查是否禁用

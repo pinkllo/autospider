@@ -132,7 +132,7 @@ class URLExtractor:
             # 尝试返回列表页
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-            except:
+            except Exception:
                 pass
         
         return None
@@ -198,6 +198,6 @@ class URLExtractor:
                 if nav_steps:
                     nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
                     await nav_handler.replay_nav_steps(nav_steps)
-            except:
+            except Exception:
                 pass
             return None

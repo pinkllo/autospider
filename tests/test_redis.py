@@ -7,8 +7,8 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from autospider.config import config
-from autospider.redis_manager import RedisManager
+from autospider.common.config import config
+from autospider.common.storage.redis_manager import RedisManager
 
 
 async def test_redis():
@@ -38,7 +38,6 @@ async def test_redis():
         password=config.redis.password,
         db=config.redis.db,
         key_prefix=config.redis.key_prefix,
-        auto_start=True,
     )
     
     client = await redis_mgr.connect()
@@ -64,12 +63,12 @@ async def test_redis():
     
     print(f"\n[测试] 保存 {len(test_urls)} 个测试 URL...")
     for url in test_urls:
-        await redis_mgr.save_url(url)
+        await redis_mgr.save_item(url)
         print(f"  ✓ {url}")
     
     # 加载 URL
     print(f"\n[测试] 从 Redis 加载 URL...")
-    loaded_urls = await redis_mgr.load_urls()
+    loaded_urls = await redis_mgr.load_items()
     print(f"  找到 {len(loaded_urls)} 个 URL")
     
     # 获取数量

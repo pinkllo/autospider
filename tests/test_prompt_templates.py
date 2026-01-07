@@ -13,7 +13,7 @@ import sys
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from autospider.llm.prompt_template import (
+from autospider.extractor.llm.prompt_template import (
     render_template,
     get_template_sections,
     is_jinja2_available,

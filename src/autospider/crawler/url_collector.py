@@ -634,8 +634,8 @@ class URLCollector:
                                     await self.redis_manager.save_item(url)
                                 print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
                             continue
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"[Collect-XPath] 获取 href 失败: {e}")
                     
                     # 点击获取
                     url = await self.url_extractor.click_element_and_get_url(locator, self.nav_steps)

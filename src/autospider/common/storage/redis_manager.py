@@ -305,13 +305,13 @@ class RedisManager:
         try:
             pattern = f"{self.key_prefix}:*"
             active_items = set()
-            prefix_len = len(self.key_prefix) + 1
             
             async for key in self.client.scan_iter(match=pattern):
                 deleted = await self.client.hget(key, "deleted")
                 if deleted != "true":
-                    item = key[prefix_len:]
-                    active_items.add(item)
+                    item = await self.client.hget(key, "item")
+                    if item:
+                        active_items.add(item)
             
             return active_items
         except Exception as e:

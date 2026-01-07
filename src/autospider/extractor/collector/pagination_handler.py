@@ -148,7 +148,7 @@ class PaginationHandler:
                         print(f"[Extract-Pagination] ✓ 规则识别成功: {selector}")
                         self.pagination_xpath = selector
                         return selector
-            except Exception as e:
+            except Exception:
                 continue
         
         print(f"[Extract-Pagination] ⚠ 所有策略均失败，未能提取分页控件")
@@ -230,7 +230,7 @@ class PaginationHandler:
                     input_xpath = selector
                     print(f"[Extract-JumpWidget] ✓ 找到输入框: {selector}")
                     break
-            except:
+            except Exception:
                 continue
 
         if input_xpath:
@@ -241,7 +241,7 @@ class PaginationHandler:
                         button_xpath = selector
                         print(f"[Extract-JumpWidget] ✓ 找到按钮: {selector}")
                         break
-                except:
+                except Exception:
                     continue
 
         if input_xpath and button_xpath:

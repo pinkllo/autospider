@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from ...common.config import config
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
@@ -52,5 +54,5 @@ async def smart_scroll(page: "Page", distance: int = 500) -> bool:
         return False
     
     await page.evaluate(f"window.scrollBy(0, {distance})")
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(config.url_collector.scroll_delay)
     return True

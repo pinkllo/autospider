@@ -30,8 +30,7 @@ class XPathExtractor:
                 # 按优先级排序
                 sorted_candidates = sorted(
                     visit.clicked_element_xpath_candidates,
-                    key=lambda c: c.get("priority", 0),
-                    reverse=True
+                    key=lambda c: c.get("priority", 0)
                 )
                 if sorted_candidates:
                     xpaths.append(sorted_candidates[0]["xpath"])
