@@ -10,19 +10,19 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
-from ..config import config
-from ..types import Action, ActionType, ScrollInfo
+from ...common.config import config
+from ...common.types import Action, ActionType, ScrollInfo
 from .prompt_template import render_template
 
 if TYPE_CHECKING:
-    from ..types import AgentState, SoMSnapshot
+    from ...common.types import AgentState, SoMSnapshot
 
 
 # ============================================================================
 # Prompt 模板文件路径
 # ============================================================================
 
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent / "prompts" / "decider.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "decider.yaml")
 
 
 # ============================================================================

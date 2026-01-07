@@ -12,12 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .config import config
-from .redis_manager import RedisManager
-from .persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
+from ..common.config import config
+from ..common.storage.redis_manager import RedisManager
+from ..common.storage.persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
 from .checkpoint import AdaptiveRateController
-from .checkpoint.resume_strategy import ResumeCoordinator
-from .collector import (
+from ..crawler.checkpoint.resume_strategy import ResumeCoordinator
+from ..extractor.collector import (
     URLCollectorResult,
     LLMDecisionMaker,
     URLExtractor,
@@ -25,12 +25,12 @@ from .collector import (
     PaginationHandler,
     smart_scroll,
 )
-from .som import (
+from ..common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from .llm import LLMDecider
+from ..extractor.llm import LLMDecider
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -494,8 +494,6 @@ class BatchCollector:
             self.progress_persistence.append_urls(self.collected_urls)
     
     def _create_result(self) -> URLCollectorResult:
-        """创建结果对象"""
-        from .collector import URLCollectorResult
         return URLCollectorResult(
             detail_visits=[],
             common_pattern=None,
@@ -506,8 +504,6 @@ class BatchCollector:
         )
     
     def _create_empty_result(self) -> URLCollectorResult:
-        """创建空结果"""
-        from .collector import URLCollectorResult
         return URLCollectorResult(
             detail_visits=[],
             common_pattern=None,

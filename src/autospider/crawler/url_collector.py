@@ -16,23 +16,23 @@ from typing import TYPE_CHECKING
 
 from langchain_openai import ChatOpenAI
 
-from .config import config
-from .redis_manager import RedisManager
-from .llm import LLMDecider
-from .llm.prompt_template import render_template
-from .persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
-from .script_generator import ScriptGenerator
-from .checkpoint import AdaptiveRateController
+from ..common.config import config
+from ..common.storage.redis_manager import RedisManager
+from ..extractor.llm.decider import LLMDecider
+from ..extractor.llm.prompt_template import render_template
+from ..common.storage.persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
+from ..extractor.output.script_generator import ScriptGenerator
+from .checkpoint.rate_controller import AdaptiveRateController
 from .checkpoint.resume_strategy import ResumeCoordinator
-from .som import (
+from ..common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
     format_marks_for_llm,
     inject_and_scan,
 )
-from .mark_id_validator import MarkIdValidator
-from .collector import (
+from ..extractor.validator.mark_id_validator import MarkIdValidator
+from ..extractor.collector import (
     DetailPageVisit,
     URLCollectorResult,
     XPathExtractor,
@@ -45,11 +45,11 @@ from .collector import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from .types import SoMSnapshot
+    from ..common.types import SoMSnapshot
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "url_collector.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "url_collector.yaml")
 
 
 class URLCollector:

@@ -12,11 +12,11 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from playwright.async_api import Page
 
-from ..browser import ActionExecutor
-from ..config import config
+from ...common.browser import ActionExecutor
+from ...common.config import config
 from ..llm import LLMDecider
 from ..llm.planner import TaskPlanner
-from ..som import (
+from ...common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
@@ -24,7 +24,7 @@ from ..som import (
     inject_and_scan,
     set_overlay_visibility,
 )
-from ..types import (
+from ...common.types import (
     Action,
     ActionResult,
     ActionType,

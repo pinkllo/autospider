@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 
-from ..config import config
+from ...common.config import config
 
 
 def get_random_delay(base: float, random_range: float) -> float:

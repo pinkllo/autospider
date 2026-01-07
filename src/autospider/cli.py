@@ -11,10 +11,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .browser import create_browser_session
-from .config import config
-from .graph import run_agent
-from .types import RunInput
+from .common.browser import create_browser_session
+from .common.config import config
+from .extractor.graph import run_agent
+from .common.types import RunInput
 
 app = typer.Typer(
     name="autospider",
@@ -104,7 +104,7 @@ def run_command(
     # 运行 Agent
     try:
         # 延迟导入避免循环依赖
-        from .output import export_script_json, export_script_readable, print_script_summary
+        from .extractor.output import export_script_json, export_script_readable, print_script_summary
         
         script = asyncio.run(_run_agent(run_input))
         
@@ -457,7 +457,7 @@ async def _run_config_generator(
     output_dir: str,
 ):
     """异步运行配置生成器"""
-    from .config_generator import generate_collection_config
+    from .extractor.config_generator import generate_collection_config
     
     async with create_browser_session(headless=headless) as session:
         return await generate_collection_config(
@@ -475,7 +475,7 @@ async def _run_batch_collector(
     output_dir: str,
 ):
     """异步运行批量收集器"""
-    from .batch_collector import batch_collect_urls
+    from .crawler.batch_collector import batch_collect_urls
     
     async with create_browser_session(headless=headless) as session:
         return await batch_collect_urls(
@@ -493,7 +493,7 @@ async def _run_collector(
     output_dir: str,
 ):
     """异步运行 URL 收集器（完整流程）"""
-    from .url_collector import collect_detail_urls
+    from .crawler.url_collector import collect_detail_urls
     
     async with create_browser_session(headless=headless) as session:
         return await collect_detail_urls(

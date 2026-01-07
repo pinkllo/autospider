@@ -7,8 +7,8 @@ import json
 import re
 from typing import TYPE_CHECKING
 
-from ..config import config
-from ..som import clear_overlay, inject_and_scan, capture_screenshot_with_marks
+from ...common.config import config
+from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -375,7 +375,7 @@ class PaginationHandler:
                     print(f"[Pagination] 策略1: 使用提取的 xpath...")
                     
                     # 获取随机延迟
-                    from ..checkpoint.rate_controller import get_random_delay
+                    from ...crawler.checkpoint.rate_controller import get_random_delay
                     delay = get_random_delay(
                         config.url_collector.action_delay_base,
                         config.url_collector.action_delay_random

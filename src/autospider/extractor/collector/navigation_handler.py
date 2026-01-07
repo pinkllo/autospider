@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from ..browser import ActionExecutor
-from ..som import clear_overlay, inject_and_scan, capture_screenshot_with_marks, build_mark_id_to_xpath_map, format_marks_for_llm, set_overlay_visibility
-from ..types import AgentState, RunInput, ActionType
+from ...common.browser import ActionExecutor
+from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks, build_mark_id_to_xpath_map, format_marks_for_llm, set_overlay_visibility
+from ...common.types import AgentState, RunInput, ActionType
 
 if TYPE_CHECKING:
     from pathlib import Path

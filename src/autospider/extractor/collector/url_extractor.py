@@ -6,11 +6,11 @@ import asyncio
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
-from ..som import set_overlay_visibility
+from ...common.som import set_overlay_visibility
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..types import ElementMark, SoMSnapshot
+    from ...common.types import ElementMark, SoMSnapshot
 
 
 class URLExtractor:

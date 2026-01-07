@@ -10,10 +10,10 @@ import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
-from .config import config
+from ...common.config import config
 
 if TYPE_CHECKING:
-    from .types import SoMSnapshot, ElementMark
+    from ...common.types import SoMSnapshot, ElementMark
 
 
 class MarkIdValidationResult:

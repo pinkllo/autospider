@@ -14,11 +14,11 @@ from ..llm.prompt_template import render_template
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..llm import LLMDecider
-    from ..types import SoMSnapshot
+    from ...common.types import SoMSnapshot
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent / "prompts" / "url_collector.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "url_collector.yaml")
 
 
 class LLMDecisionMaker:

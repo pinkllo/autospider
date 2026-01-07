@@ -15,11 +15,11 @@ load_dotenv()
 class LLMConfig(BaseModel):
     """LLM 配置"""
 
-    api_key: str = Field(default_factory=lambda: os.getenv("AIPING_API_KEY", ""))
+    api_key: str = Field(default_factory=lambda: os.getenv("SILICON_API_KEY", ""))
     api_base: str = Field(
-        default_factory=lambda: os.getenv("AIPING_API_BASE", "https://api.siliconflow.cn/v1")
+        default_factory=lambda: os.getenv("SILICON_API_BASE", "https://api.siliconflow.cn/v1")
     )
-    model: str = Field(default_factory=lambda: os.getenv("AIPING_MODEL", "zai-org/GLM-4.6V"))
+    model: str = Field(default_factory=lambda: os.getenv("SILICON_MODEL", "zai-org/GLM-4.6V"))
     # Planner 专用模型配置（可选，默认使用主模型）
     planner_model: str | None = Field(
         default_factory=lambda: os.getenv("SILICON_PLANNER_MODEL", None)
