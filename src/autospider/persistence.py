@@ -265,4 +265,3 @@ class ProgressPersistence:
             self.progress_file.unlink()
         if self.urls_file.exists():
             self.urls_file.unlink()
-

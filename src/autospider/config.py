@@ -61,6 +61,16 @@ class AgentConfig(BaseModel):
     output_dir: str = "output"
 
 
+class RedisConfig(BaseModel):
+    """Redis 配置"""
+    enabled: bool = Field(default_factory=lambda: os.getenv("REDIS_ENABLED", "false").lower() == "true")
+    host: str = Field(default_factory=lambda: os.getenv("REDIS_HOST", "localhost"))
+    port: int = Field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))
+    password: str | None = Field(default_factory=lambda: os.getenv("REDIS_PASSWORD", None))
+    db: int = Field(default_factory=lambda: int(os.getenv("REDIS_DB", "0")))
+    key_prefix: str = Field(default_factory=lambda: os.getenv("REDIS_KEY_PREFIX", "autospider:urls"))
+
+
 class URLCollectorConfig(BaseModel):
     """URL 收集器配置"""
 
@@ -147,6 +157,7 @@ class Config(BaseModel):
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
 
     @classmethod
     def load(cls) -> "Config":

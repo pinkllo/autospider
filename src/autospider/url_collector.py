@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from langchain_openai import ChatOpenAI
 
 from .config import config
+from .redis_manager import RedisManager
 from .llm import LLMDecider
 from .llm.prompt_template import render_template
 from .persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
@@ -107,6 +108,17 @@ class URLCollector:
             temperature=0.1,
             max_tokens=4096,
         )
+        
+        # Redis 管理器（用于持久化 URL）
+        self.redis_manager: RedisManager | None = None
+        if config.redis.enabled:
+            self.redis_manager = RedisManager(
+                host=config.redis.host,
+                port=config.redis.port,
+                password=config.redis.password,
+                db=config.redis.db,
+                key_prefix=config.redis.key_prefix,
+            )
     
     async def run(self) -> URLCollectorResult:
         """运行 URL 收集流程"""
@@ -114,6 +126,14 @@ class URLCollector:
         print(f"[URLCollector] 任务描述: {self.task_description}")
         print(f"[URLCollector] 列表页: {self.list_url}")
         print(f"[URLCollector] 将探索 {self.explore_count} 个详情页")
+        
+        # 0. 连接 Redis 并加载历史 URL（断点续爬）
+        if self.redis_manager:
+            await self.redis_manager.connect()
+            urls = await self.redis_manager.load_urls()
+            if urls:
+                self.collected_urls.extend(urls)
+                self.visited_detail_urls.update(urls)
         
         # 1. 导航到列表页
         print(f"\n[Phase 1] 导航到列表页...")
@@ -208,6 +228,7 @@ class URLCollector:
             screenshots_dir=self.screenshots_dir,
             llm_decision_maker=self.llm_decision_maker,
         )
+
     
     async def _explore_phase(self) -> None:
         """探索阶段：进入多个详情页"""
@@ -493,6 +514,8 @@ class URLCollector:
                             url = urljoin(self.list_url, href)
                             if url not in self.collected_urls:
                                 self.collected_urls.append(url)
+                                if self.redis_manager:
+                                    await self.redis_manager.save_url(url)
                                 print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
                             continue
                     except:
@@ -502,6 +525,8 @@ class URLCollector:
                     url = await self.url_extractor.click_element_and_get_url(locator, self.nav_steps)
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
+                        if self.redis_manager:
+                            await self.redis_manager.save_url(url)
                         print(f"[Collect-XPath] ✓ [{i+1}/{count}] {url[:60]}...")
                 
                 # 如果成功收集到URL，标记为成功
@@ -591,6 +616,8 @@ class URLCollector:
                             url = await self.url_extractor.extract_from_element(candidate, snapshot)
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
+                                if self.redis_manager:
+                                    await self.redis_manager.save_url(url)
                     
                     # 检查是否有新 URL
                     current_count = len(self.collected_urls)
