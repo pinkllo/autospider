@@ -2,11 +2,17 @@
 
 这是一个完全独立的 Redis 管理器，可用于任何 Python 项目。
 支持逻辑删除功能，适用于需要保留删除记录的场景。
+
+存储结构：
+- Key: {key_prefix}:{item_hash}  # 使用 item 的 SHA256 hash
+- Value: Hash {"item": "actual_item", "deleted": "true/false", ...metadata}
+- 优点：消除数据冗余，item 只存储一次
 """
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Any
 import logging
+import hashlib
 
 import redis.asyncio as aioredis
 
@@ -49,6 +55,22 @@ class RedisManager:
         self.client: Redis | None = None
         self.logger = logger or logging.getLogger(__name__)
     
+    def _generate_key_id(self, item: str) -> str:
+        """生成 item 的稳定 hash ID
+        
+        使用 SHA256 的前 16 位作为 key ID，确保：
+        1. 相同 item 总是生成相同 ID
+        2. ID 足够短，节省内存
+        3. 碰撞概率极低
+        
+        Args:
+            item: 数据项标识（如 URL）
+            
+        Returns:
+            16 位十六进制 hash ID
+        """
+        return hashlib.sha256(item.encode('utf-8')).hexdigest()[:16]
+    
     async def connect(self) -> Redis | None:
         """连接到 Redis 服务器
         
@@ -89,12 +111,12 @@ class RedisManager:
     
 
     async def load_items(self) -> set[str]:
-        """从 Redis 加载所有数据项的键
+        """从 Redis 加载所有数据项
         
         加载所有数据项（包括已逻辑删除的），适用于需要避免重复处理的场景。
         
         Returns:
-            所有数据项键的集合
+            所有数据项的集合
         """
         if not self.client:
             return set()
@@ -110,13 +132,14 @@ class RedisManager:
             if not all_keys:
                 return set()
             
-            # 从每个 key 中提取数据项部分（移除前缀）
+            # 从每个 hash 中提取 item 字段
             items = set()
-            prefix_len = len(self.key_prefix) + 1  # +1 for the colon
             
             for key in all_keys:
-                item = key[prefix_len:]
-                items.add(item)
+                # 从 hash 中读取 item 字段
+                item = await self.client.hget(key, "item")
+                if item:
+                    items.add(item)
             
             if items:
                 self.logger.info(f"已加载 {len(items)} 个数据项（包含已删除项）")
@@ -131,7 +154,7 @@ class RedisManager:
         """保存单个数据项到 Redis
         
         Args:
-            item: 数据项的唯一标识
+            item: 数据项的唯一标识（如 URL）
             metadata: 可选的元数据字典，会自动添加 deleted=false 字段
             
         Returns:
@@ -141,9 +164,11 @@ class RedisManager:
             return False
         
         try:
-            key = f"{self.key_prefix}:{item}"
+            # 使用 item 的 hash 作为 key ID
+            key_id = self._generate_key_id(item)
+            key = f"{self.key_prefix}:{key_id}"
             
-            # 构建存储的映射
+            # 构建存储的映射，item 只存储在 hash 中
             data = {"item": item, "deleted": "false"}
             if metadata:
                 data.update(metadata)
@@ -171,7 +196,9 @@ class RedisManager:
             # 使用 pipeline 批量写入
             async with self.client.pipeline() as pipe:
                 for i, item in enumerate(items):
-                    key = f"{self.key_prefix}:{item}"
+                    # 使用 item 的 hash 作为 key ID
+                    key_id = self._generate_key_id(item)
+                    key = f"{self.key_prefix}:{key_id}"
                     
                     data = {"item": item, "deleted": "false"}
                     if metadata_list and i < len(metadata_list):
@@ -199,16 +226,19 @@ class RedisManager:
             return False
         
         try:
-            key = f"{self.key_prefix}:{item}"
+            # 使用 item 的 hash 作为 key ID
+            key_id = self._generate_key_id(item)
+            key = f"{self.key_prefix}:{key_id}"
+            
             # 检查 key 是否存在
             exists = await self.client.exists(key)
             if not exists:
-                self.logger.warning(f"数据项不存在，无法标记删除: {item}")
+                self.logger.warning(f"数据项不存在，无法标记删除: {item[:60]}...")
                 return False
             
             # 更新 deleted 字段
             await self.client.hset(key, "deleted", "true")
-            self.logger.debug(f"已标记数据项为删除: {item}")
+            self.logger.debug(f"已标记数据项为删除: {item[:60]}...")
             return True
         except Exception as e:
             self.logger.error(f"标记删除失败: {e}")
@@ -229,7 +259,9 @@ class RedisManager:
         try:
             async with self.client.pipeline() as pipe:
                 for item in items:
-                    key = f"{self.key_prefix}:{item}"
+                    # 使用 item 的 hash 作为 key ID
+                    key_id = self._generate_key_id(item)
+                    key = f"{self.key_prefix}:{key_id}"
                     pipe.hset(key, "deleted", "true")
                 await pipe.execute()
             
@@ -252,7 +284,9 @@ class RedisManager:
             return False
         
         try:
-            key = f"{self.key_prefix}:{item}"
+            # 使用 item 的 hash 作为 key ID
+            key_id = self._generate_key_id(item)
+            key = f"{self.key_prefix}:{key_id}"
             deleted = await self.client.hget(key, "deleted")
             return deleted == "true"
         except Exception as e:
@@ -291,13 +325,15 @@ class RedisManager:
             item: 数据项标识
             
         Returns:
-            元数据字典，如果不存在返回 None
+            元数据字典（包含 item 字段），如果不存在返回 None
         """
         if not self.client:
             return None
         
         try:
-            key = f"{self.key_prefix}:{item}"
+            # 使用 item 的 hash 作为 key ID
+            key_id = self._generate_key_id(item)
+            key = f"{self.key_prefix}:{key_id}"
             data = await self.client.hgetall(key)
             return data if data else None
         except Exception as e:
