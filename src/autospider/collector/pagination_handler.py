@@ -157,33 +157,43 @@ class PaginationHandler:
     async def extract_jump_widget_xpath(self) -> dict[str, str] | None:
         """
         提取页码跳转控件的 xpath（输入框 + 确定按钮）
-        
+
         用于断点恢复的第二阶段策略（控件直达）
-        
+
+        策略：先用 LLM 视觉识别，失败则使用增强的规则兜底
+
         Returns:
             {"input": "输入框xpath", "button": "按钮xpath"} 或 None
         """
         print(f"[Extract-JumpWidget] 开始提取页码跳转控件...")
-        
+
+        # 策略1: 优先使用 LLM 视觉识别（准确度更高）
+        if self.llm_decision_maker:
+            print(f"[Extract-JumpWidget] 策略1: 使用 LLM 视觉识别...")
+            result = await self._extract_jump_widget_with_llm()
+            if result:
+                print(f"[Extract-JumpWidget] ✓ LLM 识别成功: {result}")
+                self.jump_widget_xpath = result
+                return result
+            print(f"[Extract-JumpWidget] LLM 识别失败，切换到规则兜底...")
+
+        # 策略2: 规则兜底
+        print(f"[Extract-JumpWidget] 策略2: 使用规则识别...")
+        input_xpath = None
+        button_xpath = None
+
         # 常见的页码输入框选择器
         input_selectors = [
-            # 输入框类型
             'input[type="text"][placeholder*="页" i]',
             'input[type="number"][placeholder*="页" i]',
             'input[type="text"][placeholder*="page" i]',
             'input[type="number"][placeholder*="page" i]',
-            
-            # 类名匹配
             'input[class*="page-input"]',
             'input[class*="pageInput"]',
             'input[class*="jump"]',
             'input[class*="go-input"]',
-            
-            # ID匹配
             'input[id*="page" i]',
             'input[id*="jump" i]',
-            
-            # 分页容器中的输入框
             '[class*="pagination"] input[type="text"]',
             '[class*="pagination"] input[type="number"]',
             '[class*="pager"] input[type="text"]',
@@ -191,10 +201,9 @@ class PaginationHandler:
             '.pagination input',
             '.pager input',
         ]
-        
+
         # 常见的确定/跳转按钮选择器
         button_selectors = [
-            # 文本匹配
             'button:has-text("确定")',
             'button:has-text("确认")',
             'button:has-text("跳转")',
@@ -203,27 +212,17 @@ class PaginationHandler:
             'button:has-text("go")',
             'a:has-text("确定")',
             'a:has-text("GO")',
-            
-            # 类名匹配
             'button[class*="page-go"]',
             'button[class*="jump"]',
             'button[class*="confirm"]',
             'a[class*="page-go"]',
-            
-            # ID匹配
             'button[id*="go" i]',
             'button[id*="jump" i]',
             'button[id*="confirm" i]',
-            
-            # 分页容器中的按钮
             '[class*="pagination"] button',
             '[class*="pager"] button',
         ]
-        
-        input_xpath = None
-        button_xpath = None
-        
-        # 尝试找到输入框
+
         for selector in input_selectors:
             try:
                 locator = self.page.locator(selector)
@@ -233,8 +232,7 @@ class PaginationHandler:
                     break
             except:
                 continue
-        
-        # 尝试找到按钮
+
         if input_xpath:
             for selector in button_selectors:
                 try:
@@ -245,7 +243,7 @@ class PaginationHandler:
                         break
                 except:
                     continue
-        
+
         if input_xpath and button_xpath:
             self.jump_widget_xpath = {"input": input_xpath, "button": button_xpath}
             print(f"[Extract-JumpWidget] ✓ 成功提取跳转控件")
@@ -253,6 +251,60 @@ class PaginationHandler:
         else:
             print(f"[Extract-JumpWidget] ⚠ 未能提取完整的跳转控件")
             return None
+
+    async def _extract_jump_widget_with_llm(self) -> dict[str, str] | None:
+        """使用 LLM 视觉识别跳转控件并提取 xpath"""
+        if not self.llm_decision_maker:
+            return None
+
+        try:
+            await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(0.5)
+
+            await clear_overlay(self.page)
+            snapshot = await inject_and_scan(self.page)
+            screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
+
+            if self.screenshots_dir:
+                screenshot_path = self.screenshots_dir / "jump_widget_extract.png"
+                screenshot_path.write_bytes(screenshot_bytes)
+
+            data = await self.llm_decision_maker.extract_jump_widget_with_llm(snapshot, screenshot_base64)
+
+            if data and data.get("found"):
+                input_mark_id = data.get("input_mark_id")
+                button_mark_id = data.get("button_mark_id")
+
+                print(f"[Extract-JumpWidget-LLM] 找到输入框 [{input_mark_id}], 按钮 [{button_mark_id}]")
+
+                input_xpath = None
+                button_xpath = None
+
+                if input_mark_id:
+                    input_mark_id_str = str(input_mark_id)
+                    element = next((m for m in snapshot.marks if m.mark_id == int(input_mark_id_str)), None)
+                    if element and element.xpath_candidates:
+                        sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
+                        input_xpath = sorted_candidates[0].xpath if sorted_candidates else None
+
+                if button_mark_id:
+                    button_mark_id_str = str(button_mark_id)
+                    element = next((m for m in snapshot.marks if m.mark_id == int(button_mark_id_str)), None)
+                    if element and element.xpath_candidates:
+                        sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
+                        button_xpath = sorted_candidates[0].xpath if sorted_candidates else None
+
+                if input_xpath and button_xpath:
+                    return {"input": input_xpath, "button": button_xpath}
+                elif input_xpath:
+                    print(f"[Extract-JumpWidget-LLM] 找到输入框但未找到按钮的 xpath")
+                    return None
+            else:
+                print(f"[Extract-JumpWidget-LLM] 未找到跳转控件: {data.get('reasoning', '') if data else ''}")
+        except Exception as e:
+            print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
+
+        return None
     
     async def extract_pagination_xpath_with_llm(self) -> str | None:
         """使用 LLM 视觉识别分页控件并提取 xpath"""
@@ -260,7 +312,9 @@ class PaginationHandler:
             return None
         
         try:
-            # 截图
+            await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(0.5)
+
             await clear_overlay(self.page)
             snapshot = await inject_and_scan(self.page)
             screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)

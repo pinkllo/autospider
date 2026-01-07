@@ -119,6 +119,40 @@ class LLMDecisionMaker:
             traceback.print_exc()
         
         return None
+
+    async def extract_jump_widget_with_llm(self, snapshot: "SoMSnapshot", screenshot_base64: str) -> dict | None:
+        """使用 LLM 视觉识别页码跳转控件（输入框 + 确定按钮）"""
+
+        system_prompt = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="jump_widget_llm_system_prompt",
+        )
+
+        user_message = render_template(
+            PROMPT_TEMPLATE_PATH,
+            section="jump_widget_llm_user_message",
+        )
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=[
+                {"type": "text", "text": user_message},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
+            ]),
+        ]
+
+        try:
+            response = await self.decider.llm.ainvoke(messages)
+            response_text = response.content
+
+            json_match = re.search(r'\{[\s\S]*\}', response_text)
+            if json_match:
+                data = json.loads(json_match.group())
+                return data
+        except Exception as e:
+            print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
+
+        return None
     
     async def extract_pagination_with_llm(self, snapshot: "SoMSnapshot", screenshot_base64: str) -> dict | None:
         """使用 LLM 视觉识别分页控件并提取 xpath"""
