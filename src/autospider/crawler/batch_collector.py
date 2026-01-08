@@ -121,14 +121,19 @@ class BatchCollector(BaseCollector):
         print(f"  - 导航步骤: {len(self.nav_steps)} 个")
         print(f"  - 公共 XPath: {'已配置' if self.common_detail_xpath else '未配置'}")
         
-        # 0.5 连接 Redis 并加载历史 URL（使用基类方法）
-        await self._load_previous_urls()
-        
-        # 0.6 加载历史进度
+        # 0.5 加载历史进度
         previous_progress = self.progress_persistence.load_progress()
         target_page_num = 1
         is_resume = False
         
+        if previous_progress and not self._is_progress_compatible(previous_progress):
+            print(f"\n[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
+            previous_progress = None
+        
+        # 0.6 连接 Redis / 本地文件并加载历史 URL（使用基类方法）
+        if previous_progress or not self.progress_persistence.has_checkpoint():
+            await self._load_previous_urls()
+
         if previous_progress and previous_progress.current_page_num > 1:
             print(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
             print(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")

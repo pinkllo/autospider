@@ -109,19 +109,41 @@ class URLCollector(BaseCollector):
         print(f"[URLCollector] 列表页: {self.list_url}")
         print(f"[URLCollector] 将探索 {self.explore_count} 个详情页")
         
-        # 0. 连接 Redis 并加载历史 URL（断点续爬）
-        if self.redis_manager:
-            await self.redis_manager.connect()
-            urls = await self.redis_manager.load_items()
-            if urls:
-                self.collected_urls.extend(urls)
-                self.visited_detail_urls.update(urls)
-        
         # 0.5 加载历史进度和配置信息
         previous_progress = self.progress_persistence.load_progress()
         previous_config = self.config_persistence.load()
         target_page_num = 1  # 默认从第1页开始
         is_resume = False  # 是否是断点恢复
+        config_mismatch = False
+        progress_mismatch = False
+
+        # 校验历史配置是否与当前任务匹配
+        if previous_config:
+            if previous_config.list_url and previous_config.list_url != self.list_url:
+                config_mismatch = True
+            if (
+                previous_config.task_description
+                and previous_config.task_description != self.task_description
+            ):
+                config_mismatch = True
+            if config_mismatch:
+                print(
+                    f"[断点恢复] 历史配置与当前任务不匹配，忽略旧配置与进度"
+                )
+                previous_config = None
+                previous_progress = None
+
+        # 校验历史进度是否与当前任务匹配
+        if previous_progress and not self._is_progress_compatible(previous_progress):
+            print(f"[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
+            previous_progress = None
+            progress_mismatch = True
+
+        # 0.6 连接 Redis / 本地文件并加载历史 URL（断点续爬）
+        if not config_mismatch and not progress_mismatch:
+            await self._load_previous_urls()
+            if self.collected_urls:
+                self.visited_detail_urls.update(self.collected_urls)
         
         if previous_progress and previous_progress.current_page_num > 1:
             print(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
@@ -389,6 +411,8 @@ class URLCollector(BaseCollector):
             print(f"[Explore] 返回列表页...")
             await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(1)
+            if self.nav_steps:
+                await self.navigation_handler.replay_nav_steps(self.nav_steps)
             return True
         return False
     
@@ -432,7 +456,9 @@ class URLCollector(BaseCollector):
                 break
             
             print(f"[Explore] 处理候选 {i}/{len(candidates)}: [{candidate.mark_id}] {candidate.text[:30]}...")
-            url = await self.url_extractor.extract_from_element(candidate, snapshot)
+            url = await self.url_extractor.extract_from_element(
+                candidate, snapshot, nav_steps=self.nav_steps
+            )
             
             if url and url not in self.visited_detail_urls:
                 visit = DetailPageVisit(
@@ -488,7 +514,9 @@ class URLCollector(BaseCollector):
         
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
         if element:
-            url = await self.url_extractor.click_and_get_url(element)
+            url = await self.url_extractor.click_and_get_url(
+                element, nav_steps=self.nav_steps
+            )
             if url and url not in self.visited_detail_urls:
                 visit = DetailPageVisit(
                     list_page_url=self.list_url,
@@ -692,13 +720,28 @@ class URLCollector(BaseCollector):
                     llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
                     
                     if llm_decision and llm_decision.get("action") == "select_detail_links":
-                        mark_ids = llm_decision.get("mark_ids", [])
+                        mark_id_text_map = llm_decision.get("mark_id_text_map", {})
+                        old_mark_ids = llm_decision.get("mark_ids", [])
+                        mark_ids: list[int] = []
+
+                        if mark_id_text_map:
+                            if config.url_collector.validate_mark_id:
+                                mark_ids = self._validate_mark_ids(
+                                    mark_id_text_map, snapshot, screenshot_base64
+                                )
+                            else:
+                                mark_ids = [int(k) for k in mark_id_text_map.keys()]
+                        elif old_mark_ids:
+                            mark_ids = old_mark_ids
+
                         print(f"[Collect] LLM 识别到 {len(mark_ids)} 个详情链接")
                         
                         candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
                         
                         for candidate in candidates:
-                            url = await self.url_extractor.extract_from_element(candidate, snapshot)
+                            url = await self.url_extractor.extract_from_element(
+                                candidate, snapshot, nav_steps=self.nav_steps
+                            )
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
                                 if self.redis_manager:
@@ -761,6 +804,8 @@ class URLCollector(BaseCollector):
         """保存收集进度"""
         progress = CollectionProgress(
             status="RUNNING",
+            list_url=self.list_url,
+            task_description=self.task_description,
             current_page_num=self.pagination_handler.current_page_num if self.pagination_handler else 1,
             collected_count=len(self.collected_urls),
             backoff_level=self.rate_controller.current_level,
