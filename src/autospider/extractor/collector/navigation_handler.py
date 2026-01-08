@@ -162,6 +162,11 @@ class NavigationHandler:
                     "target_text": action.target_text,
                     "thinking": action.thinking,
                     "success": result.success,
+                    "text": action.text,
+                    "key": action.key,
+                    "url": action.url,
+                    "scroll_delta": action.scroll_delta,
+                    "timeout_ms": action.timeout_ms,
                 }
                 
                 # 如果有点击元素，添加详细信息
@@ -194,40 +199,142 @@ class NavigationHandler:
             print(f"[Nav] ⚠ 导航阶段达到最大步数 {self.max_nav_steps}，继续探索")
             return False
     
-    async def replay_nav_steps(self, nav_steps: list[dict] = None) -> None:
+    async def replay_nav_steps(self, nav_steps: list[dict] = None) -> bool:
         """重放导航步骤（使用记录的 xpath）"""
         steps = nav_steps if nav_steps is not None else self.nav_steps
+        if not steps:
+            return False
+        
+        all_success = True
+        executed_steps = 0
         
         for step in steps:
             if not step.get("success"):
                 continue
             
-            action_type = step.get("action")
-            if action_type not in ["click", "CLICK"]:
-                continue
+            action_type = (step.get("action") or "").lower()
+            step_success = True
             
-            # 获取 xpath（优先使用 priority 最小的）
-            xpath_candidates = step.get("clicked_element_xpath_candidates", [])
-            if not xpath_candidates:
-                continue
-            
-            # 按 priority 排序，取第一个
-            xpath_candidates_sorted = sorted(xpath_candidates, key=lambda x: x.get("priority", 99))
-            xpath = xpath_candidates_sorted[0].get("xpath") if xpath_candidates_sorted else None
-            
-            if not xpath:
-                continue
-            
-            target_text = step.get("target_text") or step.get("clicked_element_text", "")
-            print(f"[Replay] 点击: {target_text[:30]}... (xpath: {xpath[:50]}...)")
-            
-            try:
-                locator = self.page.locator(f"xpath={xpath}")
-                if await locator.count() > 0:
-                    await locator.first.click(timeout=5000)
-                    await asyncio.sleep(1)
-                    print(f"[Replay] ✓ 点击成功")
+            if action_type in ["click", "type"]:
+                xpath_candidates = step.get("clicked_element_xpath_candidates", [])
+                if not xpath_candidates:
+                    step_success = False
                 else:
-                    print(f"[Replay] ⚠ 元素未找到，跳过")
-            except Exception as e:
-                print(f"[Replay] ✗ 点击失败: {e}")
+                    xpath_candidates_sorted = sorted(
+                        xpath_candidates, key=lambda x: x.get("priority", 99)
+                    )
+                    xpath = (
+                        xpath_candidates_sorted[0].get("xpath")
+                        if xpath_candidates_sorted
+                        else None
+                    )
+                    if not xpath:
+                        step_success = False
+                    else:
+                        try:
+                            locator = self.page.locator(f"xpath={xpath}")
+                            if await locator.count() == 0:
+                                step_success = False
+                            else:
+                                if action_type == "click":
+                                    target_text = step.get("target_text") or step.get(
+                                        "clicked_element_text", ""
+                                    )
+                                    print(
+                                        f"[Replay] 点击: {target_text[:30]}... (xpath: {xpath[:50]}...)"
+                                    )
+                                    await locator.first.click(timeout=5000)
+                                    await asyncio.sleep(1)
+                                elif action_type == "type":
+                                    text = step.get("text") or ""
+                                    print(
+                                        f"[Replay] 输入: {text[:30]}... (xpath: {xpath[:50]}...)"
+                                    )
+                                    await locator.first.click(timeout=5000)
+                                    await locator.first.fill(text, timeout=5000)
+                                    await asyncio.sleep(0.5)
+                        except Exception as e:
+                            print(f"[Replay] ✗ 执行失败: {e}")
+                            step_success = False
+            elif action_type == "press":
+                key = step.get("key") or "Enter"
+                xpath_candidates = step.get("clicked_element_xpath_candidates", [])
+                if xpath_candidates:
+                    xpath_candidates_sorted = sorted(
+                        xpath_candidates, key=lambda x: x.get("priority", 99)
+                    )
+                    xpath = (
+                        xpath_candidates_sorted[0].get("xpath")
+                        if xpath_candidates_sorted
+                        else None
+                    )
+                    if xpath:
+                        try:
+                            locator = self.page.locator(f"xpath={xpath}")
+                            if await locator.count() > 0:
+                                print(
+                                    f"[Replay] 按键: {key} (xpath: {xpath[:50]}...)"
+                                )
+                                await locator.first.press(key)
+                                await asyncio.sleep(0.5)
+                            else:
+                                step_success = False
+                        except Exception as e:
+                            print(f"[Replay] ✗ 按键失败: {e}")
+                            step_success = False
+                    else:
+                        step_success = False
+                else:
+                    try:
+                        print(f"[Replay] 按键: {key} (全局)")
+                        await self.page.keyboard.press(key)
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"[Replay] ✗ 按键失败: {e}")
+                        step_success = False
+            elif action_type == "scroll":
+                delta = step.get("scroll_delta") or (0, 300)
+                try:
+                    print(f"[Replay] 滚动: {delta}")
+                    await self.page.mouse.wheel(delta[0], delta[1])
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    print(f"[Replay] ✗ 滚动失败: {e}")
+                    step_success = False
+            elif action_type == "navigate":
+                url = step.get("url")
+                if not url:
+                    step_success = False
+                else:
+                    try:
+                        print(f"[Replay] 导航: {url}")
+                        await self.page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"[Replay] ✗ 导航失败: {e}")
+                        step_success = False
+            elif action_type == "wait":
+                timeout_ms = step.get("timeout_ms") or 2000
+                try:
+                    print(f"[Replay] 等待: {timeout_ms}ms")
+                    await self.page.wait_for_load_state(
+                        "networkidle", timeout=timeout_ms
+                    )
+                except Exception:
+                    pass
+            elif action_type == "go_back":
+                try:
+                    print(f"[Replay] 返回上一页")
+                    await self.page.go_back(wait_until="domcontentloaded", timeout=10000)
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"[Replay] ✗ 返回失败: {e}")
+                    step_success = False
+            else:
+                continue
+            
+            executed_steps += 1
+            if not step_success:
+                all_success = False
+
+        return executed_steps > 0 and all_success

@@ -1,39 +1,21 @@
-# Crawler 模块
+# Checkpoint 子模块
 
-Crawler 模块是 AutoSpider 的核心爬取引擎，负责执行批量网页数据采集任务。该模块集成了 URL 收集、批量爬取、断点续传、速率控制等关键功能，支持从列表页自动发现并导航到详情页，实现全流程自动化的数据采集。
+Checkpoint 子模块实现断点续传系统，提供自适应速率控制和恢复策略，确保长时间运行的爬取任务能够从中断点恢复。
 
 ---
 
-## 模块结构
+## 📁 模块结构
 
 ```
-crawler/
-├── __init__.py          # 模块入口，导出 BatchCollector 和 URLCollector
-├── url_collector.py     # URL 收集器，负责从列表页发现详情页 URL
-├── batch_collector.py   # 批量爬取控制器，协调整个爬取流程
-└── checkpoint/          # 断点续传系统
-    ├── __init__.py      # 检查点模块导出
-    ├── rate_controller.py   # 自适应速率控制器
-    └── resume_strategy.py   # 断点恢复策略
+src/autospider/crawler/checkpoint/
+├── __init__.py              # 模块导出
+├── rate_controller.py       # 自适应速率控制器
+└── resume_strategy.py       # 断点恢复策略
 ```
 
 ---
 
 ## 📑 函数目录
-
-### 🔍 URL 收集器 (url_collector.py)
-- `URLCollector` - URL 收集器主类
-- `run()` - 执行 URL 收集任务
-- `explore()` - 探索阶段，访问详情页样本
-- `collect()` - 收集阶段，批量收集 URL
-- `analyze()` - 分析阶段，提取公共 XPath 模式
-
-### 📦 批量爬取控制器 (batch_collector.py)
-- `BatchCollector` - 批量爬取控制器主类
-- `collect_from_config()` - 从配置文件加载并执行爬取
-- `collect()` - 执行批量爬取任务
-- `save_progress()` - 保存爬取进度
-- `load_progress()` - 加载爬取进度
 
 ### ⚡ 自适应速率控制器 (rate_controller.py)
 - `AdaptiveRateController` - 速率控制器主类
@@ -45,7 +27,7 @@ crawler/
 
 ### 🔄 断点恢复策略 (resume_strategy.py)
 - `ResumeStrategy` - 恢复策略基类
-- `URLPatternStrategy` - URL 规律爆破策略
+- `URLPatternStrategy` - URL规律爆破策略
 - `WidgetJumpStrategy` - 控件直达策略
 - `SmartSkipStrategy` - 智能跳过策略
 - `ResumeCoordinator` - 恢复策略协调器
@@ -54,84 +36,63 @@ crawler/
 
 ## 🚀 核心功能
 
-### URLCollector
+### 自适应速率控制
 
-URLCollector 是负责从列表页收集详情页 URL 的专用组件。它通过多阶段探索策略，自动发现并导航到目标详情页，同时进行 URL 去重和持久化存储。
-
-```python
-from autospider import URLCollector
-
-collector = URLCollector(
-    list_url="https://example.com/products",
-    task_description="采集商品详情页",
-    explore_count=5,
-    common_detail_xpath=None,
-    redis_manager=None
-)
-
-result = await collector.run()
-print(f"收集到 {len(result.detail_urls)} 个详情页 URL")
-```
-
-### BatchCollector
-
-BatchCollector 是批量爬取的主控制器，负责协调整个采集流程的各个环节。
+AdaptiveRateController 实现智能速率控制算法，根据网站反爬情况自动调整请求频率。
 
 ```python
-from autospider import BatchCollector
+from autospider.crawler.checkpoint.rate_controller import AdaptiveRateController
 
-collector = BatchCollector(
-    config_path="./config.yaml",
-    redis_manager=redis_manager
-)
-
-result = await collector.collect_from_config()
-```
-
-### AdaptiveRateController
-
-AdaptiveRateController 实现了自适应速率控制算法，能够根据网站的反爬策略自动调整请求频率。
-
-```python
-from autospider.checkpoint import AdaptiveRateController
-
+# 创建速率控制器
 controller = AdaptiveRateController(
-    base_delay=1.0,      # 基础延迟 1 秒
-    backoff_factor=1.5,  # 退避因子 1.5
-    max_level=5,         # 最大降速等级 5
-    credit_recovery_pages=10,  # 每 10 个成功请求恢复一级
-    initial_level=0      # 初始等级 0
+    base_delay=1.0,          # 基础延迟1秒
+    backoff_factor=1.5,      # 退避因子1.5
+    max_level=5,             # 最大降速等级5
+    credit_recovery_pages=10, # 每10个成功请求恢复一级
+    initial_level=0          # 初始等级0
 )
 
-# 获取当前延迟
+# 获取当前延迟时间
 delay = controller.get_delay()
+print(f"当前延迟: {delay}秒")
 
-# 触发惩罚（遇到反爬）
-controller.apply_penalty()
+# 模拟请求过程
+for page_num in range(1, 21):
+    # 获取延迟并等待
+    current_delay = controller.get_delay()
+    print(f"第{page_num}页 - 延迟: {current_delay:.2f}秒")
 
-# 记录成功
-controller.record_success()
+    # 模拟请求（假设第5页遇到反爬）
+    if page_num == 5:
+        print("遇到反爬机制，应用惩罚")
+        controller.apply_penalty()
+    else:
+        # 记录成功请求
+        controller.record_success()
 
-# 从检查点恢复
-controller.set_level(3)
+    # 等待延迟时间
+    await asyncio.sleep(current_delay)
+
+print(f"最终降速等级: {controller.current_level}")
 ```
 
-### ResumeStrategy
+### 断点恢复策略
 
-ResumeStrategy 定义了断点恢复的策略接口，目前提供了三种具体的恢复策略实现。
+提供多种恢复策略，根据网站特点选择最合适的恢复方式。
 
 ```python
-from autospider.checkpoint import (
+from autospider.crawler.checkpoint.resume_strategy import (
     ResumeCoordinator,
     URLPatternStrategy,
     WidgetJumpStrategy,
     SmartSkipStrategy
 )
 
-# 使用 URL 规律爆破策略
-strategy = URLPatternStrategy(list_url="https://example.com/list?page=1")
+# 创建各种恢复策略
+url_strategy = URLPatternStrategy(
+    list_url="https://example.com/products?page=1"
+)
 
-# 使用控件直达策略
 widget_strategy = WidgetJumpStrategy(
     jump_widget_xpath={
         "input": "input.page-input",
@@ -139,16 +100,31 @@ widget_strategy = WidgetJumpStrategy(
     }
 )
 
-# 使用智能跳过策略
 smart_strategy = SmartSkipStrategy(
-    list_url="https://example.com/list",
+    list_url="https://example.com/products",
     item_xpath="//div[@class='product-item']",
-    nav_steps=[...]
+    nav_steps=[
+        {"action": "scroll", "direction": "down", "times": 2},
+        {"action": "click", "selector": "button.next-page"}
+    ]
 )
 
-# 协调器自动选择最佳策略
-coordinator = ResumeCoordinator([strategy, widget_strategy, smart_strategy])
-result = await coordinator.try_resume(page, target_page=50)
+# 创建协调器
+coordinator = ResumeCoordinator([url_strategy, widget_strategy, smart_strategy])
+
+# 尝试从第50页恢复
+current_page = 10
+target_page = 50
+
+result = await coordinator.try_resume(current_page, target_page)
+
+if result.success:
+    print(f"成功恢复到第{result.resumed_page}页")
+    print(f"使用的策略: {result.strategy_used}")
+    print(f"跳过的页数: {result.pages_skipped}")
+else:
+    print("恢复失败，需要手动处理")
+    print(f"失败原因: {result.error_message}")
 ```
 
 ---
@@ -178,14 +154,14 @@ current_delay = base_delay * (backoff_factor ^ current_level)
 
 系统自动选择最适合的恢复策略：
 
-1. **URLPatternStrategy**：适用于 URL 包含页码参数的网站
-   - 直接构造目标页 URL
+1. **URLPatternStrategy**：适用于URL包含页码参数的网站
+   - 直接构造目标页URL
    - 快速跳转，效率最高
-   - 需要 URL 规律明显
+   - 需要URL规律明显
 
 2. **WidgetJumpStrategy**：适用于使用页码输入控件的网站
    - 模拟输入页码并点击确定
-   - 适用于现代 Web 应用
+   - 适用于现代Web应用
    - 需要控件定位准确
 
 3. **SmartSkipStrategy**：兜底方案，通用性最强
@@ -217,8 +193,8 @@ if saved_state:
 
 ```python
 import asyncio
-from autospider.checkpoint.rate_controller import AdaptiveRateController
-from autospider.checkpoint.resume_strategy import ResumeCoordinator
+from autospider.crawler.checkpoint.rate_controller import AdaptiveRateController
+from autospider.crawler.checkpoint.resume_strategy import ResumeCoordinator
 from autospider.common.storage.redis_manager import RedisManager
 
 class CrawlTaskManager:
@@ -327,7 +303,7 @@ class CrawlTaskManager:
             current_page += 1
 
         # 任务完成，清理进度数据
-        await self.storage.mark_as_deleted(f"task:{self.task_id}:progress")
+        await self.storage.delete(f"task:{self.task_id}:progress")
         print(f"任务完成! 共收集 {len(collected_urls)} 个URL")
 
         return collected_urls
@@ -394,7 +370,7 @@ asyncio.run(main())
    - 考虑网站的实际反爬强度
 
 2. **恢复策略失败**
-   - 检查 URL 模式是否正确
+   - 检查URL模式是否正确
    - 验证控件定位准确性
    - 考虑使用兜底策略
 

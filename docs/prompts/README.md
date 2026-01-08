@@ -1,219 +1,371 @@
 # Prompts 模块
 
-Prompts 模块是 AutoSpider 的提示词管理中枢，承载了系统中所有与大语言模型交互的 Prompt 模板。这些模板经过精心设计，引导 LLM 完成页面导航决策、任务规划、URL 提取、脚本生成等关键任务。Prompts 模块的设计理念是将领域知识结构化地嵌入到提示词中，使 LLM 能够像人类专家一样理解和执行网页自动化任务。
+Prompts 模块是 AutoSpider 的提示词管理中枢，包含所有与大语言模型交互的 Prompt 模板。该模块采用模块化设计，每个功能模块都有独立的 Prompt 文件夹，便于管理和维护。
 
-一个优秀的 Prompt 模板不仅要清晰地表达任务要求，还要包含足够的上下文信息、决策约束和输出格式规范。AutoSpider 的 Prompt 模板经过大量实验调优，针对不同的任务场景采用了差异化的策略：决策类 Prompt 强调简洁高效，减少思考时间以提升响应速度；规划类 Prompt 注重逻辑完整性，确保执行步骤的连贯性；生成类 Prompt 则强调代码规范和可执行性，确保输出的脚本能够直接运行。
+---
 
-Prompts 模块采用 YAML 格式存储模板文件，这种格式具有良好的可读性和结构化表达能力。每个模板文件都可以包含多个 section（如 system_prompt、user_prompt），每个 section 都可以使用 Jinja2 模板语法定义变量占位符。运行时，prompts 模块会加载对应的模板文件，填充变量后传递给 LLM。这种设计使得模板的管理和更新变得简单直观，无需修改代码即可调整 LLM 的行为模式。
-
-## 模块结构
+## 📁 模块结构
 
 ```
 prompts/
-├── decider.yaml          # 视觉 Agent 决策 Prompt
-├── planner.yaml          # 任务规划 Prompt
-├── url_collector.yaml    # URL 收集 Prompt
-└── script_generator.yaml # 脚本生成 Prompt
+├── __init__.py              # 模块导出
+├── agent/                   # Agent 相关 Prompt
+│   ├── __init__.py
+│   ├── agent.yaml           # Agent 决策 Prompt
+│   └── action.yaml         # 动作执行 Prompt
+├── crawler/                 # 爬虫相关 Prompt
+│   ├── __init__.py
+│   ├── url_collector.yaml   # URL 收集 Prompt
+│   └── batch_collector.yaml # 批量爬取 Prompt
+├── extractor/               # 提取器相关 Prompt
+│   ├── __init__.py
+│   ├── config_generator.yaml # 配置生成 Prompt
+│   └── rule_generator.yaml  # 规则生成 Prompt
+└── utils/                   # 工具 Prompt
+    ├── __init__.py
+    └── xpath_generator.yaml # XPath 生成 Prompt
 ```
 
-## 核心概念
+---
 
-### Prompt 结构
+## 📑 函数目录
 
-每个 Prompt 模板文件由一个或多个 section 组成，最常见的结构包含 system_prompt 和 user_prompt 两个部分。system_prompt 定义了 LLM 的角色定位和行为准则，这部分内容通常比较稳定，不会随每次请求而变化。user_prompt 则包含了具体的任务信息和变量占位符，每次请求都需要动态填充。这种分离设计使得系统提示能够持续塑造 LLM 的行为风格，而用户提示则提供任务特定的输入。
+### 🎯 Agent Prompt (agent/)
+- `agent.yaml` - Agent 决策 Prompt，用于生成下一步动作
+- `action.yaml` - 动作执行 Prompt，用于执行具体动作
 
-以 decider.yaml 为例，system_prompt 明确了 LLM 作为「网页自动化 Agent」的角色定位，定义了动作类型、输出格式和核心规则。user_prompt 则根据当前执行上下文动态生成，包含历史截图信息、当前页面状态和任务目标。这种结构确保了 LLM 既能保持一致的行为风格，又能灵活应对不同的任务场景。
+### 🔍 Crawler Prompt (crawler/)
+- `url_collector.yaml` - URL 收集 Prompt，用于发现详情页 URL
+- `batch_collector.yaml` - 批量爬取 Prompt，用于批量数据采集
 
-### 变量渲染
+### 📊 Extractor Prompt (extractor/)
+- `config_generator.yaml` - 配置生成 Prompt，用于生成爬虫配置
+- `rule_generator.yaml` - 规则生成 Prompt，用于生成提取规则
 
-Prompts 模块使用 Jinja2 模板引擎进行变量渲染，支持完整的模板语法，包括变量替换、条件判断、循环遍历等高级特性。变量占位符使用双花括号语法，如 {{start_url}}、{{task}} 等。在渲染时，调用方需要提供一个字典，将变量名映射到实际值。模板引擎会递归处理嵌套变量，确保所有占位符都被正确替换。
+### 🛠️ Utils Prompt (utils/)
+- `xpath_generator.yaml` - XPath 生成 Prompt，用于生成 XPath 选择器
 
-如果运行环境未安装 Jinja2，模块会自动降级到简单的字符串替换模式，只支持最基本的 {{variable}} 替换。这种优雅降级设计确保了模块在各种环境下的可用性，尽管降级模式不支持复杂的模板语法，但对于大多数场景已经足够。
+---
 
-### 输出格式约束
+## 🚀 核心功能
 
-为了便于解析 LLM 的响应，所有 Prompt 模板都对输出格式做了严格约束。decider.yaml 要求输出严格的 JSON 格式，不要使用 markdown 代码块包裹。planner.yaml 同样要求 JSON 格式输出，并明确定义了各个字段的含义和结构。这种格式约束不仅降低了解析难度，还减少了 LLM 输出格式错误导致的解析失败。
+### Prompt 模板系统
 
-在设计输出格式时，需要平衡表达力和解析难度。过复杂的输出结构会增加 LLM 的出错概率，过简单的结构则可能无法传递足够的决策信息。AutoSpider 的 Prompt 设计遵循「最小够用」原则，只包含完成任务所必需的信息字段，并在模板中提供清晰的示例和说明。
+使用 YAML 格式存储 Prompt 模板，支持多部分定义和变量替换。
 
-## 核心模板详解
+```yaml
+# agent.yaml 示例
+system_prompt: |
+  你是一个智能网页自动化助手，负责分析页面并执行操作。
 
-### decider.yaml
+user_prompt: |
+  当前任务: {{task}}
+  页面截图: [截图]
+  标注元素:
+  {% for mark in marks %}
+  - [{{mark.mark_id}}] {{mark.tag}}: {{mark.text}}
+  {% endfor %}
 
-decider.yaml 是视觉 Agent 的核心决策模板，驱动 LLMDecider 组件完成页面导航决策。该模板的设计目标是让 LLM 能够像人类一样浏览网页：查看当前页面内容，理解任务目标，决定下一步操作，然后观察结果并迭代调整。
+  请分析页面并决定下一步操作。
 
-system_prompt 部分定义了完整的决策框架。首先说明 LLM 的角色是「网页自动化 Agent」，会收到多张截图作为输入。历史截图帮助理解之前的操作上下文，当前截图则用于决策下一步。接着详细说明了可用的动作类型：click（点击元素）、type（输入文本）、press（按键）、scroll（滚动）、extract（提取文本）、go_back（返回上一页）、done（任务完成）、retry（重试）。每种动作都说明了需要的参数，如 click 需要 mark_id 指定目标元素。
+examples: |
+  示例 1:
+  用户: 点击登录按钮
+  助手: {"action": "click", "mark_id": 5, "thinking": "点击登录按钮提交表单"}
+```
 
-模板中最重要的是核心规则部分，用 🚨 符号标记以引起特别关注。这些规则针对常见的决策陷阱提供了明确指导：要求对比历史截图避免重复操作；严禁重复点击同一元素或执行相同滚动；页面已完整滚动时不要再滚；检测到循环时必须改变策略；找不到目标时尝试其他方向。这些规则凝聚了实际运行中的经验教训，是确保 Agent 高效运行的关键。
+### Prompt 渲染
+
+使用 Prompt 渲染器加载和渲染模板：
+
+```python
+from autospider.prompts import load_prompt, render_prompt
+
+# 加载 Prompt 模板
+prompt_template = load_prompt("agent/agent.yaml")
+
+# 渲染 Prompt
+rendered_prompt = render_prompt(
+    template=prompt_template,
+    section="user_prompt",
+    variables={
+        "task": "点击登录按钮",
+        "marks": [
+            {"mark_id": 5, "tag": "button", "text": "登录"}
+        ]
+    }
+)
+
+print(f"渲染后的 Prompt: {rendered_prompt}")
+```
+
+---
+
+## 💡 特性说明
+
+### 模块化设计
+
+每个功能模块都有独立的 Prompt 文件夹，便于管理和维护：
+
+```
+prompts/
+├── agent/          # Agent 相关 Prompt
+├── crawler/        # 爬虫相关 Prompt
+├── extractor/      # 提取器相关 Prompt
+└── utils/          # 工具 Prompt
+```
+
+### 多部分定义
+
+支持在单个 YAML 文件中定义多个 Prompt 部分：
 
 ```yaml
 system_prompt: |
-  你是网页自动化Agent。你会收到多张截图：历史截图帮助你理解之前的操作，当前截图用于决策下一步。
+  系统提示词...
 
-  ## 截图说明
-  - **历史截图**：展示之前几步的页面状态，帮助你理解操作上下文
-  - **当前截图**：带有红色边框和数字编号标注的可交互元素，基于此做决策
+user_prompt: |
+  用户提示词...
 
-  ## 动作类型
-  - click: 点击元素 (需要mark_id)
-  - type: 输入文本 (需要mark_id和text)
-  - press: 按键 (需要key，如Enter)
-  - scroll: 滚动 (需要scroll_delta，如[0,300]向下,[0,-300]向上)
-  - extract: 提取文本 (需要mark_id)，当看到目标文本时使用
-  - go_back: 返回上一页（当前详情页找不到目标时使用）
-  - done: 任务完成，已提取到目标内容
-  - retry: 重试
+examples: |
+  示例...
 
-  ## 输出格式 (严格JSON，不要markdown代码块)
-  {"thinking":"思考","action":"click","mark_id":1,"target_text":"按钮文字"}
+output_format: |
+  输出格式...
 ```
 
-user_prompt 部分根据执行上下文动态生成，包含当前任务目标、历史操作记录、当前页面状态等信息。这些信息帮助 LLM 理解「在哪里」以及「要做什么」，从而做出正确的决策。
+### 变量替换
 
-### planner.yaml
-
-planner.yaml 是任务规划器的 Prompt 模板，用于在执行前分析任务并生成详细的执行计划。与 decider.yaml 的实时决策不同，planner.yaml 是一次性的深度分析，目标是制定出清晰、可执行的步骤序列。
-
-system_prompt 将 LLM 定位为「专业的网页自动化任务规划专家」。这个角色定位强调了专业性和系统性，专家级别的规划应该考虑到各种可能的场景和挑战，并为每种情况准备应对策略。
-
-user_prompt 部分使用模板变量填充具体的任务信息：起始 URL、任务描述和目标文本。模板要求 LLM 以 JSON 格式输出任务规划，包含五个关键字段。task_analysis 字段记录 LLM 对任务的理解，这有助于验证系统是否正确理解了用户意图。steps 字段是具体的执行步骤列表，每个步骤都应该对应一个明确的操作。target_description 解释目标文本的含义和可能出现的位置，帮助后续执行阶段理解「找什么」。success_criteria 定义任务完成的判断标准，这是自动终止任务的重要依据。potential_challenges 预判可能遇到的挑战，使执行阶段能够提前准备应对方案。
+支持使用 Jinja2 语法进行变量替换：
 
 ```yaml
 user_prompt: |
-  ## 输入
-  - 起始URL: {{start_url}}
-  - 任务描述: {{task}}
-  - 提取目标文本: {{target_text}}（需要在页面中精确匹配此文本）
-
-  ## 输出要求
-  以JSON格式输出任务规划：
-  {
-      "task_analysis": "对任务的理解和分析",
-      "steps": ["步骤1: 具体操作描述", "步骤2: 具体操作描述"],
-      "target_description": "目标文本「{{target_text}}」的含义和可能出现的位置",
-      "success_criteria": "任务完成的判断标准",
-      "potential_challenges": ["可能遇到的挑战1", "挑战2"]
-  }
+  任务: {{task}}
+  URL: {{url}}
+  字段:
+  {% for field in fields %}
+  - {{field}}
+  {% endfor %}
 ```
 
-### url_collector.yaml
+---
 
-url_collector.yaml 是 URL 收集器的 Prompt 模板，负责引导 LLM 完成详情页链接的识别和选择。该模板包含多个子模板，分别用于不同的决策场景。
+## 🔧 使用示例
 
-第一个子模板 ask_llm_decision_system_prompt 定义了 LLM 在 URL 收集过程中的角色和可用工具。这个模板的设计特点是为 LLM 提供了明确的工具调用接口，而不是让 LLM 直接输出操作。LLM 需要根据页面状态选择合适的工具：select_detail_links 用于选择详情链接，current_is_detail 标识当前页面已是详情页，scroll_down 请求向下滚动查看更多。这种工具调用模式比直接输出操作更加结构化，减少了 LLM 理解上的歧义。
+### 加载和渲染 Prompt
 
-select_detail_links 工具的返回格式设计尤为巧妙，要求返回 mark_id 到元素文本的映射。这个设计有双重作用：一是验证 LLM 选择的正确性，因为文本信息可以在标注中核对；二是为后续处理提供可读的信息，便于调试和日志记录。模板还特别强调了「只选择项目标题链接，不要选择筛选标签」，这是针对常见误选问题的专门约束。
+```python
+from autospider.prompts import load_prompt, render_prompt
 
-```yaml
-ask_llm_decision_system_prompt: |
-  你是一个网页爬虫专家。你需要帮助用户获取详情页的 URL。
+async def use_prompt_template():
+    """使用 Prompt 模板"""
 
-  你有以下工具可以使用：
+    # 加载 Agent Prompt
+    agent_prompt = load_prompt("agent/agent.yaml")
 
-  1. **select_detail_links**: 选择页面上的详情链接
-     - 只选择列表中**项目标题/公告标题**类的链接
-     - 不要选择：筛选标签、分页按钮、导航菜单、"查看更多"等
-     - 返回格式：
-       ```json
-       {
-         "action": "select_detail_links",
-         "mark_id_text_map": {"40": "某某项目招标公告", "41": "另一个项目"},
-         "reasoning": "选择了2个项目标题链接..."
-       }
-       ```
+    # 渲染用户 Prompt
+    user_prompt = render_prompt(
+        template=agent_prompt,
+        section="user_prompt",
+        variables={
+            "task": "点击登录按钮",
+            "marks": [
+                {"mark_id": 5, "tag": "button", "text": "登录"},
+                {"mark_id": 6, "tag": "input", "text": "用户名"}
+            ]
+        }
+    )
+
+    # 渲染系统 Prompt
+    system_prompt = render_prompt(
+        template=agent_prompt,
+        section="system_prompt",
+        variables={}
+    )
+
+    print(f"系统 Prompt: {system_prompt}")
+    print(f"用户 Prompt: {user_prompt}")
+
+# 使用示例
+asyncio.run(use_prompt_template())
 ```
 
-第二个子模板 pagination_llm_system_prompt 专门用于识别分页控件。这是一个视觉识别任务，要求 LLM 在截图中准确找到「下一页」按钮。模板详细说明了分页按钮的特征（文本内容、位置、形态）和不应该误选的元素（页码数字、上一页按钮、已禁用按钮等）。特别强调了 mark_id 的识别方法——红色边框右上角的白色数字编号，这是容易出错的地方。
+### 自定义 Prompt
 
-### script_generator.yaml
+```python
+from autospider.prompts import create_prompt, save_prompt
 
-script_generator.yaml 是脚本生成器的 Prompt 模板，用于将探索记录转换为可执行的 Scrapy + scrapy-playwright 爬虫脚本。这个模板的设计目标是一次性生成完整可用的代码，减少后续的修改工作量。
+async def create_custom_prompt():
+    """创建自定义 Prompt"""
 
-system_prompt 首先强调了技术选型的关键点：目标是一个 SPA 网站，必须使用 scrapy-playwright 来渲染 JavaScript。这是一个重要的前置约束，如果忽略了这一点，生成的脚本将无法正确抓取动态内容。接着详细说明了爬虫需要包含的功能模块：scrapy-playwright 配置、start_requests 方法、parse 方法（列表页解析）、parse_detail 方法（详情页解析）、分页处理等。
+    # 创建 Prompt 模板
+    custom_prompt = {
+        "system_prompt": "你是一个专业的数据提取助手",
+        "user_prompt": """
+        任务: {{task}}
+        页面: {{url}}
+        请提取以下字段:
+        {% for field in fields %}
+        - {{field}}
+        {% endfor %}
+        """,
+        "output_format": """
+        请以 JSON 格式输出:
+        {
+          "field1": "value1",
+          "field2": "value2"
+        }
+        """
+    }
 
-模板中包含了关键的代码示例，展示了如何在 parse 方法中执行点击筛选操作、提取链接、处理滚动加载等常见场景。这些示例不仅帮助 LLM 理解期望的代码风格，也为生成的脚本提供了参考实现。
+    # 保存 Prompt
+    save_prompt("custom/custom_extractor.yaml", custom_prompt)
+
+    print("自定义 Prompt 已保存")
+
+# 使用示例
+asyncio.run(create_custom_prompt())
+```
+
+---
+
+## 📝 最佳实践
+
+### Prompt 设计
+
+1. **清晰明确**：使用清晰、具体的语言
+2. **结构化输出**：要求 LLM 输出结构化数据
+3. **示例引导**：提供示例引导 LLM 理解
+4. **约束条件**：明确说明约束条件
+
+### 模板管理
+
+1. **模块化**：按功能模块组织 Prompt
+2. **命名规范**：使用清晰的文件命名
+3. **版本控制**：使用版本控制系统管理 Prompt
+4. **文档说明**：为每个 Prompt 添加说明文档
+
+### 变量设计
+
+1. **一致性**：使用一致的变量命名
+2. **完整性**：确保所有必需变量都有定义
+3. **默认值**：为可选变量提供默认值
+4. **类型检查**：验证变量类型是否正确
+
+---
+
+## 🔍 故障排除
+
+### 常见问题
+
+1. **Prompt 加载失败**
+   - 检查文件路径是否正确
+   - 验证 YAML 格式是否正确
+   - 确认文件是否存在
+
+2. **Prompt 渲染失败**
+   - 检查变量是否完整
+   - 验证 Jinja2 语法是否正确
+   - 确认模板格式是否正确
+
+3. **LLM 响应不符合预期**
+   - 检查 Prompt 是否清晰明确
+   - 验证示例是否正确
+   - 调整 Prompt 描述
+
+### 调试技巧
+
+```python
+# 启用详细日志
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# 检查 Prompt 模板
+print(f"Prompt 模板: {prompt_template}")
+print(f"Prompt 部分: {prompt_template.keys()}")
+
+# 检查渲染结果
+print(f"渲染后的 Prompt: {rendered_prompt}")
+print(f"Prompt 长度: {len(rendered_prompt)}")
+
+# 检查变量
+print(f"变量: {variables}")
+```
+
+---
+
+## 📚 Prompt 模板示例
+
+### Agent 决策 Prompt
 
 ```yaml
 system_prompt: |
-  你是一个 Python 爬虫专家，擅长 Scrapy + scrapy-playwright。你需要分析用户提供的探索记录，生成一个**完整的 Scrapy + scrapy-playwright 爬虫脚本**。
+  你是一个智能网页自动化助手，负责分析页面并执行操作。
 
-  ## 重要：这是一个 SPA 网站，必须使用 scrapy-playwright 渲染 JavaScript
+user_prompt: |
+  当前任务: {{task}}
+  页面截图: [截图]
+  标注元素:
+  {% for mark in marks %}
+  - [{{mark.mark_id}}] {{mark.tag}}: {{mark.text}}
+  {% endfor %}
 
-  ## 你的任务
-  1. 分析探索记录，从 XPath 候选中找出详情链接的选择器
-  2. 分析导航步骤，理解筛选条件的点击流程
-  3. 生成完整的 Scrapy + scrapy-playwright 爬虫
+  请分析页面并决定下一步操作。
+
+examples: |
+  示例 1:
+  用户: 点击登录按钮
+  助手: {"action": "click", "mark_id": 5, "thinking": "点击登录按钮提交表单"}
+
+  示例 2:
+  用户: 在搜索框输入"AutoSpider"
+  助手: {"action": "type", "mark_id": 3, "text": "AutoSpider", "thinking": "在搜索框中输入关键词"}
+
+output_format: |
+  请以 JSON 格式输出:
+  {
+    "action": "动作类型",
+    "mark_id": 元素标记ID,
+    "text": "输入文本（如果需要）",
+    "thinking": "思考过程"
+  }
 ```
 
-user_prompt 部分提供了所有分析所需的原始数据：任务描述、列表页 URL、导航步骤摘要、探索记录摘要和 URL 样本。这些信息按照分析难度组织，从宏观到微观，帮助 LLM 首先建立整体理解，然后逐步深入细节。
-
-## 配置选项
-
-Prompts 模块本身不提供运行时配置选项，所有的配置都在模板文件中完成。但调用方可以通过环境变量和配置系统影响模板渲染的行为。
-
-### 模板变量
-
-每个模板在使用时需要提供相应的变量值。以下是各模板所需变量的说明：
-
-decider.yaml 使用的变量包括：当前任务的描述、当前页面 URL、目标文本、历史截图信息、页面标注文本、滚动状态等。这些变量通常由 SoMAgent 组件在运行时动态提供。
-
-planner.yaml 使用的变量包括：start_url（起始 URL）、task（任务描述）、target_text（目标文本）。这三个变量构成了任务规划的基本输入，由用户或上层调用方提供。
-
-url_collector.yaml 使用的变量包括：task_description（任务描述）、current_url（当前页面 URL）、visited_count（已探索的详情页数量）、collected_urls_str（已收集的 URL 示例）。这些变量帮助 LLM 理解当前的收集进度，避免重复选择。
-
-script_generator.yaml 使用的变量包括：task_description（任务描述）、list_url（列表页 URL）、nav_summary（导航步骤摘要）、visits_summary（探索记录摘要）、urls_count（收集的 URL 数量）、url_samples（URL 样本）。这些变量提供了完整的上下文信息，使 LLM 能够生成准确的脚本。
-
-### 自定义模板
-
-对于有特殊需求的用户，可以通过修改模板文件来调整 LLM 的行为。模板文件位于项目根目录的 prompts 文件夹下，可以直接编辑修改。以下是一些常见的自定义场景：
-
-调整决策策略可以修改 decider.yaml 中的核心规则部分。例如，如果希望 Agent 更加激进地尝试新路径，可以放宽对重复操作的限制；如果担心 Agent 陷入循环，可以增加循环检测的敏感度。
-
-修改输出格式可以调整各模板中定义的 JSON 结构。但要注意，修改输出格式后，相应的解析代码也需要同步更新，否则会导致响应解析失败。
-
-添加领域知识可以在 system_prompt 中增加额外的指导信息。例如，对于特定类型的网站（电商、新闻、论坛等），可以添加针对性的导航建议和常见模式说明。
-
-## 高级用法
-
-### 多语言支持
-
-默认的 Prompt 模板使用中文编写，适合中文场景下的任务。如果需要支持英文或其他语言，可以创建对应语言的模板文件副本，然后翻译其中的文本内容。系统会加载与配置匹配的模板文件，实现多语言切换。
-
-翻译时需要注意保持语义的一致性，特别是技术术语和操作名称。某些术语（如 click、scroll、extract）已经是行业通用用法，可以保留英文原词。同时，JSON 输出格式中的键名通常保持英文，以便于程序解析。
-
-### 模板继承
-
-对于具有相似结构的任务，可以创建基础模板，然后在特定任务模板中继承和扩展。Jinja2 模板引擎支持模板继承机制，可以使用 {% extends %} 和 {% block %} 语句实现。不过考虑到 Prompts 模块当前的文件结构，继承功能使用较少，更常见的是通过变量来区分不同场景。
-
-### 动态模板生成
-
-在某些高级场景下，可能需要根据运行时条件动态生成模板内容。例如，针对不同类型的网站生成不同的指导规则。这种需求可以通过在调用 render_template 函数之前，先对模板内容进行预处理来实现。预处理逻辑可以包含条件判断、文本替换等操作，生成最终的模板字符串后再进行变量渲染。
-
-### 模板调试
-
-调试 Prompt 模板时，可以启用详细的日志输出，查看模板渲染后的完整内容。这对于定位变量替换问题、格式错误等非常有用。另外，建议在修改模板后进行小规模测试，验证 LLM 的响应是否符合预期，再应用到生产环境。
-
-## 最佳实践
-
-设计和使用 Prompt 模板时，有几个重要的最佳实践值得遵循。首先是保持模板的简洁性，避免在单条规则中包含过多信息。人类阅读者和 LLM 都更容易理解和遵循简短、清晰的指令。如果规则非常复杂，考虑将其拆分为多条独立的规则，并在 system_prompt 中按重要性排序。
-
-其次是提供具体的示例而非抽象的描述。抽象描述需要 LLM 自己推断具体做法，而示例则直接展示了期望的行为模式。decider.yaml 中的输出格式示例就很好地体现了这一点：直接给出 {"thinking":"思考","action":"click",...} 这样的具体格式，比「输出 JSON 格式」更加明确。
-
-再次是明确处理边界情况。LLM 在面对意外输入时可能会产生奇怪的行为，预先在模板中说明如何处理这些情况可以显著提高系统的鲁棒性。例如，url_collector.yaml 中详细说明了「不要选择」的元素类型，这就是针对常见误选问题的预防措施。
-
-最后是持续迭代和优化。Prompt 模板不是一次性的设计产物，而是需要根据实际运行效果不断改进的组件。建议建立模板版本管理，记录每次修改的内容和原因，并对比修改前后的效果差异。长期的迭代积累会逐渐提升模板的质量和可靠性。
-
-### 模板版本管理示例
+### URL 收集 Prompt
 
 ```yaml
-# prompts/decider.yaml 的版本管理注释
-# 版本：1.2.0 (2024-01-15)
-# 更新内容：
-#   - 增加循环检测后的强制策略变更规则
-#   - 优化 mark_id 识别说明，减少误选
-# 效果：
-#   - 循环检测准确率提升 15%
-#   - 平均任务步数减少 22%
+system_prompt: |
+  你是一个专业的网页数据提取助手，负责从列表页收集详情页 URL。
+
+user_prompt: |
+  任务: {{task}}
+  列表页 URL: {{list_url}}
+  页面截图: [截图]
+  标注元素:
+  {% for mark in marks %}
+  - [{{mark.mark_id}}] {{mark.tag}}: {{mark.text}}
+  {% endfor %}
+
+  请识别详情页链接并收集 URL。
+
+examples: |
+  示例 1:
+  用户: 收集商品详情页 URL
+  助手: {
+    "detail_urls": [
+      "https://example.com/product/123",
+      "https://example.com/product/456"
+    ],
+    "common_xpath": "//a[@class='product-link']"
+  }
+
+output_format: |
+  请以 JSON 格式输出:
+  {
+    "detail_urls": ["url1", "url2", ...],
+    "common_xpath": "公共 XPath 选择器"
+  }
 ```
 
-通过这种版本管理方式，可以追踪模板的演进历史，理解每次修改的动机和效果，为后续优化提供参考依据。
+---
+
+*最后更新: 2026-01-08*

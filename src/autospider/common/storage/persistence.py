@@ -136,6 +136,10 @@ class CollectionProgress:
     
     # 暂停原因（如果状态为 PAUSED）
     pause_reason: str | None = None
+
+    # 任务信息（用于兼容性校验）
+    list_url: str = ""
+    task_description: str = ""
     
     # 当前页码
     current_page_num: int = 1
@@ -157,6 +161,8 @@ class CollectionProgress:
         return {
             "status": self.status,
             "pause_reason": self.pause_reason,
+            "list_url": self.list_url,
+            "task_description": self.task_description,
             "current_page_num": self.current_page_num,
             "collected_count": self.collected_count,
             "backoff_level": self.backoff_level,
@@ -170,6 +176,8 @@ class CollectionProgress:
         return cls(
             status=data.get("status", "RUNNING"),
             pause_reason=data.get("pause_reason"),
+            list_url=data.get("list_url", ""),
+            task_description=data.get("task_description", ""),
             current_page_num=data.get("current_page_num", 1),
             collected_count=data.get("collected_count", 0),
             backoff_level=data.get("backoff_level", 0),

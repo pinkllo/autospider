@@ -138,16 +138,42 @@ class BaseCollector(ABC):
             screenshots_dir=self.screenshots_dir,
             llm_decision_maker=self.llm_decision_maker,
         )
-    
+
+    def _is_progress_compatible(self, progress: CollectionProgress | None) -> bool:
+        """检查进度是否与当前任务匹配"""
+        if not progress:
+            return False
+        if progress.list_url and progress.list_url != self.list_url:
+            return False
+        if progress.task_description and progress.task_description != self.task_description:
+            return False
+        return True
+
     async def _load_previous_urls(self) -> None:
-        """从 Redis 加载历史 URL（用于断点续爬）"""
+        """从 Redis 或本地文件加载历史 URL（用于断点续爬）"""
+        loaded_urls: list[str] = []
+
         if self.redis_manager:
             client = await self.redis_manager.connect()
             if client:
                 urls = await self.redis_manager.load_items()
                 if urls:
-                    self.collected_urls.extend(urls)
+                    loaded_urls.extend(urls)
                     logger.info(f"从 Redis 加载了 {len(urls)} 个历史 URL")
+
+        file_urls = self.progress_persistence.load_collected_urls()
+        if file_urls:
+            loaded_urls.extend(file_urls)
+            logger.info(f"从本地文件加载了 {len(file_urls)} 个历史 URL")
+
+        if not loaded_urls:
+            return
+
+        existing = set(self.collected_urls)
+        new_urls = [url for url in loaded_urls if url and url not in existing]
+        if new_urls:
+            self.collected_urls.extend(new_urls)
+            logger.info(f"合并后历史 URL 总数: {len(self.collected_urls)}")
     
     async def _resume_to_target_page(
         self,
@@ -369,7 +395,23 @@ class BaseCollector(ABC):
                 )
                 
                 if llm_decision and llm_decision.get("action") == "select_detail_links":
-                    mark_ids = llm_decision.get("mark_ids", [])
+                    mark_id_text_map = llm_decision.get("mark_id_text_map", {})
+                    old_mark_ids = llm_decision.get("mark_ids", [])
+                    mark_ids: list[int] = []
+                    
+                    if mark_id_text_map:
+                        if config.url_collector.validate_mark_id:
+                            from ..extractor.validator.mark_id_validator import MarkIdValidator
+                            
+                            validator = MarkIdValidator()
+                            mark_ids, _ = validator.validate_mark_id_text_map(
+                                mark_id_text_map, snapshot
+                            )
+                        else:
+                            mark_ids = [int(k) for k in mark_id_text_map.keys()]
+                    elif old_mark_ids:
+                        mark_ids = old_mark_ids
+                    
                     logger.info(f"LLM 识别到 {len(mark_ids)} 个详情链接")
                     
                     candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
@@ -377,7 +419,7 @@ class BaseCollector(ABC):
                     for candidate in candidates:
                         if self.url_extractor:
                             url = await self.url_extractor.extract_from_element(
-                                candidate, snapshot
+                                candidate, snapshot, nav_steps=self.nav_steps
                             )
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
@@ -411,6 +453,8 @@ class BaseCollector(ABC):
         """保存收集进度"""
         progress = CollectionProgress(
             status="RUNNING",
+            list_url=self.list_url,
+            task_description=self.task_description,
             current_page_num=(
                 self.pagination_handler.current_page_num 
                 if self.pagination_handler else 1

@@ -23,7 +23,8 @@ class URLExtractor:
     async def extract_from_element(
         self, 
         element: "ElementMark",
-        snapshot: "SoMSnapshot"
+        snapshot: "SoMSnapshot",
+        nav_steps: list[dict] | None = None,
     ) -> str | None:
         """从元素中提取 URL（优先从 href，否则点击获取）"""
         # 策略 1: 先尝试从 href 提取
@@ -34,9 +35,13 @@ class URLExtractor:
         
         # 策略 2: 点击获取
         print(f"[Extract] 元素无 href，点击获取 URL...")
-        return await self.click_and_get_url(element)
+        return await self.click_and_get_url(element, nav_steps=nav_steps)
     
-    async def click_and_get_url(self, element: "ElementMark") -> str | None:
+    async def click_and_get_url(
+        self,
+        element: "ElementMark",
+        nav_steps: list[dict] | None = None,
+    ) -> str | None:
         """点击元素并获取新页面的 URL"""
         list_url = self.page.url
         context = self.page.context
@@ -120,10 +125,36 @@ class URLExtractor:
                         print(f"[Click] 返回列表页...")
                         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
                         await asyncio.sleep(1)
+                        if nav_steps:
+                            from .navigation_handler import NavigationHandler
+                            
+                            nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
+                            await nav_handler.replay_nav_steps(nav_steps)
                         
                         return new_url
                     else:
                         print(f"[Click] ✗ URL 未变化")
+                        try:
+                            await self.page.go_back(wait_until="domcontentloaded", timeout=5000)
+                            await asyncio.sleep(1)
+                            return None
+                        except Exception:
+                            try:
+                                await self.page.goto(
+                                    self.list_url,
+                                    wait_until="domcontentloaded",
+                                    timeout=30000,
+                                )
+                                await asyncio.sleep(1)
+                                if nav_steps:
+                                    from .navigation_handler import NavigationHandler
+                                    
+                                    nav_handler = NavigationHandler(
+                                        self.page, self.list_url, "", 10
+                                    )
+                                    await nav_handler.replay_nav_steps(nav_steps)
+                            except Exception:
+                                pass
                         return None
             else:
                 print(f"[Click] ✗ 找不到元素 {element.mark_id}")
@@ -132,6 +163,12 @@ class URLExtractor:
             # 尝试返回列表页
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(1)
+                if nav_steps:
+                    from .navigation_handler import NavigationHandler
+                    
+                    nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
+                    await nav_handler.replay_nav_steps(nav_steps)
             except Exception:
                 pass
         
@@ -187,6 +224,23 @@ class URLExtractor:
                         await nav_handler.replay_nav_steps(nav_steps)
                     
                     return new_url
+                
+                try:
+                    await self.page.go_back(wait_until="domcontentloaded", timeout=5000)
+                    await asyncio.sleep(1)
+                except Exception:
+                    try:
+                        await self.page.goto(
+                            self.list_url,
+                            wait_until="domcontentloaded",
+                            timeout=30000,
+                        )
+                        await asyncio.sleep(1)
+                        if nav_steps:
+                            nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
+                            await nav_handler.replay_nav_steps(nav_steps)
+                    except Exception:
+                        pass
                 
                 return None
                 
