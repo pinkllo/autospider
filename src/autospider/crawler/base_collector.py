@@ -139,6 +139,29 @@ class BaseCollector(ABC):
             llm_decision_maker=self.llm_decision_maker,
         )
 
+    def _sync_page_references(self, page: "Page", list_url: str | None = None) -> None:
+        """同步页面引用到各处理器"""
+        self.page = page
+        if list_url:
+            self.list_url = list_url
+        
+        if self.url_extractor:
+            self.url_extractor.page = page
+            if list_url:
+                self.url_extractor.list_url = list_url
+        if self.pagination_handler:
+            self.pagination_handler.page = page
+            if list_url:
+                self.pagination_handler.list_url = list_url
+        if self.llm_decision_maker:
+            self.llm_decision_maker.page = page
+            if list_url:
+                self.llm_decision_maker.list_url = list_url
+        if self.navigation_handler:
+            self.navigation_handler.page = page
+            if list_url:
+                self.navigation_handler.list_url = list_url
+
     def _is_progress_compatible(self, progress: CollectionProgress | None) -> bool:
         """检查进度是否与当前任务匹配"""
         if not progress:

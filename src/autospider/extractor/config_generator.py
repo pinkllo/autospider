@@ -125,6 +125,11 @@ class ConfigGenerator:
         if not nav_success:
             print(f"[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
         self.nav_steps = self.navigation_handler.nav_steps
+
+        if self.navigation_handler and self.navigation_handler.page is not self.page:
+            new_page = self.navigation_handler.page
+            new_list_url = self.navigation_handler.list_url or new_page.url
+            self._sync_page_references(new_page, list_url=new_list_url)
         
         # 3. 探索阶段（进入详情页）
         print(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
@@ -205,6 +210,29 @@ class ConfigGenerator:
             screenshots_dir=self.screenshots_dir,
             llm_decision_maker=self.llm_decision_maker,
         )
+
+    def _sync_page_references(self, page: "Page", list_url: str | None = None) -> None:
+        """同步页面引用到各处理器"""
+        self.page = page
+        if list_url:
+            self.list_url = list_url
+        
+        if self.url_extractor:
+            self.url_extractor.page = page
+            if list_url:
+                self.url_extractor.list_url = list_url
+        if self.llm_decision_maker:
+            self.llm_decision_maker.page = page
+            if list_url:
+                self.llm_decision_maker.list_url = list_url
+        if self.navigation_handler:
+            self.navigation_handler.page = page
+            if list_url:
+                self.navigation_handler.list_url = list_url
+        if self.pagination_handler:
+            self.pagination_handler.page = page
+            if list_url:
+                self.pagination_handler.list_url = list_url
     
     async def _explore_phase(self) -> None:
         """探索阶段：进入多个详情页"""
@@ -353,7 +381,9 @@ class ConfigGenerator:
                 break
             
             print(f"[Explore] 处理候选 {i}/{len(candidates)}: [{candidate.mark_id}] {candidate.text[:30]}...")
-            url = await self.url_extractor.extract_from_element(candidate, snapshot)
+            url = await self.url_extractor.extract_from_element(
+                candidate, snapshot, nav_steps=self.nav_steps
+            )
             
             if url and url not in self.visited_detail_urls:
                 visit = DetailPageVisit(
@@ -408,7 +438,9 @@ class ConfigGenerator:
         
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
         if element:
-            url = await self.url_extractor.click_and_get_url(element)
+            url = await self.url_extractor.click_and_get_url(
+                element, nav_steps=self.nav_steps
+            )
             if url and url not in self.visited_detail_urls:
                 visit = DetailPageVisit(
                     list_page_url=self.list_url,

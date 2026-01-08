@@ -188,6 +188,12 @@ class URLCollector(BaseCollector):
                 print(f"[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
             # 保存导航步骤
             self.nav_steps = self.navigation_handler.nav_steps
+
+        # 如果导航阶段打开了新标签页，更新页面引用
+        if self.navigation_handler and self.navigation_handler.page is not self.page:
+            new_page = self.navigation_handler.page
+            new_list_url = self.navigation_handler.list_url or new_page.url
+            self._sync_page_references(new_page, list_url=new_list_url)
         
         # 3. 探索阶段
         if is_resume and self.common_detail_xpath:
