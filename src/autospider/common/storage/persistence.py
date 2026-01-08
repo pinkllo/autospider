@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
-import json
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+# 引入通用文件操作工具
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "common"))
+from utils.file_utils import ensure_directory, save_json, load_json, file_exists
 
 
 @dataclass
@@ -74,7 +78,7 @@ class ConfigPersistence:
             config_dir: 配置文件存放目录
         """
         self.config_dir = Path(config_dir)
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        ensure_directory(self.config_dir)
         self.config_file = self.config_dir / "collection_config.json"
 
     def save(self, config: CollectionConfig) -> None:
@@ -90,10 +94,7 @@ class ConfigPersistence:
 
         # 保存到文件
         data = config.to_dict()
-        self.config_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        save_json(self.config_file, data)
         print(f"[持久化] 配置已保存到: {self.config_file}")
 
     def load(self) -> CollectionConfig | None:
@@ -102,12 +103,14 @@ class ConfigPersistence:
         Returns:
             加载的配置，如果文件不存在则返回 None
         """
-        if not self.config_file.exists():
+        if not file_exists(self.config_file):
             print(f"[持久化] 配置文件不存在: {self.config_file}")
             return None
 
         try:
-            data = json.loads(self.config_file.read_text(encoding="utf-8"))
+            data = load_json(self.config_file)
+            if data is None:
+                return None
             config = CollectionConfig.from_dict(data)
             print(f"[持久化] 配置已加载: {self.config_file}")
             return config
@@ -121,7 +124,7 @@ class ConfigPersistence:
         Returns:
             配置文件是否存在
         """
-        return self.config_file.exists()
+        return file_exists(self.config_file)
 
 
 @dataclass
@@ -185,7 +188,7 @@ class ProgressPersistence:
             output_dir: 输出目录
         """
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        ensure_directory(self.output_dir)
         
         self.progress_file = self.output_dir / "progress.json"
         self.urls_file = self.output_dir / "urls.txt"
@@ -201,10 +204,7 @@ class ProgressPersistence:
         
         # 保存到文件
         data = progress.to_dict()
-        self.progress_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        save_json(self.progress_file, data)
     
     def load_progress(self) -> CollectionProgress | None:
         """加载进度
@@ -212,11 +212,13 @@ class ProgressPersistence:
         Returns:
             进度信息，如果文件不存在则返回 None
         """
-        if not self.progress_file.exists():
+        if not file_exists(self.progress_file):
             return None
         
         try:
-            data = json.loads(self.progress_file.read_text(encoding="utf-8"))
+            data = load_json(self.progress_file)
+            if data is None:
+                return None
             return CollectionProgress.from_dict(data)
         except Exception as e:
             print(f"[进度] 加载进度失败: {e}")
@@ -231,9 +233,9 @@ class ProgressPersistence:
         if not urls:
             return
         
-        # 读取已有URL（去重）
+        # 读取已有URL(去重)
         existing_urls = set()
-        if self.urls_file.exists():
+        if file_exists(self.urls_file):
             existing_urls = set(self.urls_file.read_text(encoding="utf-8").strip().split("\n"))
             existing_urls.discard("")  # 移除空字符串
         
@@ -250,7 +252,7 @@ class ProgressPersistence:
         Returns:
             URL列表
         """
-        if not self.urls_file.exists():
+        if not file_exists(self.urls_file):
             return []
         
         urls = self.urls_file.read_text(encoding="utf-8").strip().split("\n")
@@ -262,11 +264,11 @@ class ProgressPersistence:
         Returns:
             是否存在checkpoint
         """
-        return self.progress_file.exists()
+        return file_exists(self.progress_file)
     
     def clear(self) -> None:
         """清除所有进度数据"""
-        if self.progress_file.exists():
+        if file_exists(self.progress_file):
             self.progress_file.unlink()
-        if self.urls_file.exists():
+        if file_exists(self.urls_file):
             self.urls_file.unlink()
