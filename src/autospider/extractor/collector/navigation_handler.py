@@ -148,6 +148,15 @@ class NavigationHandler:
                 print(f"[Nav] 执行结果: {'成功' if result.success else '失败'}")
                 if result.error:
                     print(f"[Nav] 错误: {result.error}")
+
+                # 如果打开了新标签页，切换到新页面继续探索
+                if hasattr(self.executor, "_new_page") and self.executor._new_page:
+                    new_page = self.executor._new_page
+                    self.page = new_page
+                    self.executor.page = new_page
+                    self.executor._new_page = None
+                    self.list_url = self.page.url
+                    print(f"[Nav] ✓ 切换到新标签页: {self.page.url}")
                 
                 # 获取被点击元素的详细信息
                 clicked_element = None
@@ -243,7 +252,19 @@ class NavigationHandler:
                                     print(
                                         f"[Replay] 点击: {target_text[:30]}... (xpath: {xpath[:50]}...)"
                                     )
-                                    await locator.first.click(timeout=5000)
+                                    try:
+                                        context = self.page.context
+                                        async with context.expect_page(timeout=3000) as new_page_info:
+                                            await locator.first.click(timeout=5000)
+                                        new_page = await new_page_info.value
+                                        await new_page.wait_for_load_state(
+                                            "domcontentloaded", timeout=10000
+                                        )
+                                        self.page = new_page
+                                        self.list_url = self.page.url
+                                        print(f"[Replay] ✓ 切换到新标签页: {self.page.url}")
+                                    except Exception:
+                                        pass
                                     await asyncio.sleep(1)
                                 elif action_type == "type":
                                     text = step.get("text") or ""
