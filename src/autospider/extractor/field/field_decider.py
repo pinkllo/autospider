@@ -90,6 +90,11 @@ class FieldDecider:
             if value_match:
                 data[key] = value_match.group(1)
 
+        for key in ["text", "key"]:
+            value_match = re.search(rf'"{key}"\s*:\s*"([^"]*)', text)
+            if value_match:
+                data[key] = value_match.group(1)
+
         return data or None
 
     def _parse_response_json(self, response_text: str) -> dict | None:
@@ -191,6 +196,77 @@ class FieldDecider:
 
         return "\n".join(lines), len(lines)
 
+    def _collect_input_candidates(
+        self,
+        snapshot: "SoMSnapshot",
+    ) -> list[tuple[float, "ElementMark", str]]:
+        if not snapshot or not snapshot.marks:
+            return []
+
+        candidates: list[tuple[float, "ElementMark", str]] = []
+        seen_labels: set[str] = set()
+        input_tags = {"input", "textarea"}
+        input_roles = {"textbox", "searchbox"}
+
+        for mark in snapshot.marks:
+            if (
+                mark.tag not in input_tags
+                and mark.role not in input_roles
+                and not mark.input_type
+            ):
+                continue
+
+            label = self._get_candidate_label(mark)
+            label = self._compact_text(label) if label else ""
+            if not label:
+                label = "[input]"
+
+            label_key = f"{label.lower()}-{mark.mark_id}"
+            if label_key in seen_labels:
+                continue
+            seen_labels.add(label_key)
+
+            score = 0.5
+            if mark.input_type:
+                score += 0.2
+            if mark.placeholder or mark.aria_label:
+                score += 0.1
+            if mark.tag in input_tags:
+                score += 0.2
+
+            candidates.append((score, mark, label))
+
+        candidates.sort(
+            key=lambda item: (
+                -item[0],
+                item[1].center_normalized[1],
+                item[1].center_normalized[0],
+            )
+        )
+        return candidates
+
+    def _build_input_candidates_text(
+        self,
+        snapshot: "SoMSnapshot",
+        max_candidates: int = 20,
+    ) -> tuple[str, int]:
+        candidates = self._collect_input_candidates(snapshot)
+        if not candidates:
+            return "无", 0
+
+        lines = []
+        for _, mark, label in candidates[:max_candidates]:
+            cx, cy = mark.center_normalized
+            role_text = mark.role or "none"
+            input_type = mark.input_type or "text"
+            lines.append(
+                f"- [{mark.mark_id}] {label} "
+                f"(tag={mark.tag} role={role_text} type={input_type} "
+                f"@{cx:.2f},{cy:.2f})"
+            )
+
+        return "\n".join(lines), len(lines)
+
     def get_clickable_candidate_ids(
         self,
         snapshot: "SoMSnapshot",
@@ -268,6 +344,9 @@ class FieldDecider:
         clickable_candidates_text, clickable_candidates_count = (
             self._build_clickable_candidates_text(snapshot)
         )
+        input_candidates_text, input_candidates_count = (
+            self._build_input_candidates_text(snapshot)
+        )
         
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -282,6 +361,8 @@ class FieldDecider:
                 "scroll_status": scroll_status,
                 "clickable_candidates": clickable_candidates_text,
                 "clickable_candidates_count": clickable_candidates_count,
+                "input_candidates": input_candidates_text,
+                "input_candidates_count": input_candidates_count,
                 "page_text_hit": page_text_hit_text,
             }
         )

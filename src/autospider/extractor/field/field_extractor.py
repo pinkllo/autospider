@@ -364,6 +364,30 @@ class FieldExtractor:
                 if mark_id:
                     await self._execute_click(int(mark_id), snapshot)
                 await asyncio.sleep(1.0)
+
+            elif action == "type":
+                mark_id = decision.get("mark_id")
+                text = decision.get("text")
+                if mark_id and text:
+                    try:
+                        await self._execute_type(int(mark_id), text, snapshot)
+                    except (TypeError, ValueError):
+                        print(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
+                else:
+                    print(f"[FieldExtractor] 输入动作缺少 mark_id 或 text")
+                await asyncio.sleep(0.5)
+
+            elif action == "press":
+                key = decision.get("key") or "Enter"
+                mark_id = decision.get("mark_id")
+                mark_id_value = None
+                if mark_id is not None:
+                    try:
+                        mark_id_value = int(mark_id)
+                    except (TypeError, ValueError):
+                        print(f"[FieldExtractor] 按键动作 mark_id 无效: {mark_id}")
+                await self._execute_press(key, mark_id_value, snapshot)
+                await asyncio.sleep(0.5)
             
             elif action == "scroll_down":
                 await self.page.evaluate("window.scrollBy(0, 500)")
@@ -397,6 +421,50 @@ class FieldExtractor:
             return result.success
         except Exception as e:
             print(f"[FieldExtractor] 点击失败: {e}")
+            return False
+
+    async def _execute_type(self, mark_id: int, text: str, snapshot) -> bool:
+        """执行输入操作"""
+        try:
+            mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
+
+            action = Action(
+                action=ActionType.TYPE,
+                mark_id=mark_id,
+                text=text,
+            )
+
+            result, _ = await self.action_executor.execute(
+                action=action,
+                mark_id_to_xpath=mark_id_to_xpath,
+                step_index=0,
+            )
+
+            return result.success
+        except Exception as e:
+            print(f"[FieldExtractor] 输入失败: {e}")
+            return False
+
+    async def _execute_press(self, key: str, mark_id: int | None, snapshot) -> bool:
+        """执行按键操作"""
+        try:
+            mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
+
+            action = Action(
+                action=ActionType.PRESS,
+                mark_id=mark_id,
+                key=key,
+            )
+
+            result, _ = await self.action_executor.execute(
+                action=action,
+                mark_id_to_xpath=mark_id_to_xpath,
+                step_index=0,
+            )
+
+            return result.success
+        except Exception as e:
+            print(f"[FieldExtractor] 按键失败: {e}")
             return False
     
     async def _extract_xpath_for_text(
