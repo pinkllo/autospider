@@ -70,6 +70,14 @@ class RedisManager:
             16 位十六进制 hash ID
         """
         return hashlib.sha256(item.encode('utf-8')).hexdigest()[:16]
+
+    def _format_connection_summary(self, timeout_seconds: int) -> str:
+        password_status = "set" if self.password else "empty"
+        return (
+            f"host={self.host}, port={self.port}, db={self.db}, "
+            f"key_prefix={self.key_prefix}, timeout={timeout_seconds}s, "
+            f"password={password_status}"
+        )
     
     async def connect(self) -> Redis | None:
         """连接到 Redis 服务器
@@ -78,13 +86,14 @@ class RedisManager:
             Redis 客户端实例，连接失败返回 None
         """
         try:
+            connect_timeout = 2
             self.client = aioredis.Redis(
                 host=self.host,
                 port=self.port,
                 password=self.password,
                 db=self.db,
                 decode_responses=True,
-                socket_connect_timeout=2,
+                socket_connect_timeout=connect_timeout,
             )
             
             # 测试连接
@@ -94,6 +103,9 @@ class RedisManager:
             
         except (ConnectionRefusedError, TimeoutError, aioredis.ConnectionError) as e:
             self.logger.error(f"Redis 连接失败: {e}")
+            self.logger.error(
+                f"Redis 连接参数: {self._format_connection_summary(connect_timeout)}"
+            )
             self.logger.info("请确保 Redis 服务正在运行")
             
             # 连接失败，关闭客户端
@@ -103,6 +115,9 @@ class RedisManager:
             
         except Exception as e:
             self.logger.error(f"Redis 连接时发生未知错误: {e}")
+            self.logger.error(
+                f"Redis 连接参数: {self._format_connection_summary(connect_timeout)}"
+            )
             if self.client:
                 await self.client.close()
                 self.client = None

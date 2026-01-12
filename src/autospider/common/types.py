@@ -64,6 +64,12 @@ class ElementMark(BaseModel):
     placeholder: str | None = Field(default=None, description="placeholder")
     href: str | None = Field(default=None, description="链接地址")
     input_type: str | None = Field(default=None, description="input 类型")
+    clickability_reason: str | None = Field(
+        default=None, description="可点击性判定依据"
+    )
+    clickability_confidence: float | None = Field(
+        default=None, description="可点击性置信度"
+    )
     bbox: BoundingBox = Field(..., description="边界框")
     center_normalized: tuple[float, float] = Field(..., description="归一化中心坐标 (0-1)")
     xpath_candidates: list[XPathCandidate] = Field(

@@ -1,0 +1,38 @@
+# 详情页字段提取功能开发
+
+## 任务目标
+实现从详情页提取目标字段的功能，复用当前项目已有的 SoM、LLM 决策器等组件。
+
+## 任务分解
+
+### 阶段一：规划和准备
+- [x] 探索项目结构，了解现有功能
+- [x] 创建实现计划文档
+- [x] 用户审批计划
+
+### 阶段二：通用组件抽取到 common
+- [x] 将 SoM API 确认适用于字段提取
+- [x] 抽取/复用 LLM 决策器相关代码
+- [x] 创建通用的文本模糊搜索工具 ([common/utils/fuzzy_search.py](file:///d:/autospider/src/autospider/common/utils/fuzzy_search.py))
+- [x] 创建 XPath 公共模式提取工具 ([extractor/field/xpath_pattern.py](file:///d:/autospider/src/autospider/extractor/field/xpath_pattern.py))
+
+### 阶段三：详情页字段提取器核心实现
+- [x] 创建 [FieldExtractor](file:///d:/autospider/src/autospider/extractor/field/field_extractor.py#40-512) 类
+- [x] 实现导航阶段（复用 SoM + LLM）
+- [x] 实现字段定位阶段
+- [x] 实现 XPath 提取阶段
+- [x] 实现 XPath 验证阶段
+
+### 阶段四：公共 XPath 模式提取
+- [x] 实现多 URL 探索逻辑 ([BatchFieldExtractor](file:///d:/autospider/src/autospider/extractor/field/batch_field_extractor.py#35-296))
+- [x] 实现公共 XPath 模式提取
+- [x] 实现 XPath 校验
+
+### 阶段五：脚本生成和批量爬取
+- [x] 生成批量爬取配置
+- [x] 集成到 CLI (`extract-fields` 命令)
+
+### 阶段六：测试和验证
+- [x] 语法检查通过
+- [ ] 集成测试（需要实际运行）
+- [ ] 端到端测试
