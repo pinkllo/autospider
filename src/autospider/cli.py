@@ -614,6 +614,50 @@ async def _run_field_extractor(
         return await extractor.run(urls=urls)
 
 
+async def _run_batch_xpath_extractor(
+    urls: list[str] | None,
+    fields_config: list[dict],
+    headless: bool,
+    output_dir: str,
+):
+    """异步运行批量 XPath 字段提取器"""
+    from .extractor.field import BatchXPathExtractor
+
+    if urls is None:
+        if not config.redis.enabled:
+            raise ValueError("Redis 未启用，请设置 REDIS_ENABLED=true")
+        try:
+            from .common.storage.redis_manager import RedisManager
+        except ImportError as e:
+            raise ImportError("Redis 依赖未安装，请使用 pip install autospider[redis] 安装") from e
+
+        redis_manager = RedisManager(
+            host=config.redis.host,
+            port=config.redis.port,
+            password=config.redis.password,
+            db=config.redis.db,
+            key_prefix=config.redis.key_prefix,
+            logger=logger,
+        )
+        try:
+            await redis_manager.connect()
+            items = await redis_manager.get_active_items()
+            urls = list(items)
+        except Exception as e:
+            raise ValueError(f"Redis 读取失败: {e}") from e
+
+    if not urls:
+        raise ValueError("未获取到 URL，请提供 --urls 或检查 Redis")
+
+    async with create_browser_session(headless=headless) as session:
+        extractor = BatchXPathExtractor(
+            page=session.page,
+            fields_config=fields_config,
+            output_dir=output_dir,
+        )
+        return await extractor.run(urls=urls)
+
+
 @app.command("extract-fields")
 def extract_fields_command(
     urls: Optional[str] = typer.Option(
@@ -790,6 +834,141 @@ def extract_fields_command(
         ))
         import traceback
         traceback.print_exc()
+        raise typer.Exit(1)
+
+
+@app.command("batch-extract")
+def batch_extract_command(
+    config_path: str = typer.Option(
+        ...,
+        "--config-path",
+        "-c",
+        help="extract-fields 输出的 extraction_config.json 路径",
+    ),
+    urls: Optional[str] = typer.Option(
+        None,
+        "--urls",
+        "-u",
+        help="详情页 URL，多个用逗号分隔，或传入包含 URL 列表的 JSON 文件路径（不传则从 Redis 读取）",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--no-headless",
+        help="是否使用无头模式",
+    ),
+    output_dir: str = typer.Option(
+        "output",
+        "--output",
+        "-o",
+        help="输出目录",
+    ),
+):
+    """
+    基于 extraction_config.json 批量提取字段
+
+    示例:
+        autospider batch-extract --config-path output/extraction_config.json --urls "output/collected_urls.json"
+    """
+    import json
+
+    config_file = Path(config_path)
+    if not config_file.exists():
+        console.print(Panel(f"[red]配置文件不存在: {config_path}[/red]", title="错误", style="red"))
+        raise typer.Exit(1)
+
+    try:
+        config_data = json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(Panel(f"[red]配置文件解析失败: {e}[/red]", title="错误", style="red"))
+        raise typer.Exit(1)
+
+    fields_config = config_data.get("fields") if isinstance(config_data, dict) else None
+    if not isinstance(fields_config, list) or not fields_config:
+        console.print(Panel("[red]配置文件中缺少有效的 fields[/red]", title="错误", style="red"))
+        raise typer.Exit(1)
+
+    url_list = None
+    use_redis = urls is None or not urls.strip()
+    if use_redis:
+        if not config.redis.enabled:
+            console.print(Panel(
+                "[red]未启用 Redis，无法从 Redis 读取 URL。请设置 REDIS_ENABLED=true[/red]",
+                title="错误",
+                style="red",
+            ))
+            raise typer.Exit(1)
+    else:
+        if urls.endswith(".json"):
+            urls_file = Path(urls)
+            if not urls_file.exists():
+                console.print(Panel(f"[red]URL 文件不存在: {urls}[/red]", title="错误", style="red"))
+                raise typer.Exit(1)
+            with open(urls_file, encoding="utf-8") as f:
+                url_data = json.load(f)
+            if isinstance(url_data, dict):
+                url_list = url_data.get("collected_urls") or url_data.get("urls")
+            elif isinstance(url_data, list):
+                url_list = url_data
+        else:
+            url_list = [u.strip() for u in urls.split(",") if u.strip()]
+
+        if not url_list:
+            console.print(Panel("[red]未提供有效的 URL[/red]", title="错误", style="red"))
+            raise typer.Exit(1)
+
+    url_summary = (
+        f"Redis (key_prefix={config.redis.key_prefix})"
+        if use_redis
+        else f"{len(url_list)} 个"
+    )
+    field_names = [f.get("name", "") for f in fields_config]
+    console.print(Panel(
+        f"[bold]URL 来源:[/bold] {url_summary}\n"
+        f"[bold]字段数量:[/bold] {len(fields_config)} 个\n"
+        f"[bold]字段列表:[/bold] {', '.join(field_names)}\n"
+        f"[bold]无头模式:[/bold] {headless}\n"
+        f"[bold]输出目录:[/bold] {output_dir}",
+        title="批量字段提取器配置",
+        style="cyan",
+    ))
+
+    missing_xpath_fields = [f.get("name") for f in fields_config if not f.get("xpath")]
+    if missing_xpath_fields:
+        console.print(Panel(
+            f"[yellow]以下字段缺少 XPath，批量提取时可能失败:[/yellow]\n"
+            f"{', '.join(missing_xpath_fields)}",
+            title="提示",
+            style="yellow",
+        ))
+
+    try:
+        result = asyncio.run(_run_batch_xpath_extractor(
+            urls=url_list,
+            fields_config=fields_config,
+            headless=headless,
+            output_dir=output_dir,
+        ))
+
+        console.print(Panel(
+            f"[green]批量字段提取完成！[/green]\n\n"
+            f"总 URL: {result.get('total_urls', 0)}\n"
+            f"成功页面: {result.get('success_count', 0)}/{result.get('total_urls', 0)}\n\n"
+            f"输出文件:\n"
+            f"  - {output_dir}/batch_extraction_result.json\n"
+            f"  - {output_dir}/extracted_items.json",
+            title="提取完成",
+            style="green",
+        ))
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断[/yellow]")
+        raise typer.Exit(130)
+    except Exception as e:
+        console.print(Panel(
+            f"[red]{str(e)}[/red]",
+            title="执行错误",
+            style="red",
+        ))
         raise typer.Exit(1)
 
 def main():
