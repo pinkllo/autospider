@@ -155,6 +155,27 @@ class URLCollectorConfig(BaseModel):
     )
 
 
+class FieldExtractorConfig(BaseModel):
+    """字段提取器配置"""
+    
+    # 探索阶段的 URL 数量
+    explore_count: int = Field(
+        default_factory=lambda: int(os.getenv("FIELD_EXPLORE_COUNT", "3"))
+    )
+    # 校验阶段的 URL 数量
+    validate_count: int = Field(
+        default_factory=lambda: int(os.getenv("FIELD_VALIDATE_COUNT", "2"))
+    )
+    # 导航最大步数
+    max_nav_steps: int = Field(
+        default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "10"))
+    )
+    # 模糊匹配阈值
+    fuzzy_match_threshold: float = Field(
+        default_factory=lambda: float(os.getenv("FIELD_FUZZY_THRESHOLD", "0.8"))
+    )
+
+
 class Config(BaseModel):
     """全局配置"""
 
@@ -163,6 +184,7 @@ class Config(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
 
     @classmethod
     def load(cls) -> "Config":

@@ -558,6 +558,240 @@ async def _run_collector(
         )
 
 
+async def _run_field_extractor(
+    urls: list[str] | None,
+    fields_config: list[dict],
+    explore_count: int,
+    validate_count: int,
+    headless: bool,
+    output_dir: str,
+):
+    """异步运行字段提取器"""
+    from .extractor.field import (
+        FieldDefinition,
+        BatchFieldExtractor,
+    )
+    
+    # 转换字段配置
+    fields = [
+        FieldDefinition(
+            name=f["name"],
+            description=f.get("description", f["name"]),
+            required=f.get("required", True),
+            data_type=f.get("data_type", "text"),
+            example=f.get("example"),
+        )
+        for f in fields_config
+    ]
+    
+    redis_manager = None
+    if urls is None:
+        if not config.redis.enabled:
+            raise ValueError("Redis 未启用，请设置 REDIS_ENABLED=true")
+        try:
+            from .common.storage.redis_manager import RedisManager
+        except ImportError as e:
+            raise ImportError("Redis 依赖未安装，请使用 pip install autospider[redis] 安装") from e
+        
+        redis_manager = RedisManager(
+            host=config.redis.host,
+            port=config.redis.port,
+            password=config.redis.password,
+            db=config.redis.db,
+            key_prefix=config.redis.key_prefix,
+            logger=logger,
+        )
+    
+    async with create_browser_session(headless=headless) as session:
+        extractor = BatchFieldExtractor(
+            page=session.page,
+            fields=fields,
+            redis_manager=redis_manager,
+            explore_count=explore_count,
+            validate_count=validate_count,
+            output_dir=output_dir,
+        )
+        return await extractor.run(urls=urls)
+
+
+@app.command("extract-fields")
+def extract_fields_command(
+    urls: Optional[str] = typer.Option(
+        None,
+        "--urls",
+        "-u",
+        help="详情页 URL，多个用逗号分隔，或传入包含 URL 列表的 JSON 文件路径（不传则从 Redis 读取）",
+    ),
+    fields: str = typer.Option(
+        ...,
+        "--fields",
+        "-f",
+        help="字段配置 JSON 文件路径或 JSON 字符串",
+    ),
+    explore_count: int = typer.Option(
+        3,
+        "--explore-count",
+        "-n",
+        help="探索阶段的 URL 数量",
+    ),
+    validate_count: int = typer.Option(
+        2,
+        "--validate-count",
+        "-v",
+        help="校验阶段的 URL 数量",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--no-headless",
+        help="是否使用无头模式",
+    ),
+    output_dir: str = typer.Option(
+        "output",
+        "--output",
+        "-o",
+        help="输出目录",
+    ),
+):
+    """
+    从详情页提取目标字段
+    
+    流程:
+    1. 从提供的 URL 列表中选取若干进行探索（未提供时从 Redis 读取）
+    2. 使用 SoM + LLM 导航到目标字段区域
+    3. 提取字段值并生成 XPath
+    4. 分析多个页面的 XPath，提取公共模式
+    5. 使用额外 URL 校验公共 XPath
+    6. 输出提取配置供批量使用
+    
+    示例:
+        # 使用 URL 列表和字段配置文件
+        autospider extract-fields --urls "urls.json" --fields "fields.json"
+        
+        # 使用逗号分隔的 URL 和 JSON 字符串配置
+        autospider extract-fields --urls "http://a.com,http://b.com" --fields '[{"name":"title","description":"标题"}]'
+    """
+    import json
+    
+    # 解析 URL 列表
+    url_list = None
+    use_redis = urls is None or not urls.strip()
+    if use_redis:
+        if not config.redis.enabled:
+            console.print(Panel(
+                "[red]未启用 Redis，无法从 Redis 读取 URL。请设置 REDIS_ENABLED=true[/red]",
+                title="错误",
+                style="red",
+            ))
+            raise typer.Exit(1)
+    else:
+        if urls.endswith(".json"):
+            # JSON 文件
+            urls_file = Path(urls)
+            if not urls_file.exists():
+                console.print(Panel(f"[red]URL 文件不存在: {urls}[/red]", title="错误", style="red"))
+                raise typer.Exit(1)
+            with open(urls_file, encoding="utf-8") as f:
+                url_list = json.load(f)
+        else:
+            # 逗号分隔的 URL
+            url_list = [u.strip() for u in urls.split(",") if u.strip()]
+        
+        if not url_list:
+            console.print(Panel("[red]未提供有效的 URL[/red]", title="错误", style="red"))
+            raise typer.Exit(1)
+    
+    # 解析字段配置
+    fields_config = []
+    if fields.endswith(".json") or fields.endswith(".yaml"):
+        # 配置文件
+        fields_file = Path(fields)
+        if not fields_file.exists():
+            console.print(Panel(f"[red]字段配置文件不存在: {fields}[/red]", title="错误", style="red"))
+            raise typer.Exit(1)
+        with open(fields_file, encoding="utf-8") as f:
+            if fields.endswith(".yaml"):
+                import yaml
+                fields_config = yaml.safe_load(f)
+            else:
+                fields_config = json.load(f)
+    else:
+        # JSON 字符串
+        try:
+            fields_config = json.loads(fields)
+        except json.JSONDecodeError as e:
+            console.print(Panel(f"[red]字段配置 JSON 解析失败: {e}[/red]", title="错误", style="red"))
+            raise typer.Exit(1)
+    
+    if not fields_config:
+        console.print(Panel("[red]未提供有效的字段配置[/red]", title="错误", style="red"))
+        raise typer.Exit(1)
+    
+    # 显示配置
+    url_summary = (
+        f"Redis (key_prefix={config.redis.key_prefix})"
+        if use_redis
+        else f"{len(url_list)} 个"
+    )
+    console.print(Panel(
+        f"[bold]URL 来源:[/bold] {url_summary}\n"
+        f"[bold]字段数量:[/bold] {len(fields_config)} 个\n"
+        f"[bold]字段列表:[/bold] {', '.join(f['name'] for f in fields_config)}\n"
+        f"[bold]探索数量:[/bold] {explore_count}\n"
+        f"[bold]校验数量:[/bold] {validate_count}\n"
+        f"[bold]无头模式:[/bold] {headless}\n"
+        f"[bold]输出目录:[/bold] {output_dir}",
+        title="字段提取器配置",
+        style="cyan",
+    ))
+    
+    # 运行提取器
+    try:
+        result = asyncio.run(_run_field_extractor(
+            urls=url_list,
+            fields_config=fields_config,
+            explore_count=explore_count,
+            validate_count=validate_count,
+            headless=headless,
+            output_dir=output_dir,
+        ))
+        
+        # 显示结果
+        success_count = sum(1 for r in result.exploration_records if r.success)
+        
+        console.print(Panel(
+            f"[green]字段提取完成！[/green]\n\n"
+            f"探索结果:\n"
+            f"  - 成功提取: {success_count}/{len(result.exploration_records)} 个页面\n"
+            f"  - 公共 XPath: {len(result.common_xpaths)} 个字段\n"
+            f"  - 校验通过: {'是' if result.validation_success else '否'}\n\n"
+            f"输出文件:\n"
+            f"  - {output_dir}/extraction_config.json\n"
+            f"  - {output_dir}/extraction_result.json",
+            title="提取完成",
+            style="green",
+        ))
+        
+        # 显示公共 XPath
+        if result.common_xpaths:
+            console.print("\n[bold]公共 XPath 模式:[/bold]")
+            for xpath_info in result.common_xpaths:
+                status = "✓" if xpath_info.validated else "?"
+                console.print(f"  {status} {xpath_info.field_name}: {xpath_info.xpath_pattern}")
+                console.print(f"      置信度: {xpath_info.confidence:.0%}")
+            
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断[/yellow]")
+        raise typer.Exit(130)
+    except Exception as e:
+        console.print(Panel(
+            f"[red]{str(e)}[/red]",
+            title="执行错误",
+            style="red",
+        ))
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
 def main():
     """CLI 入口点
     

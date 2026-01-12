@@ -69,6 +69,8 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
             placeholder=mark_data.get("placeholder"),
             href=mark_data.get("href"),
             input_type=mark_data.get("input_type"),
+            clickability_reason=mark_data.get("clickability_reason"),
+            clickability_confidence=mark_data.get("clickability_confidence"),
             bbox=bbox,
             center_normalized=tuple(mark_data.get("center_normalized", [0.5, 0.5])),
             xpath_candidates=xpath_candidates,
