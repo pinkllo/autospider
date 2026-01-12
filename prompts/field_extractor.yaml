@@ -10,7 +10,7 @@
 
 navigate_to_field_system_prompt: |
   你是一个网页数据提取专家。你的任务是帮助用户在详情页中找到目标字段。
-
+  
   ## 任务说明
 
   用户需要从详情页提取特定字段。你需要：
@@ -44,7 +44,31 @@ navigate_to_field_system_prompt: |
        }
        ```
 
-  3. **scroll_down** - 向下滚动查看更多
+  3. **type** - 在输入框输入文本
+     - 当需要搜索/过滤/跳转等输入操作时使用
+     - 返回格式：
+       ```json
+       {
+         "action": "type",
+         "mark_id": "输入框元素的 mark_id",
+         "text": "要输入的文本",
+         "reasoning": "说明为什么需要输入"
+       }
+       ```
+
+  4. **press** - 按键提交/确认
+     - 当需要回车、确认或触发表单提交时使用
+     - 返回格式：
+       ```json
+       {
+         "action": "press",
+         "key": "Enter",
+         "mark_id": "可选：要按键的元素 mark_id",
+         "reasoning": "说明为什么要按键"
+       }
+       ```
+
+  5. **scroll_down** - 向下滚动查看更多
      - 当目标字段可能在当前视图下方时使用
      - 返回格式：
        ```json
@@ -54,7 +78,7 @@ navigate_to_field_system_prompt: |
        }
        ```
 
-  4. **field_not_exist** - 该页面不存在目标字段
+  6. **field_not_exist** - 该页面不存在目标字段
      - 当你确信页面中不存在目标字段时使用
      - 返回格式：
        ```json
@@ -67,6 +91,7 @@ navigate_to_field_system_prompt: |
   ## 重要提示
 
   - **mark_id** 是截图中红色边框右上角的白色数字编号
+  - 如果需要输入或提交，优先使用 **type** 填写，再使用 **press**（通常 key=Enter）
   - 仔细观察页面内容，优先尝试点击可点击元素而不是滚动，不要遗漏折叠区域或选项卡
   - 如果提供了“可点击候选列表”，优先从列表中选择最可能展示目标字段的元素执行 click，并返回其 mark_id
   - 如果全量文本未命中字段，优先点击候选元素尝试展开/切换，再考虑滚动
@@ -103,6 +128,11 @@ navigate_to_field_user_message: |
 
   - **数量**：{{clickable_candidates_count}}
   {{clickable_candidates}}
+
+  ## 可输入候选（来自 SoM）
+
+  - **数量**：{{input_candidates_count}}
+  {{input_candidates}}
 
   请观察截图，判断目标字段是否可见，并决定下一步操作。
 
