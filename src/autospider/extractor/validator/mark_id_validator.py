@@ -347,28 +347,28 @@ class MarkIdValidator:
         return norm_llm_no_ws in norm_actual_no_ws or norm_actual_no_ws in norm_llm_no_ws
 
 
-# 兼容旧版本的 mark_ids 列表格式
-def convert_mark_ids_to_map(
-    mark_ids: list[int],
-    snapshot: "SoMSnapshot",
-) -> dict[str, str]:
-    """将旧版本的 mark_ids 列表转换为 mark_id_text_map 格式
+# # 兼容旧版本的 mark_ids 列表格式
+# def convert_mark_ids_to_map(
+#     mark_ids: list[int],
+#     snapshot: "SoMSnapshot",
+# ) -> dict[str, str]:
+#     """将旧版本的 mark_ids 列表转换为 mark_id_text_map 格式
     
-    用于向后兼容。自动从 snapshot 中获取每个 mark_id 对应的文本。
+#     用于向后兼容。自动从 snapshot 中获取每个 mark_id 对应的文本。
     
-    Args:
-        mark_ids: mark_id 列表
-        snapshot: SoM 快照
+#     Args:
+#         mark_ids: mark_id 列表
+#         snapshot: SoM 快照
         
-    Returns:
-        {mark_id: text} 映射
-    """
-    mark_id_to_element = {m.mark_id: m for m in snapshot.marks}
-    result = {}
+#     Returns:
+#         {mark_id: text} 映射
+#     """
+#     mark_id_to_element = {m.mark_id: m for m in snapshot.marks}
+#     result = {}
     
-    for mark_id in mark_ids:
-        element = mark_id_to_element.get(mark_id)
-        if element:
-            result[str(mark_id)] = element.text or ""
+#     for mark_id in mark_ids:
+#         element = mark_id_to_element.get(mark_id)
+#         if element:
+#             result[str(mark_id)] = element.text or ""
     
-    return result
+#     return result
