@@ -16,8 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.config import config
-from ...common.storage import RedisManager
+from ..common.config import config
+from ..common.storage import RedisManager
 
 from .models import (
     FieldDefinition,

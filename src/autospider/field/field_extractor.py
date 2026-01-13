@@ -13,19 +13,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.som import (
+from ..common.som import (
     inject_and_scan,
     capture_screenshot_with_marks,
     clear_overlay,
     build_mark_id_to_xpath_map,
     format_marks_for_llm,
 )
-from ...common.som.text_first import resolve_single_mark_id
-from ...common.browser import ActionExecutor
-from ...common.types import Action, ActionType
-from ...common.config import config
-from ...common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
-from ..llm import LLMDecider
+from ..common.som.text_first import resolve_single_mark_id
+from ..common.browser import ActionExecutor
+from ..common.types import Action, ActionType
+from ..common.config import config
+from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
+from ..extractor.llm import LLMDecider
 
 from .models import (
     FieldDefinition,
