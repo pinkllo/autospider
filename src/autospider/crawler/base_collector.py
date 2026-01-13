@@ -32,6 +32,7 @@ from ..common.som import (
     clear_overlay,
     inject_and_scan,
 )
+from ..common.som.text_first import resolve_mark_ids_from_map
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -424,11 +425,13 @@ class BaseCollector(ABC):
                     
                     if mark_id_text_map:
                         if config.url_collector.validate_mark_id:
-                            from ..extractor.validator.mark_id_validator import MarkIdValidator
-                            
-                            validator = MarkIdValidator()
-                            mark_ids, _ = validator.validate_mark_id_text_map(
-                                mark_id_text_map, snapshot
+                            # 修改原因：与 URLCollector/ConfigGenerator 使用同一套“文本优先 + 歧义重选”逻辑
+                            mark_ids = await resolve_mark_ids_from_map(
+                                page=self.page,
+                                llm=self.llm_decision_maker.decider.llm,
+                                snapshot=snapshot,
+                                mark_id_text_map=mark_id_text_map,
+                                max_retries=config.url_collector.max_validation_retries,
                             )
                         else:
                             mark_ids = [int(k) for k in mark_id_text_map.keys()]

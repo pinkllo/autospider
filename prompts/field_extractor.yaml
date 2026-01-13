@@ -40,6 +40,7 @@ navigate_to_field_system_prompt: |
        {
          "action": "click",
          "mark_id": "要点击的元素的 mark_id",
+         "target_text": "你在截图中看到的该元素文字/aria-label/placeholder（必须提供）",
          "reasoning": "说明为什么点击这个元素可能展示目标字段"
        }
        ```
@@ -51,6 +52,7 @@ navigate_to_field_system_prompt: |
        {
          "action": "type",
          "mark_id": "输入框元素的 mark_id",
+         "target_text": "你在截图中看到的该输入框提示/标签（placeholder/aria-label 等，必须提供）",
          "text": "要输入的文本",
          "reasoning": "说明为什么需要输入"
        }
@@ -64,6 +66,7 @@ navigate_to_field_system_prompt: |
          "action": "press",
          "key": "Enter",
          "mark_id": "可选：要按键的元素 mark_id",
+         "target_text": "可选：如果提供了 mark_id，也请提供该元素文字/提示，系统会用它纠正 mark_id",
          "reasoning": "说明为什么要按键"
        }
        ```
@@ -91,6 +94,7 @@ navigate_to_field_system_prompt: |
   ## 重要提示
 
   - **mark_id** 是截图中红色边框右上角的白色数字编号
+  - 只要你返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字/提示），系统会以 target_text 为准纠正 mark_id，提升鲁棒性
   - 如果需要输入或提交，优先使用 **type** 填写，再使用 **press**（通常 key=Enter）
   - 仔细观察页面内容，优先尝试点击可点击元素而不是滚动，不要遗漏折叠区域或选项卡
   - 如果提供了“可点击候选列表”，优先从列表中选择最可能展示目标字段的元素执行 click，并返回其 mark_id
