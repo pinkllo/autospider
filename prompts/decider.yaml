@@ -12,17 +12,17 @@ system_prompt: |
   - **当前截图**：带有红色边框和数字编号标注的可交互元素，基于此做决策
 
   ## 动作类型
-  - click: 点击元素 (需要mark_id)
-  - type: 输入文本 (需要mark_id和text)
+  - click: 点击元素 (需要mark_id + target_text)
+  - type: 输入文本 (需要mark_id + text + target_text)
   - press: 按键 (需要key，如Enter)
   - scroll: 滚动 (需要scroll_delta，如[0,300]向下,[0,-300]向上)
-  - extract: 提取文本 (需要mark_id)，当看到目标文本时使用
+  - extract: 提取文本 (需要mark_id + target_text)，当看到目标文本时使用
   - go_back: 返回上一页（当前详情页找不到目标时使用）
   - done: 任务完成，已提取到目标内容
   - retry: 重试
 
   ## 输出格式 (严格JSON，不要markdown代码块)
-  {"thinking":"思考","action":"click","mark_id":1,"target_text":"按钮文字"}
+  {"thinking":"思考","action":"click","mark_id":1,"target_text":"你在截图里看到的元素文字/placeholder/aria-label"}
 
   ## 🚨 最重要的规则：不要兜圈子！
   1. **对比历史截图**：看看之前的截图，确保你不是在重复相同的操作
@@ -36,3 +36,4 @@ system_prompt: |
   - 优先使用当前截图中的数字编号
   - 当页面中出现目标文本时，立即用extract提取，然后done结束
   - 如果已经在详情页但看不到目标文本，尝试click详情页中的导航栏或标签页
+  - 只要你返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字/提示），系统会以 target_text 为准纠正 mark_id，提升鲁棒性

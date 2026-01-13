@@ -20,6 +20,7 @@ from ...common.som import (
     build_mark_id_to_xpath_map,
     format_marks_for_llm,
 )
+from ...common.som.text_first import resolve_single_mark_id
 from ...common.browser import ActionExecutor
 from ...common.types import Action, ActionType
 from ...common.config import config
@@ -360,17 +361,47 @@ class FieldExtractor:
                 return decision
             
             elif action == "click":
-                mark_id = decision.get("mark_id")
-                if mark_id:
-                    await self._execute_click(int(mark_id), snapshot)
+                mark_id_raw = decision.get("mark_id")
+                target_text = decision.get("target_text") or ""
+                mark_id_value = None
+                if mark_id_raw is not None:
+                    try:
+                        mark_id_value = int(mark_id_raw)
+                    except (TypeError, ValueError):
+                        mark_id_value = None
+
+                # 修改原因：字段导航点击同样经常出现“文本选对但 mark_id 读错/歧义”的问题，统一用文本优先纠正
+                if config.url_collector.validate_mark_id and target_text:
+                    mark_id_value = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decider.llm,
+                        snapshot=snapshot,
+                        mark_id=mark_id_value,
+                        target_text=target_text,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
+
+                if mark_id_value is not None:
+                    await self._execute_click(mark_id_value, snapshot)
                 await asyncio.sleep(1.0)
 
             elif action == "type":
                 mark_id = decision.get("mark_id")
+                target_text = decision.get("target_text") or ""
                 text = decision.get("text")
                 if mark_id and text:
                     try:
-                        await self._execute_type(int(mark_id), text, snapshot)
+                        mark_id_value = int(mark_id)
+                        if config.url_collector.validate_mark_id and target_text:
+                            mark_id_value = await resolve_single_mark_id(
+                                page=self.page,
+                                llm=self.llm_decider.llm,
+                                snapshot=snapshot,
+                                mark_id=mark_id_value,
+                                target_text=target_text,
+                                max_retries=config.url_collector.max_validation_retries,
+                            )
+                        await self._execute_type(mark_id_value, text, snapshot)
                     except (TypeError, ValueError):
                         print(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
                 else:
@@ -380,12 +411,23 @@ class FieldExtractor:
             elif action == "press":
                 key = decision.get("key") or "Enter"
                 mark_id = decision.get("mark_id")
+                target_text = decision.get("target_text") or ""
                 mark_id_value = None
                 if mark_id is not None:
                     try:
                         mark_id_value = int(mark_id)
                     except (TypeError, ValueError):
                         print(f"[FieldExtractor] 按键动作 mark_id 无效: {mark_id}")
+
+                if config.url_collector.validate_mark_id and target_text:
+                    mark_id_value = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decider.llm,
+                        snapshot=snapshot,
+                        mark_id=mark_id_value,
+                        target_text=target_text,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
                 await self._execute_press(key, mark_id_value, snapshot)
                 await asyncio.sleep(0.5)
             

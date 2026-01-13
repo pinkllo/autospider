@@ -2,6 +2,7 @@
 
 from .api import (
     build_mark_id_to_xpath_map,
+    capture_screenshot_with_custom_marks,
     capture_screenshot_with_marks,
     clear_overlay,
     format_marks_for_llm,
@@ -13,6 +14,7 @@ from .api import (
 __all__ = [
     "inject_and_scan",
     "capture_screenshot_with_marks",
+    "capture_screenshot_with_custom_marks",
     "clear_overlay",
     "set_overlay_visibility",
     "get_element_by_mark_id",

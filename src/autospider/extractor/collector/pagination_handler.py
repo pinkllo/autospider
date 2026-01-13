@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ...common.config import config
 from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks
+from ...common.som.text_first import resolve_single_mark_id
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -274,6 +275,8 @@ class PaginationHandler:
             if data and data.get("found"):
                 input_mark_id = data.get("input_mark_id")
                 button_mark_id = data.get("button_mark_id")
+                input_text = data.get("input_text") or ""
+                button_text = data.get("button_text") or ""
 
                 print(f"[Extract-JumpWidget-LLM] 找到输入框 [{input_mark_id}], 按钮 [{button_mark_id}]")
 
@@ -281,15 +284,44 @@ class PaginationHandler:
                 button_xpath = None
 
                 if input_mark_id:
-                    input_mark_id_str = str(input_mark_id)
-                    element = next((m for m in snapshot.marks if m.mark_id == int(input_mark_id_str)), None)
+                    try:
+                        input_mark_id_value = int(input_mark_id)
+                    except (TypeError, ValueError):
+                        input_mark_id_value = None
+
+                    # 修改原因：全项目统一“文本优先纠正 mark_id”，输入框常见 innerText 为空，需要依赖 placeholder/aria-label
+                    if config.url_collector.validate_mark_id and input_text:
+                        input_mark_id_value = await resolve_single_mark_id(
+                            page=self.page,
+                            llm=self.llm_decision_maker.decider.llm,
+                            snapshot=snapshot,
+                            mark_id=input_mark_id_value,
+                            target_text=input_text,
+                            max_retries=config.url_collector.max_validation_retries,
+                        )
+
+                    element = next((m for m in snapshot.marks if m.mark_id == int(input_mark_id_value)), None) if input_mark_id_value is not None else None
                     if element and element.xpath_candidates:
                         sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
                         input_xpath = sorted_candidates[0].xpath if sorted_candidates else None
 
                 if button_mark_id:
-                    button_mark_id_str = str(button_mark_id)
-                    element = next((m for m in snapshot.marks if m.mark_id == int(button_mark_id_str)), None)
+                    try:
+                        button_mark_id_value = int(button_mark_id)
+                    except (TypeError, ValueError):
+                        button_mark_id_value = None
+
+                    if config.url_collector.validate_mark_id and button_text:
+                        button_mark_id_value = await resolve_single_mark_id(
+                            page=self.page,
+                            llm=self.llm_decision_maker.decider.llm,
+                            snapshot=snapshot,
+                            mark_id=button_mark_id_value,
+                            target_text=button_text,
+                            max_retries=config.url_collector.max_validation_retries,
+                        )
+
+                    element = next((m for m in snapshot.marks if m.mark_id == int(button_mark_id_value)), None) if button_mark_id_value is not None else None
                     if element and element.xpath_candidates:
                         sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
                         button_xpath = sorted_candidates[0].xpath if sorted_candidates else None
@@ -328,11 +360,28 @@ class PaginationHandler:
             data = await self.llm_decision_maker.extract_pagination_with_llm(snapshot, screenshot_base64)
             
             if data and data.get("found") and data.get("mark_id"):
-                mark_id = data["mark_id"]
-                print(f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id}]: {data.get('reasoning', '')}")
+                mark_id_raw = data["mark_id"]
+                target_text = data.get("target_text") or ""
+                print(f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw}]: {data.get('reasoning', '')}")
+
+                try:
+                    mark_id_value = int(mark_id_raw)
+                except (TypeError, ValueError):
+                    mark_id_value = None
+
+                # 修改原因：分页按钮很容易把页面上的“>”等符号误认为编号，统一用文本优先纠正
+                if config.url_collector.validate_mark_id and target_text:
+                    mark_id_value = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decision_maker.decider.llm,
+                        snapshot=snapshot,
+                        mark_id=mark_id_value,
+                        target_text=target_text,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
                 
                 # 找到对应的元素，获取其 xpath
-                element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
+                element = next((m for m in snapshot.marks if m.mark_id == mark_id_value), None)
                 if element and element.xpath_candidates:
                     # 取优先级最高的 xpath
                     sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
@@ -514,8 +563,30 @@ class PaginationHandler:
             data = await self.llm_decision_maker.extract_pagination_with_llm(snapshot, screenshot_base64)
             
             if data and data.get("found") and data.get("mark_id"):
-                mark_id = str(data["mark_id"])  # 确保是字符串
-                print(f"[Pagination-LLM] 找到下一页按钮 [{mark_id}]")
+                mark_id_raw = data["mark_id"]
+                target_text = data.get("target_text") or ""
+                print(f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw}]")
+
+                try:
+                    mark_id_value = int(mark_id_raw)
+                except (TypeError, ValueError):
+                    mark_id_value = None
+
+                if config.url_collector.validate_mark_id and target_text:
+                    mark_id_value = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decision_maker.decider.llm,
+                        snapshot=snapshot,
+                        mark_id=mark_id_value,
+                        target_text=target_text,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
+
+                if mark_id_value is None:
+                    print(f"[Pagination-LLM] mark_id 无效，无法点击: {mark_id_raw}")
+                    return False
+
+                mark_id = str(mark_id_value)  # data-som-id 是字符串
                 
                 # 点击（使用 data-som-id 属性）
                 locator = self.page.locator(f'[data-som-id="{mark_id}"]')

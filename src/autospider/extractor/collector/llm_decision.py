@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..llm.prompt_template import render_template
+from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..llm import LLMDecider
-    from ...common.types import SoMSnapshot
+    from ...common.types import SoMSnapshot, ElementMark
 
 
 # Prompt 模板文件路径
@@ -119,6 +120,24 @@ class LLMDecisionMaker:
             traceback.print_exc()
         
         return None
+
+    async def disambiguate_mark_id_by_text(
+        self,
+        candidates: list["ElementMark"],
+        target_text: str,
+        max_retries: int = 1,
+    ) -> int | None:
+        """当文本命中多个候选时，重新框选这些候选让 LLM 重选
+
+        修改原因：消歧逻辑需要在全项目复用，因此下沉到 `common/som/text_first.py` 统一实现。
+        """
+        return await _disambiguate_mark_id_by_text(
+            page=self.page,
+            llm=self.decider.llm,
+            candidates=candidates,
+            target_text=target_text,
+            max_retries=max_retries,
+        )
 
     async def extract_jump_widget_with_llm(self, snapshot: "SoMSnapshot", screenshot_base64: str) -> dict | None:
         """使用 LLM 视觉识别页码跳转控件（输入框 + 确定按钮）"""

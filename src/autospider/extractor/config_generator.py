@@ -21,7 +21,7 @@ from ..common.som import (
     clear_overlay,
     inject_and_scan,
 )
-from ..extractor.validator.mark_id_validator import MarkIdValidator
+from ..common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
 from .collector import (
     DetailPageVisit,
     XPathExtractor,
@@ -354,11 +354,9 @@ class ConfigGenerator:
         if mark_id_text_map:
             print(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
             
-            # 验证 mark_id
+            # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
             if config.url_collector.validate_mark_id:
-                mark_ids = self._validate_mark_ids(mark_id_text_map, snapshot, screenshot_base64)
-                if not mark_ids:
-                    return explored
+                mark_ids = await self._resolve_mark_ids_by_text(mark_id_text_map, snapshot)
             else:
                 mark_ids = [int(k) for k in mark_id_text_map.keys()]
         elif old_mark_ids:
@@ -410,31 +408,48 @@ class ConfigGenerator:
         
         return explored
     
-    def _validate_mark_ids(
-        self, mark_id_text_map: dict, snapshot: "SoMSnapshot", screenshot_base64: str
+    async def _resolve_mark_ids_by_text(
+        self, mark_id_text_map: dict, snapshot: "SoMSnapshot"
     ) -> list[int]:
-        """验证 mark_id 与文本的匹配"""
-        validator = MarkIdValidator()
-        valid_mark_ids, validation_results = validator.validate_mark_id_text_map(
-            mark_id_text_map, snapshot
+        """文本优先解析 mark_id：匹配/纠正/歧义重选（M=0 直接报错）
+
+        修改原因：旧逻辑把文本当作校验信号，会丢弃 LLM 返回但 mark_id 不匹配的结果；
+        新逻辑把文本当作“正确答案”，在候选框内按文本定位真实元素，并在歧义时触发重选。
+        """
+        # 修改原因：统一使用 common/som/text_first.py 的同一套逻辑，避免各模块策略漂移。
+        mark_ids = await resolve_mark_ids_from_map(
+            page=self.page,
+            llm=self.decider.llm,
+            snapshot=snapshot,
+            mark_id_text_map=mark_id_text_map,
+            max_retries=config.url_collector.max_validation_retries,
         )
-        
-        total = len(validation_results)
-        passed = len([r for r in validation_results if r.is_valid])
-        failed_results = [r for r in validation_results if not r.is_valid]
-        print(f"[Explore] mark_id 验证: {passed}/{total} 通过")
-        
-        # 如果有验证失败且没有通过的，重试
-        if failed_results and not valid_mark_ids:
-            print(f"[Explore] ⚠ 所有 mark_id 验证失败，将反馈给 LLM 重新选择")
-            return []
-        
-        return valid_mark_ids
+        print(f"[Explore] mark_id 解析完成: {len(mark_ids)} 个")
+        return mark_ids
     
     async def _handle_click_to_enter(self, llm_decision: dict, snapshot: "SoMSnapshot") -> bool:
         """处理点击进入详情页的情况"""
-        mark_id = llm_decision.get("mark_id")
-        print(f"[Explore] LLM 要求点击元素 [{mark_id}] 进入详情页")
+        mark_id_raw = llm_decision.get("mark_id")
+        target_text = llm_decision.get("target_text") or ""
+        try:
+            mark_id = int(mark_id_raw) if mark_id_raw is not None else None
+        except (TypeError, ValueError):
+            mark_id = None
+        print(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
+
+        # 修改原因：全项目统一“文本优先纠正 mark_id”，避免 LLM 读错编号导致误点
+        if config.url_collector.validate_mark_id and target_text:
+            try:
+                mark_id = await resolve_single_mark_id(
+                    page=self.page,
+                    llm=self.decider.llm,
+                    snapshot=snapshot,
+                    mark_id=mark_id,
+                    target_text=target_text,
+                    max_retries=config.url_collector.max_validation_retries,
+                )
+            except Exception as e:
+                raise ValueError(f"点击进入详情页：无法根据文本纠正 mark_id: {e}") from e
         
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
         if element:

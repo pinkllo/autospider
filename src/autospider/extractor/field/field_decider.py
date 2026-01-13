@@ -85,7 +85,7 @@ class FieldDecider:
             except ValueError:
                 pass
 
-        for key in ["field_value", "field_text", "reasoning", "location_description"]:
+        for key in ["field_value", "field_text", "reasoning", "location_description", "target_text"]:
             value_match = re.search(rf'"{key}"\s*:\s*"([^"]*)', text)
             if value_match:
                 data[key] = value_match.group(1)

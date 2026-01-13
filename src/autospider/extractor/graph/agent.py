@@ -24,6 +24,7 @@ from ...common.som import (
     inject_and_scan,
     set_overlay_visibility,
 )
+from ...common.som.text_first import resolve_single_mark_id
 from ...common.types import (
     Action,
     ActionResult,
@@ -230,6 +231,8 @@ class SoMAgent:
             state["screenshot_base64"] = screenshot_base64
             state["marks_text"] = marks_text
             state["mark_id_to_xpath"] = mark_id_to_xpath
+            # 修改原因：执行动作前需要同一轮 snapshot 来做“文本优先纠正 mark_id / 歧义重选”
+            state["som_snapshot"] = snapshot.model_dump()
             
             # 保存滚动信息
             if snapshot.scroll_info:
@@ -340,6 +343,30 @@ class SoMAgent:
             return state
 
         try:
+            # 文本优先纠正 mark_id（全项目统一策略）
+            if config.url_collector.validate_mark_id and action.target_text:
+                snapshot_data = state.get("som_snapshot")
+                if snapshot_data:
+                    snapshot = SoMSnapshot(**snapshot_data)
+                    try:
+                        resolved_id = await resolve_single_mark_id(
+                            page=self.page,
+                            llm=self.decider.llm,
+                            snapshot=snapshot,
+                            mark_id=action.mark_id,
+                            target_text=action.target_text,
+                            max_retries=config.url_collector.max_validation_retries,
+                        )
+                        if action.mark_id != resolved_id:
+                            print(
+                                f"[Act] 文本优先纠正 mark_id: {action.mark_id} -> {resolved_id} | text='{action.target_text[:50]}'"
+                            )
+                            action.mark_id = resolved_id
+                            state["current_action"] = action.model_dump()
+                    except Exception as e:
+                        # 修改原因：你要求 |M|=0 直接报错，这里让失败尽早暴露，避免误点误输
+                        raise RuntimeError(f"无法根据文本纠正 mark_id: {e}") from e
+
             # 隐藏覆盖层以便点击（虽然是 pointer-events: none，但为保险起见）
             await set_overlay_visibility(self.page, False)
 
