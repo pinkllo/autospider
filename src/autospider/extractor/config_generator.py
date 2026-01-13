@@ -356,7 +356,14 @@ class ConfigGenerator:
             
             # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
             if config.url_collector.validate_mark_id:
-                mark_ids = await self._resolve_mark_ids_by_text(mark_id_text_map, snapshot)
+                # 修改原因：解析逻辑已统一抽到 common/som/text_first.py，这里直接调用避免重复封装
+                mark_ids = await resolve_mark_ids_from_map(
+                    page=self.page,
+                    llm=self.decider.llm,
+                    snapshot=snapshot,
+                    mark_id_text_map=mark_id_text_map,
+                    max_retries=config.url_collector.max_validation_retries,
+                )
             else:
                 mark_ids = [int(k) for k in mark_id_text_map.keys()]
         elif old_mark_ids:
@@ -407,25 +414,6 @@ class ConfigGenerator:
                 print(f"[Explore] 已探索 {explored}/{self.explore_count} 个详情页")
         
         return explored
-    
-    async def _resolve_mark_ids_by_text(
-        self, mark_id_text_map: dict, snapshot: "SoMSnapshot"
-    ) -> list[int]:
-        """文本优先解析 mark_id：匹配/纠正/歧义重选（M=0 直接报错）
-
-        修改原因：旧逻辑把文本当作校验信号，会丢弃 LLM 返回但 mark_id 不匹配的结果；
-        新逻辑把文本当作“正确答案”，在候选框内按文本定位真实元素，并在歧义时触发重选。
-        """
-        # 修改原因：统一使用 common/som/text_first.py 的同一套逻辑，避免各模块策略漂移。
-        mark_ids = await resolve_mark_ids_from_map(
-            page=self.page,
-            llm=self.decider.llm,
-            snapshot=snapshot,
-            mark_id_text_map=mark_id_text_map,
-            max_retries=config.url_collector.max_validation_retries,
-        )
-        print(f"[Explore] mark_id 解析完成: {len(mark_ids)} 个")
-        return mark_ids
     
     async def _handle_click_to_enter(self, llm_decision: dict, snapshot: "SoMSnapshot") -> bool:
         """处理点击进入详情页的情况"""
