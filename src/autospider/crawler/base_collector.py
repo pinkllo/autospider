@@ -79,6 +79,10 @@ class BaseCollector(ABC):
         
         # 收集的数据
         self.collected_urls: list[str] = []
+        # 记录已写入 urls.txt 的数量（用于增量追加，避免每次都把全量 URL 做去重追加）
+        # 修改原因：URLCollector/BatchCollector 之前每次保存进度都会 append_urls(self.collected_urls)，
+        # ProgressPersistence 内部会读全量 urls.txt 去重，频繁调用会带来不必要的 I/O。
+        self._last_appended_url_count: int = 0
         self.nav_steps: list[dict] = []
         self.common_detail_xpath: str | None = None
         
@@ -230,14 +234,17 @@ class BaseCollector(ABC):
         """收集阶段：使用公共 XPath 直接提取 URL"""
         if not self.common_detail_xpath:
             return
-        
-        logger.info("返回列表页开始位置...")
-        await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(1)
-        
-        # 重放导航步骤
-        if self.nav_steps and self.navigation_handler:
-            await self.navigation_handler.replay_nav_steps(self.nav_steps)
+
+        # 修改原因：断点恢复时（current_page_num>1）通常已通过 ResumeCoordinator 定位到目标页，
+        # 此时再 goto(list_url) 会把页码重置回第一页，导致断点续爬失效。
+        if self.pagination_handler and self.pagination_handler.current_page_num > 1:
+            logger.info(
+                f"断点恢复：从当前页面继续收集（第 {self.pagination_handler.current_page_num} 页）"
+            )
+        else:
+            logger.info("返回列表页开始位置...")
+            await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(1)
         
         max_pages = config.url_collector.max_pages
         target_url_count = config.url_collector.target_url_count
@@ -333,9 +340,20 @@ class BaseCollector(ABC):
     
     async def _collect_phase_with_llm(self) -> None:
         """收集阶段：使用 LLM 遍历列表页"""
-        logger.info("返回列表页开始位置...")
-        await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(1)
+        # 修改原因：断点恢复时（current_page_num>1）通常已通过 ResumeCoordinator 定位到目标页，
+        # 此时再 goto(list_url) 会把页码重置回第一页，导致断点续爬失效。
+        if self.pagination_handler and self.pagination_handler.current_page_num > 1:
+            logger.info(
+                f"断点恢复：从当前页面继续收集（第 {self.pagination_handler.current_page_num} 页）"
+            )
+        else:
+            logger.info("返回列表页开始位置...")
+            await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(1)
+
+            # 重放导航步骤
+            if self.nav_steps and self.navigation_handler:
+                await self.navigation_handler.replay_nav_steps(self.nav_steps)
         
         max_scrolls = config.url_collector.max_scrolls
         no_new_threshold = config.url_collector.no_new_url_threshold
@@ -490,6 +508,20 @@ class BaseCollector(ABC):
             consecutive_success_pages=self.rate_controller.consecutive_success_count,
         )
         self.progress_persistence.save_progress(progress)
+        self._append_new_urls_to_progress()
+
+    def _append_new_urls_to_progress(self) -> None:
+        """将新增 URL 增量追加到 urls.txt"""
+        if not self.collected_urls:
+            return
+
+        if self._last_appended_url_count >= len(self.collected_urls):
+            return
+
+        new_urls = self.collected_urls[self._last_appended_url_count :]
+        if new_urls:
+            self.progress_persistence.append_urls(new_urls)
+        self._last_appended_url_count = len(self.collected_urls)
     
     def _create_result(self) -> URLCollectorResult:
         """创建收集结果"""
