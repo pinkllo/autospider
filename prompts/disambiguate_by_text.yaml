@@ -16,14 +16,13 @@ system_prompt: |
   - mark_id 是红色边框右上角的白色数字编号（本轮从 1 开始）
   - 目标文本以用户提供的为准（它一定正确）
 
-  输出格式：严格 JSON，不要使用 markdown 代码块。
+  输出格式：严格 JSON，不要使用 markdown 代码块（统一协议 autospider.protocol.v1）。
 
   返回示例：
-  {"selected_mark_id":"1","reasoning":"说明你为什么选择这个元素（位置/上下文/样式等）"}
+  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"disambiguate_by_text","items":[{"mark_id":1,"text":"（可选）该元素文本"}],"reasoning":"说明你为什么选择这个元素（位置/上下文/样式等）"}}
 
 user_message: |
   目标文本：{{target_text}}
 
   当前截图只标注了 {{candidate_count}} 个候选元素（已重新编号）。
   请在截图中选择与目标文本对应的元素 mark_id。
-
