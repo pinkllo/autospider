@@ -14,22 +14,11 @@ from typing import TYPE_CHECKING
 
 from ..common.config import config
 from ..common.logger import get_logger
-from ..common.storage.redis_manager import RedisManager
-from ..common.storage.persistence import CollectionConfig, ConfigPersistence, ProgressPersistence, CollectionProgress
-from .checkpoint import AdaptiveRateController
-from ..crawler.checkpoint.resume_strategy import ResumeCoordinator
+from ..common.storage.persistence import CollectionConfig, ConfigPersistence
 from ..extractor.collector import (
     URLCollectorResult,
     LLMDecisionMaker,
-    URLExtractor,
     NavigationHandler,
-    PaginationHandler,
-    smart_scroll,
-)
-from ..common.som import (
-    capture_screenshot_with_marks,
-    clear_overlay,
-    inject_and_scan,
 )
 from ..extractor.llm import LLMDecider
 from .base_collector import BaseCollector
@@ -265,14 +254,6 @@ class BatchCollector(BaseCollector):
             self.collection_config.pagination_xpath if self.collection_config else None
         )
         return await super()._resume_to_target_page(target_page_num, jump_xpath, pag_xpath)
-    
-    def _save_progress(self) -> None:
-        """保存收集进度（覆盖基类以添加 append_urls）"""
-        super()._save_progress()
-        # 追加新收集到的URL
-        if self.collected_urls:
-            self.progress_persistence.append_urls(self.collected_urls)
-
     
     def _create_result(self) -> URLCollectorResult:
         return URLCollectorResult(
