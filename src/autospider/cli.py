@@ -567,7 +567,7 @@ async def _run_field_extractor(
     output_dir: str,
 ):
     """异步运行字段提取器"""
-    from .extractor.field import (
+    from .field import (
         FieldDefinition,
         BatchFieldExtractor,
     )
@@ -621,7 +621,7 @@ async def _run_batch_xpath_extractor(
     output_dir: str,
 ):
     """异步运行批量 XPath 字段提取器"""
-    from .extractor.field import BatchXPathExtractor
+    from .field import BatchXPathExtractor
 
     if urls is None:
         if not config.redis.enabled:

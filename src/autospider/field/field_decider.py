@@ -15,17 +15,17 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..llm.prompt_template import render_template
+from ..extractor.llm.prompt_template import render_template
 from .models import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..llm import LLMDecider
-    from ...common.types import ElementMark, SoMSnapshot, ScrollInfo
+    from ..extractor.llm import LLMDecider
+    from ..common.types import ElementMark, SoMSnapshot, ScrollInfo
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "field_extractor.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).resolve().parents[3] / "prompts" / "field_extractor.yaml")
 
 
 class FieldDecider:
