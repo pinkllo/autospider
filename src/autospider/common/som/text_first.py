@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
+from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_selected_mark
 from ...extractor.llm.prompt_template import render_template
 from ...extractor.validator.mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks
@@ -173,14 +174,11 @@ async def disambiguate_mark_id_by_text(
         response = await llm.ainvoke(messages)
         response_text = getattr(response, "content", "") or ""
 
-        json_match = re.search(r"\{[\s\S]*\}", response_text)
-        if not json_match:
+        data = parse_json_dict_from_llm(response_text)
+        if not data:
             continue
 
-        try:
-            data = json.loads(json_match.group())
-        except json.JSONDecodeError:
-            continue
+        data = protocol_to_legacy_selected_mark(data)
 
         selected = data.get("selected_mark_id") or data.get("mark_id")
         try:

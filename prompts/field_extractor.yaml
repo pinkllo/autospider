@@ -19,88 +19,45 @@ navigate_to_field_system_prompt: |
   3. 如果可见，标记为已找到
   4. 如果不可见，决定如何导航到目标字段
 
-  ## 可用操作
+  ## 统一输出协议（必须遵守）
+  - 你必须输出 `autospider.protocol.v1` 协议的严格 JSON（不要 markdown 代码块）。
+  - 协议格式：
+    {"protocol":"autospider.protocol.v1","thinking":"...","action":"click|type|press|scroll|extract","args":{...}}
 
-  1. **found_field** - 已找到目标字段，准备提取
-     - 当目标字段在当前视图中清晰可见时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "found_field",
-         "field_text": "字段的实际文本值（你在截图中看到的）",
-         "mark_id": "包含该字段的元素的 mark_id（如果能识别）",
-         "reasoning": "说明在哪里找到了该字段"
-       }
-       ```
+  ## 可用操作（action）
+
+  1. **extract（kind=field）** - 已找到字段或确认字段不存在（字段提取结果统一走 extract）
+     - 当字段在当前视图中清晰可见：found=true，并给出 field_value（精确复制）
+     - 当你确信页面不存在该字段：found=false
+     - 返回示例：
+       {"protocol":"autospider.protocol.v1","action":"extract","args":{"kind":"field","field_name":"从用户消息里的字段名称逐字复制","found":true,"field_value":"精确字段值","confidence":0.95,"mark_id":12,"target_text":"截图里对应的文字/提示","location_description":"位置描述","reasoning":"说明依据"}}
 
   2. **click** - 点击元素
-     - 当目标字段可能隐藏在折叠区域、选项卡或需要点击才能显示时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "click",
-         "mark_id": "要点击的元素的 mark_id",
-         "target_text": "你在截图中看到的该元素文字/aria-label/placeholder（必须提供）",
-         "reasoning": "说明为什么点击这个元素可能展示目标字段"
-       }
-       ```
+     - 返回示例：
+       {"protocol":"autospider.protocol.v1","action":"click","args":{"mark_id":12,"target_text":"你在截图中看到的文字/aria-label/placeholder","reasoning":"为什么点击它可能展示目标字段"}}
 
   3. **type** - 在输入框输入文本
-     - 当需要搜索/过滤/跳转等输入操作时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "type",
-         "mark_id": "输入框元素的 mark_id",
-         "target_text": "你在截图中看到的该输入框提示/标签（placeholder/aria-label 等，必须提供）",
-         "text": "要输入的文本",
-         "reasoning": "说明为什么需要输入"
-       }
-       ```
+     - 返回示例：
+       {"protocol":"autospider.protocol.v1","action":"type","args":{"mark_id":12,"target_text":"输入框提示/标签（placeholder/aria-label）","text":"要输入的文本","reasoning":"为什么需要输入"}}
 
   4. **press** - 按键提交/确认
-     - 当需要回车、确认或触发表单提交时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "press",
-         "key": "Enter",
-         "mark_id": "可选：要按键的元素 mark_id",
-         "target_text": "可选：如果提供了 mark_id，也请提供该元素文字/提示，系统会用它纠正 mark_id",
-         "reasoning": "说明为什么要按键"
-       }
-       ```
+     - 返回示例：
+       {"protocol":"autospider.protocol.v1","action":"press","args":{"key":"Enter","mark_id":12,"target_text":"（可选）元素提示","reasoning":"为什么要按键"}}
 
-  5. **scroll_down** - 向下滚动查看更多
-     - 当目标字段可能在当前视图下方时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "scroll_down",
-         "reasoning": "说明为什么需要滚动"
-       }
-       ```
-
-  6. **field_not_exist** - 该页面不存在目标字段
-     - 当你确信页面中不存在目标字段时使用
-     - 返回格式：
-       ```json
-       {
-         "action": "field_not_exist",
-         "reasoning": "说明为什么确定字段不存在"
-       }
-       ```
+  5. **scroll** - 向下滚动查看更多
+     - 返回示例：
+       {"protocol":"autospider.protocol.v1","action":"scroll","args":{"scroll_delta":[0,500],"reasoning":"说明为什么需要滚动"}}
 
   ## 重要提示
 
   - **mark_id** 是截图中红色边框右上角的白色数字编号
-  - 只要你返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字/提示），系统会以 target_text 为准纠正 mark_id，提升鲁棒性
+  - 只要你在 args 里返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字/提示），系统会以 target_text 为准纠正 mark_id，提升鲁棒性
   - 如果需要输入或提交，优先使用 **type** 填写，再使用 **press**（通常 key=Enter）
   - 仔细观察页面内容，优先尝试点击可点击元素而不是滚动，不要遗漏折叠区域或选项卡
   - 如果提供了“可点击候选列表”，优先从列表中选择最可能展示目标字段的元素执行 click，并返回其 mark_id
   - 如果全量文本未命中字段，优先点击候选元素尝试展开/切换，再考虑滚动
   - 如果不确定字段是否存在，优先选择滚动或点击探索
-  - 输出格式：严格 JSON，不要使用 markdown 代码块
+  - 输出格式：严格 JSON，不要使用 markdown 代码块（必须包含 protocol 字段）
 
 navigate_to_field_user_message: |
   ## 目标字段信息
@@ -154,25 +111,15 @@ extract_field_text_system_prompt: |
   2. 准确识别字段的文本值
   3. 返回提取结果
 
-  ## 输出格式
+  ## 输出格式（统一协议 autospider.protocol.v1；字段提取结果统一走 extract）
 
   严格 JSON 格式，不要使用 markdown 代码块：
 
   **找到字段时**：
-  {
-    "found": true,
-    "field_value": "字段的实际文本值（精确复制）",
-    "confidence": 0.95,
-    "location_description": "字段在页面中的位置描述（如：页面顶部标题区域）",
-    "reasoning": "说明找到字段的依据"
-  }
+  {"protocol":"autospider.protocol.v1","action":"extract","args":{"kind":"field","field_name":"从用户消息里的字段名称逐字复制","found":true,"field_value":"字段的实际文本值（精确复制）","confidence":0.95,"location_description":"字段在页面中的位置描述（如：页面顶部标题区域）","reasoning":"说明找到字段的依据"}}
 
   **未找到字段时**：
-  {
-    "found": false,
-    "confidence": 0.0,
-    "reasoning": "说明为什么未找到"
-  }
+  {"protocol":"autospider.protocol.v1","action":"extract","args":{"kind":"field","field_name":"从用户消息里的字段名称逐字复制","found":false,"confidence":0.0,"reasoning":"说明为什么未找到"}}
 
 
   ## 重要提示
@@ -215,15 +162,11 @@ select_match_system_prompt: |
 
   来判断哪个是真正的目标字段。
 
-  ## 输出格式
+  ## 输出格式（统一协议 autospider.protocol.v1）
 
   严格 JSON 格式：
 
-  {
-    "selected_mark_id": "选中的 mark_id",
-    "selected_text": "该元素的文本内容",
-    "reasoning": "详细说明选择理由，包括位置、样式、上下文等因素"
-  }
+  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"field_match","items":[{"mark_id":1,"text":"该元素文本（可选）"}],"reasoning":"详细说明选择理由，包括位置、样式、上下文等因素"}}
 
 
   ## 重要提示

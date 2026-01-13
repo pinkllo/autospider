@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,6 +10,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..llm.prompt_template import render_template
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
+from ...common.protocol import (
+    parse_json_dict_from_llm,
+    protocol_to_legacy_jump_widget_result,
+    protocol_to_legacy_pagination_result,
+    protocol_to_legacy_url_decision,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -102,15 +107,15 @@ class LLMDecisionMaker:
             response_text = response.content
             print(f"[LLM] 响应前100字符: {response_text[:100]}...")
             
-            # 解析 JSON
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                data = json.loads(json_match.group())
-                print(f"[LLM] 决策: {data.get('action')}")
-                print(f"[LLM] 理由: {data.get('reasoning', 'N/A')[:100]}...")
-                return data
-            else:
-                print(f"[LLM] 响应中未找到 JSON: {response_text[:200]}")
+            data = parse_json_dict_from_llm(response_text)
+            if data:
+                # 兼容：统一协议 autospider.protocol.v1 → URLCollector 旧决策结构
+                legacy = protocol_to_legacy_url_decision(data)
+                print(f"[LLM] 决策: {legacy.get('action')}")
+                print(f"[LLM] 理由: {legacy.get('reasoning', 'N/A')[:100]}...")
+                return legacy
+
+            print(f"[LLM] 响应中未找到 JSON: {response_text[:200]}")
         except json.JSONDecodeError as e:
             print(f"[LLM] JSON 解析失败: {e}")
             print(f"[LLM] 原始响应: {response_text[:300] if 'response_text' in locals() else 'N/A'}")
@@ -164,10 +169,9 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
 
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                data = json.loads(json_match.group())
-                return data
+            data = parse_json_dict_from_llm(response_text)
+            if data:
+                return protocol_to_legacy_jump_widget_result(data)
         except Exception as e:
             print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
 
@@ -200,11 +204,9 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
             
-            # 解析 JSON
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                data = json.loads(json_match.group())
-                return data
+            data = parse_json_dict_from_llm(response_text)
+            if data:
+                return protocol_to_legacy_pagination_result(data)
         except Exception as e:
             print(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
         

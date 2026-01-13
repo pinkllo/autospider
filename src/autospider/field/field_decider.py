@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,6 +15,12 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..extractor.llm.prompt_template import render_template
+from ..common.protocol import (
+    parse_json_dict_from_llm,
+    protocol_to_legacy_field_extract_result,
+    protocol_to_legacy_field_nav_decision,
+    protocol_to_legacy_selected_mark,
+)
 from .models import FieldDefinition
 
 if TYPE_CHECKING:
@@ -98,14 +103,12 @@ class FieldDecider:
         return data or None
 
     def _parse_response_json(self, response_text: str) -> dict | None:
-        cleaned = self._strip_code_fences(response_text)
-        json_text = self._extract_json_block(cleaned)
-        if json_text:
-            try:
-                return json.loads(json_text)
-            except json.JSONDecodeError as e:
-                print(f"[FieldDecider] JSON 解析失败: {e}")
+        # 优先走统一 JSON 解析（支持 autospider.protocol.v1）
+        parsed = parse_json_dict_from_llm(response_text)
+        if parsed:
+            return parsed
 
+        cleaned = self._strip_code_fences(response_text)
         fallback = self._salvage_response(cleaned)
         if fallback:
             print("[FieldDecider] 使用降级解析结果")
@@ -382,6 +385,8 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
+                # 兼容：统一协议 autospider.protocol.v1 → 字段导航旧结构
+                data = protocol_to_legacy_field_nav_decision(data, field.name)
                 print(f"[FieldDecider] 决策: {data.get('action')}")
                 return data
             print(f"[FieldDecider] 响应中未找到 JSON")
@@ -440,6 +445,8 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
+                # 兼容：统一协议 autospider.protocol.v1 → 字段提取旧结构
+                data = protocol_to_legacy_field_extract_result(data, field.name)
                 if data.get("found"):
                     print(f"[FieldDecider] 提取到值: {data.get('field_value', '')[:50]}...")
                 else:
@@ -505,6 +512,8 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
+                # 兼容：统一协议 autospider.protocol.v1 → selected_mark_id 旧结构
+                data = protocol_to_legacy_selected_mark(data)
                 print(f"[FieldDecider] 选择: mark_id={data.get('selected_mark_id')}")
                 return data
         except Exception as e:

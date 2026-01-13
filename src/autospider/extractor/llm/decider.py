@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,6 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from ...common.config import config
 from ...common.types import Action, ActionType, ScrollInfo
+from ...common.protocol import parse_json_dict_from_llm, protocol_to_legacy_agent_action
 from .prompt_template import render_template
 
 if TYPE_CHECKING:
@@ -439,41 +438,54 @@ class LLMDecider:
 
     def _parse_response(self, response_text: str) -> Action:
         """解析 LLM 响应"""
-        # 先清理 markdown 代码块标记
-        cleaned_text = response_text
-        
-        # 移除 ```json ... ``` 或 ``` ... ``` 包裹
-        code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', cleaned_text)
-        if code_block_match:
-            cleaned_text = code_block_match.group(1).strip()
-        
-        # 尝试提取 JSON 对象
-        json_match = re.search(r'\{[\s\S]*\}', cleaned_text)
-        if not json_match:
-            # 如果没有找到 JSON，返回 retry
+        data = parse_json_dict_from_llm(response_text)
+        if not data:
             return Action(
                 action=ActionType.RETRY,
                 thinking=f"无法解析 LLM 响应: {response_text[:200]}",
             )
 
-        try:
-            json_str = json_match.group()
-            # 尝试修复常见的 JSON 问题（如末尾多余逗号）
-            json_str = re.sub(r',\s*}', '}', json_str)
-            json_str = re.sub(r',\s*]', ']', json_str)
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            return Action(
-                action=ActionType.RETRY,
-                thinking=f"JSON 解析失败 ({str(e)}): {response_text[:200]}",
-            )
+        # 兼容：统一协议 autospider.protocol.v1 → 扁平结构
+        data = protocol_to_legacy_agent_action(data)
 
         # 解析 action 类型
-        action_str = data.get("action", "retry").lower()
-        try:
-            action_type = ActionType(action_str)
-        except ValueError:
-            action_type = ActionType.RETRY
+        action_str_raw = data.get("action") or ""
+        action_str = str(action_str_raw).strip().lower()
+        action_aliases = {
+            # 常见同义/历史动作名
+            "scroll_down": "scroll",
+            "scroll_up": "scroll",
+        }
+        action_str = action_aliases.get(action_str, action_str)
+
+        action_type: ActionType | None = None
+        if action_str:
+            try:
+                action_type = ActionType(action_str)
+            except ValueError:
+                action_type = None
+
+        # 修改原因：LLM 偶尔会漏写/写错 action，但其它字段已足够推断具体动作；
+        # 为避免被误判为 retry 并陷入循环，这里对缺失/非法 action 做自动推断。
+        inferred = False
+        if action_type is None:
+            if data.get("text") and data.get("mark_id") is not None:
+                action_type = ActionType.TYPE
+                inferred = True
+            elif data.get("key"):
+                action_type = ActionType.PRESS
+                inferred = True
+            elif data.get("scroll_delta") is not None:
+                action_type = ActionType.SCROLL
+                inferred = True
+            elif data.get("url"):
+                action_type = ActionType.NAVIGATE
+                inferred = True
+            elif data.get("mark_id") is not None:
+                action_type = ActionType.CLICK
+                inferred = True
+            else:
+                action_type = ActionType.RETRY
 
         # 解析 scroll_delta
         scroll_delta = None
@@ -482,13 +494,25 @@ class LLMDecider:
             if isinstance(sd, list) and len(sd) == 2:
                 scroll_delta = (int(sd[0]), int(sd[1]))
 
+        thinking = data.get("thinking", "") or ""
+        if inferred and not thinking:
+            thinking = f"自动推断动作: {action_type.value}"
+        if action_type == ActionType.RETRY and not thinking:
+            thinking = "LLM 输出未包含可执行 action，已进入重试"
+
+        # 修改原因：当 action=retry 时，清空 mark_id/target_text，避免上层误以为“重试仍指向同一元素”并造成循环提示噪音。
+        mark_id = None if action_type == ActionType.RETRY else data.get("mark_id")
+        target_text = None if action_type == ActionType.RETRY else data.get("target_text")
+
         return Action(
             action=action_type,
-            mark_id=data.get("mark_id"),
-            target_text=data.get("target_text"),
+            mark_id=mark_id,
+            target_text=target_text,
             text=data.get("text"),
             key=data.get("key"),
+            url=data.get("url"),
             scroll_delta=scroll_delta,
-            thinking=data.get("thinking", ""),
+            timeout_ms=data.get("timeout_ms") or 5000,
+            thinking=thinking,
             expectation=data.get("expectation"),
         )
