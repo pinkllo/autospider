@@ -445,7 +445,7 @@ class LLMDecider:
                 thinking=f"无法解析 LLM 响应: {response_text[:200]}",
             )
 
-        # 兼容：统一协议 autospider.protocol.v1 → 扁平结构
+        # 兼容：统一协议 autospider.protocol → 扁平结构
         data = protocol_to_legacy_agent_action(data)
 
         # 解析 action 类型

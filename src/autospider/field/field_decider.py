@@ -103,7 +103,7 @@ class FieldDecider:
         return data or None
 
     def _parse_response_json(self, response_text: str) -> dict | None:
-        # 优先走统一 JSON 解析（支持 autospider.protocol.v1）
+        # 优先走统一 JSON 解析（支持 autospider.protocol）
         parsed = parse_json_dict_from_llm(response_text)
         if parsed:
             return parsed
@@ -385,7 +385,7 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
-                # 兼容：统一协议 autospider.protocol.v1 → 字段导航旧结构
+                # 兼容：统一协议 autospider.protocol → 字段导航旧结构
                 data = protocol_to_legacy_field_nav_decision(data, field.name)
                 print(f"[FieldDecider] 决策: {data.get('action')}")
                 return data
@@ -445,7 +445,7 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
-                # 兼容：统一协议 autospider.protocol.v1 → 字段提取旧结构
+                # 兼容：统一协议 autospider.protocol → 字段提取旧结构
                 data = protocol_to_legacy_field_extract_result(data, field.name)
                 if data.get("found"):
                     print(f"[FieldDecider] 提取到值: {data.get('field_value', '')[:50]}...")
@@ -512,7 +512,7 @@ class FieldDecider:
 
             data = self._parse_response_json(response_text)
             if data:
-                # 兼容：统一协议 autospider.protocol.v1 → selected_mark_id 旧结构
+                # 兼容：统一协议 autospider.protocol → selected_mark_id 旧结构
                 data = protocol_to_legacy_selected_mark(data)
                 print(f"[FieldDecider] 选择: mark_id={data.get('selected_mark_id')}")
                 return data

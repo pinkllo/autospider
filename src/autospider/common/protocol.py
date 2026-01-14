@@ -1,9 +1,9 @@
-"""统一的 LLM 输出协议（protocol v1）解析与兼容映射。
+"""统一的 LLM 输出协议解析与兼容映射。
 
 修改原因：
 - 之前项目中存在多套“工具/动作协议”（decider、url_collector、field_extractor、disambiguate 等），
   LLM 输出结构不一致，导致解析与维护成本高、鲁棒性差。
-- 现在统一为一套大协议：`autospider.protocol.v1`，并在代码侧提供兼容映射，
+- 现在统一为一套大协议：`autospider.protocol`，并在代码侧提供兼容映射，
   让旧逻辑无需大改也能接入新协议。
 """
 
@@ -16,13 +16,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-PROTOCOL_V1: str = "autospider.protocol.v1"
+PROTOCOL: str = "autospider.protocol"
 
 
 class ProtocolMessage(BaseModel):
-    """LLM 统一协议消息（v1）"""
+    """LLM 统一协议消息"""
 
-    protocol: Literal["autospider.protocol.v1"] = Field(...)
+    protocol: Literal["autospider.protocol"] = Field(...)
     action: str = Field(..., description="动作类型（统一协议中的 action）")
     args: dict[str, Any] = Field(default_factory=dict, description="动作参数（统一协议中的 args）")
     thinking: str = Field(default="", description="思考过程（可选）")
@@ -159,10 +159,10 @@ def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
         if sd:
             args["scroll_delta"] = [int(sd.group(1)), int(sd.group(2))]
 
-    if protocol == PROTOCOL_V1:
+    if protocol == PROTOCOL:
         return {"protocol": protocol, "action": action, "args": args, "thinking": thinking}
 
-    # 非 v1 情况也返回“尽力而为”的 dict，让上层还能走 legacy 解析
+    # 非统一协议情况也返回“尽力而为”的 dict，让上层还能走 legacy 解析
     out: dict[str, Any] = {"action": action}
     if thinking:
         out["thinking"] = thinking
@@ -197,12 +197,12 @@ def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
     return _salvage_json_like_dict(cleaned)
 
 
-def is_protocol_v1(data: dict[str, Any] | None) -> bool:
-    return bool(data) and data.get("protocol") == PROTOCOL_V1 and "action" in data
+def is_protocol(data: dict[str, Any] | None) -> bool:
+    return bool(data) and data.get("protocol") == PROTOCOL and "action" in data
 
 
-def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
-    if not is_protocol_v1(data):
+def as_protocol(data: dict[str, Any]) -> ProtocolMessage | None:
+    if not is_protocol(data):
         return None
     try:
         return ProtocolMessage.model_validate(data)
@@ -217,10 +217,10 @@ def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
 
 def protocol_to_legacy_agent_action(data: dict[str, Any]) -> dict[str, Any]:
     """映射到通用 Agent（Action）旧扁平字段结构"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -245,10 +245,10 @@ def protocol_to_legacy_agent_action(data: dict[str, Any]) -> dict[str, Any]:
 
 def protocol_to_legacy_url_decision(data: dict[str, Any]) -> dict[str, Any]:
     """映射到 URLCollector 探索阶段旧决策结构（select_detail_links / click_to_enter / ...）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -295,10 +295,10 @@ def protocol_to_legacy_url_decision(data: dict[str, Any]) -> dict[str, Any]:
 
 def protocol_to_legacy_pagination_result(data: dict[str, Any]) -> dict[str, Any]:
     """映射分页按钮识别旧结构（found/mark_id/target_text）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -329,10 +329,10 @@ def protocol_to_legacy_pagination_result(data: dict[str, Any]) -> dict[str, Any]
 
 def protocol_to_legacy_jump_widget_result(data: dict[str, Any]) -> dict[str, Any]:
     """映射跳页控件识别旧结构（found/input_mark_id/button_mark_id/...）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -360,10 +360,10 @@ def protocol_to_legacy_jump_widget_result(data: dict[str, Any]) -> dict[str, Any
 
 def protocol_to_legacy_field_nav_decision(data: dict[str, Any], field_name: str) -> dict[str, Any]:
     """映射字段提取“导航阶段”旧结构（found_field/field_not_exist/click/type/press/scroll_down）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -411,10 +411,10 @@ def protocol_to_legacy_field_nav_decision(data: dict[str, Any], field_name: str)
 
 def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: str) -> dict[str, Any]:
     """映射字段提取“识别文本阶段”旧结构（found/field_value/confidence/...）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 
@@ -441,10 +441,10 @@ def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: st
 
 def protocol_to_legacy_selected_mark(data: dict[str, Any]) -> dict[str, Any]:
     """映射“从多个候选中选择一个”的旧结构（selected_mark_id）"""
-    if not is_protocol_v1(data):
+    if not is_protocol(data):
         return data
 
-    msg = as_protocol_v1(data)
+    msg = as_protocol(data)
     if msg is None:
         return data
 

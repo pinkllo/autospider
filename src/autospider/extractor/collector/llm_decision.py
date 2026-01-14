@@ -109,7 +109,7 @@ class LLMDecisionMaker:
             
             data = parse_json_dict_from_llm(response_text)
             if data:
-                # 兼容：统一协议 autospider.protocol.v1 → URLCollector 旧决策结构
+                # 兼容：统一协议 autospider.protocol → URLCollector 旧决策结构
                 legacy = protocol_to_legacy_url_decision(data)
                 print(f"[LLM] 决策: {legacy.get('action')}")
                 print(f"[LLM] 理由: {legacy.get('reasoning', 'N/A')[:100]}...")
