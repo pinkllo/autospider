@@ -486,7 +486,7 @@ def create_sales_report_excel(data_list, start_date="2024-1-1", end_date="2024-2
 # 主程序
 if __name__ == "__main__":
     # usernames = ["13798252655", "13822786191"]
-    usernames = ["13822786191"]
+    usernames = ["13798252655", "13822786191","13631180662"]
 
     for username in usernames:
         result = process_user(username)

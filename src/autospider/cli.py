@@ -18,6 +18,7 @@ from .common.config import config
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
+from .common.windows_fix import run_async_safely
 from .extractor.graph import run_agent
 from .common.types import RunInput
 
@@ -115,7 +116,7 @@ def run_command(
         # 延迟导入避免循环依赖
         from .extractor.output import export_script_json, export_script_readable, print_script_summary
         
-        script = asyncio.run(_run_agent(run_input))
+        script = run_async_safely(_run_agent(run_input))
         
         # 导出脚本
         output_path = Path(output_dir)
@@ -204,7 +205,7 @@ def generate_config_command(
 
     # 运行配置生成器
     try:
-        result = asyncio.run(_run_config_generator(
+        result = run_async_safely(_run_config_generator(
             list_url=list_url,
             task=task,
             explore_count=explore_count,
@@ -498,6 +499,7 @@ async def _run_agent(run_input: RunInput):
     """异步运行 Agent"""
     async with create_browser_session(
         headless=run_input.headless,
+        close_engine=True,
     ) as session:
         return await run_agent(session.page, run_input)
 
@@ -512,7 +514,7 @@ async def _run_config_generator(
     """异步运行配置生成器"""
     from .extractor.config_generator import generate_collection_config
     
-    async with create_browser_session(headless=headless) as session:
+    async with create_browser_session(headless=headless, close_engine=True) as session:
         return await generate_collection_config(
             page=session.page,
             list_url=list_url,
@@ -530,7 +532,7 @@ async def _run_batch_collector(
     """异步运行批量收集器"""
     from .crawler.batch_collector import batch_collect_urls
     
-    async with create_browser_session(headless=headless) as session:
+    async with create_browser_session(headless=headless, close_engine=True) as session:
         return await batch_collect_urls(
             page=session.page,
             config_path=config_path,
@@ -548,7 +550,7 @@ async def _run_collector(
     """异步运行 URL 收集器（完整流程）"""
     from .crawler.url_collector import collect_detail_urls
     
-    async with create_browser_session(headless=headless) as session:
+    async with create_browser_session(headless=headless, close_engine=True) as session:
         return await collect_detail_urls(
             page=session.page,
             list_url=list_url,
@@ -602,7 +604,7 @@ async def _run_field_extractor(
             logger=logger,
         )
     
-    async with create_browser_session(headless=headless) as session:
+    async with create_browser_session(headless=headless, close_engine=True) as session:
         extractor = BatchFieldExtractor(
             page=session.page,
             fields=fields,
@@ -649,7 +651,7 @@ async def _run_batch_xpath_extractor(
     if not urls:
         raise ValueError("未获取到 URL，请提供 --urls 或检查 Redis")
 
-    async with create_browser_session(headless=headless) as session:
+    async with create_browser_session(headless=headless, close_engine=True) as session:
         extractor = BatchXPathExtractor(
             page=session.page,
             fields_config=fields_config,

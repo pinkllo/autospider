@@ -8,12 +8,12 @@
 ask_llm_decision_system_prompt: |
   你是一个网页爬虫专家。你需要帮助用户获取详情页的 URL。
 
-  你有以下工具可以使用（统一输出协议：autospider.protocol.v1）：
+  你有以下工具可以使用（统一输出格式，不含 protocol 字段）：
 
   ## 统一输出格式（必须遵守）
   - 严格 JSON，不要 markdown 代码块
-  - 协议格式：
-    {"protocol":"autospider.protocol.v1","thinking":"...","action":"select|click|scroll|report","args":{...}}
+  - 格式：
+    {"thinking":"...","action":"select|click|scroll|report","args":{...}}
 
   1. **select（purpose=detail_links）**: 选择页面上的详情链接
      - 只选择列表中**项目标题/公告标题**类的链接
@@ -21,7 +21,6 @@ ask_llm_decision_system_prompt: |
      - 返回格式：
        ```json
        {
-         "protocol": "autospider.protocol.v1",
          "thinking": "…",
          "action": "select",
          "args": {
@@ -41,18 +40,17 @@ ask_llm_decision_system_prompt: |
   2. **report（kind=page_kind）**: 报告当前页面类型
      - 当你判断当前页面已经是一个详情页（而不是列表页）时使用
      - 返回示例：
-       {"protocol":"autospider.protocol.v1","action":"report","args":{"kind":"page_kind","page_kind":"detail","reasoning":"..."}}
+       {"action":"report","args":{"kind":"page_kind","page_kind":"detail","reasoning":"..."}}
 
   3. **scroll**: 需要滚动查看更多
      - 当前视图没有新的详情链接时使用
      - 返回示例：
-       {"protocol":"autospider.protocol.v1","action":"scroll","args":{"scroll_delta":[0,500],"reasoning":"..."}}
+       {"action":"scroll","args":{"scroll_delta":[0,500],"reasoning":"..."}}
 
   4. **click**: 点击一个最可能的详情链接进入详情页（用于探索）
      - 返回格式：
        ```json
        {
-         "protocol": "autospider.protocol.v1",
          "thinking": "…",
          "action": "click",
          "args": {
@@ -72,7 +70,7 @@ ask_llm_decision_system_prompt: |
 
   你只能看到"可交互元素列表"（marks），没有截图。
 
-  输出格式：严格 JSON，不要 markdown 代码块（必须包含 protocol 字段）。
+  输出格式：严格 JSON，不要 markdown 代码块（不要包含 protocol 字段）。
 
 ask_llm_decision_user_message: |
   ## 任务描述
@@ -118,23 +116,23 @@ pagination_llm_system_prompt: |
        2) 带有箭头符号且未禁用的元素
        3) 位于分页区域最右侧的元素
   
-  ## 返回格式（统一协议 autospider.protocol.v1）
+  ## 返回格式（不含 protocol 字段）
   
   严格 JSON 格式，不要使用 markdown 代码块：
   
   **找到按钮时**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页/Next/>"}],"reasoning":"详细说明识别依据"}}
+  {"action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页/Next/>"}],"reasoning":"详细说明识别依据"}}
   
   **未找到按钮时**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"说明为什么没找到，例如页面已到最后一页或按钮禁用"}}
+  {"action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"说明为什么没找到，例如页面已到最后一页或按钮禁用"}}
   
   ## 示例
   
   **示例1 - 找到按钮**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页"}],"reasoning":"在页面底部的分页区域，找到了'下一页'按钮，编号为 42"}}
+  {"action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页"}],"reasoning":"在页面底部的分页区域，找到了'下一页'按钮，编号为 42"}}
   
   **示例2 - 未找到按钮**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"页面底部有分页区域，但'下一页'按钮灰色禁用，说明已经是最后一页"}}
+  {"action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"页面底部有分页区域，但'下一页'按钮灰色禁用，说明已经是最后一页"}}
 
 pagination_llm_user_message: |
   请仔细观察截图，找到"下一页"分页按钮的 mark_id（红色边框右上角的白色数字编号）。
@@ -153,13 +151,12 @@ retry_after_validation_failure_user_message: |
 
   ## 错误分析要求
 
-  请你先分析上一次选择错误的原因，然后重新进行选择。你必须按以下格式返回（统一协议 autospider.protocol.v1）：
+  请你先分析上一次选择错误的原因，然后重新进行选择。你必须按以下格式返回（不含 protocol 字段）：
 
   ```json
   {
     "error_analysis": "分析上一次为什么选择了错误的 mark_id，例如：我把页面内容中的序号'1.'误认为是 mark_id，实际上 mark_id 是红色边框右上角的白色数字",
     "correction_strategy": "说明这一次会如何避免同样的错误，例如：我会仔细观察每个红色边框右上角的白色数字编号，而不是页面内容中的序号",
-    "protocol": "autospider.protocol.v1",
     "action": "select",
     "args": {
       "purpose": "detail_links",
@@ -216,22 +213,22 @@ jump_widget_llm_system_prompt: |
        2) 有明确"页码"相关 placeholder 的输入框
        3) 文本为"确定"、"跳转"等的按钮
 
-  ## 返回格式（统一协议 autospider.protocol.v1）
+  ## 返回格式（不含 protocol 字段）
 
   严格 JSON 格式，不要使用 markdown 代码块：
 
   **找到跳转控件时**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":{"mark_id":16,"text":"确定/跳转/GO"},"reasoning":"详细说明识别依据"}}
+  {"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":{"mark_id":16,"text":"确定/跳转/GO"},"reasoning":"详细说明识别依据"}}
 
   **只找到输入框时**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":null,"reasoning":"找到输入框但未找到确定按钮..."}}
+  {"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":null,"reasoning":"找到输入框但未找到确定按钮..."}}
 
   **未找到跳转控件时**：
-  {"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"说明为什么没找到，例如：页面没有分页功能，或跳转控件不可见"}}
+  {"action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"说明为什么没找到，例如：页面没有分页功能，或跳转控件不可见"}}
 
   **示例**：
-  - 找到时：{"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码"},"button":{"mark_id":16,"text":"确定"},"reasoning":"在页面底部找到页码输入框（placeholder为'请输入页码'，mark_id=15），旁边有'确定'按钮（mark_id=16）"}}
-  - 未找到时：{"protocol":"autospider.protocol.v1","action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"页面底部只有简单的页码数字列表，没有输入框和跳转按钮"}}
+  - 找到时：{"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码"},"button":{"mark_id":16,"text":"确定"},"reasoning":"在页面底部找到页码输入框（placeholder为'请输入页码'，mark_id=15），旁边有'确定'按钮（mark_id=16）"}}
+  - 未找到时：{"action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"页面底部只有简单的页码数字列表，没有输入框和跳转按钮"}}
 
 jump_widget_llm_user_message: |
   请仔细观察截图，找到页码跳转控件的 mark_id（红色边框右上角的白色数字编号）。

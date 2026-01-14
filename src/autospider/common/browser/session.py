@@ -12,7 +12,7 @@ from playwright.async_api import Page
 
 # 引入新的浏览器引擎
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "common"))
-from browser_manager.engine import get_browser_engine, BrowserEngine
+from browser_manager.engine import get_browser_engine, BrowserEngine, shutdown_browser_engine
 
 from ..config import config
 
@@ -104,6 +104,7 @@ async def create_browser_session(
     headless: bool | None = None,
     viewport_width: int | None = None,
     viewport_height: int | None = None,
+    close_engine: bool = False,
 ) -> AsyncGenerator[BrowserSession, None]:
     """创建浏览器会话的上下文管理器"""
     session = BrowserSession(
@@ -116,3 +117,9 @@ async def create_browser_session(
         yield session
     finally:
         await session.stop()
+        if close_engine:
+            # 修改原因：CLI 单次运行后关闭全局引擎，避免事件循环结束时残留连接导致报错。
+            try:
+                await shutdown_browser_engine()
+            except Exception:
+                pass
