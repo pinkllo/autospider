@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..extractor.llm.prompt_template import render_template
 from ..common.protocol import (
-    parse_json_dict_from_llm,
+    parse_protocol_message,
     protocol_to_legacy_field_extract_result,
     protocol_to_legacy_field_nav_decision,
     protocol_to_legacy_selected_mark,
@@ -103,16 +103,8 @@ class FieldDecider:
         return data or None
 
     def _parse_response_json(self, response_text: str) -> dict | None:
-        # 优先走统一 JSON 解析（action/args，protocol 字段可选）
-        parsed = parse_json_dict_from_llm(response_text)
-        if parsed:
-            return parsed
-
-        cleaned = self._strip_code_fences(response_text)
-        fallback = self._salvage_response(cleaned)
-        if fallback:
-            print("[FieldDecider] 使用降级解析结果")
-        return fallback
+        # 修改原因：协议兼容统一收口到 common.protocol，避免各处重复补丁。
+        return parse_protocol_message(response_text)
 
     def _compact_text(self, text: str, max_len: int = 60) -> str:
         cleaned = re.sub(r"\s+", " ", text).strip()

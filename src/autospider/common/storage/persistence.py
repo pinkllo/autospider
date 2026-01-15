@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 # 引入通用文件操作工具
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "common"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
 from utils.file_utils import ensure_directory, save_json, load_json, file_exists
 
 

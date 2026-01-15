@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from autospider.common.protocol import (
     parse_json_dict_from_llm,
+    parse_protocol_message,
     protocol_to_legacy_field_extract_result,
     protocol_to_legacy_field_nav_decision,
 )
@@ -174,3 +175,21 @@ def test_parse_json_dict_from_llm_salvages_found_from_broken_json():
     res = protocol_to_legacy_field_extract_result(parsed, "招标项目名称")
     assert res["found"] is True
     assert res["field_value"] == "示例值"
+
+
+def test_parse_protocol_message_normalizes_action_and_found():
+    text = """
+    {
+      "action": " EXTRACT ",
+      "args": {
+        "kind": "field",
+        "field_name": "招标项目名称",
+        "found": "false",
+        "field_value": "示例值"
+      }
+    }
+    """
+    parsed = parse_protocol_message(text)
+    assert parsed is not None
+    assert parsed["action"] == "extract"
+    assert parsed["args"]["found"] is False

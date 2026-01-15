@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, AsyncGenerator
 from playwright.async_api import Page
 
 # 引入新的浏览器引擎
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "common"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
 from browser_manager.engine import get_browser_engine, BrowserEngine, shutdown_browser_engine
 
 from ..config import config

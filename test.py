@@ -476,7 +476,12 @@ class AsyncNanChuanCrawler:
             os.makedirs("output", exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = f"output/{self.current_user}_{ts}.xlsx"
-            pd.DataFrame(data).to_excel(path, index=False)
+            
+            df = pd.DataFrame(data)
+            # 将账号插入为第一列
+            df.insert(0, '账号', self.current_user)
+            
+            df.to_excel(path, index=False)
             print(f"[{self.current_user}] ✅ 已保存 {path}")
         except Exception as e:
             print(f"保存失败: {e}")

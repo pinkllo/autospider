@@ -20,8 +20,22 @@ def export_excel_to_db(file_paths):
         print(f"正在读取: {file_path}")
         try:
             df = pd.read_excel(file_path)
+            
+            # 从文件名提取账号 (例如: 13631180662_20260113_123012.xlsx -> 13631180662)
+            filename = os.path.basename(file_path)
+            account = filename.split('_')[0]
+            
+            # 确保账号列存在且在第一列
+            if '账号' in df.columns:
+                # 如果已存在，先删除再插入到第一列，确保顺序和内容正确
+                cols = list(df.columns)
+                cols.remove('账号')
+                df = df[cols]
+            
+            df.insert(0, '账号', account)
+            
             all_dfs.append(df)
-            print(f"已加载 {len(df)} 条数据")
+            print(f"已加载 {len(df)} 条数据，账号: {account}")
         except Exception as e:
             print(f"读取文件 {file_path} 时出错: {e}")
 
@@ -74,8 +88,8 @@ def export_excel_to_db(file_paths):
 
 if __name__ == "__main__":
     files_to_import = [
-        r"output\13631180662_20260113_123012.xlsx",
-        r"output\13710862513_20260113_120910.xlsx",
+        r"output\13631180662_20260113_123012.xlsx", 
+        r"output\13710862513_20260113_220601.xlsx",
         r"output\13822786191_20260113_122927.xlsx"
     ]
     

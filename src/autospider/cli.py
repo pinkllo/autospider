@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import sys
 from pathlib import Path
 from typing import Optional
@@ -18,7 +19,6 @@ from .common.config import config
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
-from .common.windows_fix import run_async_safely
 from .extractor.graph import run_agent
 from .common.types import RunInput
 
@@ -31,6 +31,36 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+def run_async_safely(coro):
+    """在 CLI 同步上下文中安全执行协程。"""
+    # 修改原因：CLI 中直接调用 run_async_safely，但此前未定义该方法会抛 NameError。
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result_holder: dict[str, object] = {"result": None, "error": None}
+
+    def _runner():
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            result_holder["result"] = loop.run_until_complete(coro)
+        except Exception as exc:  # noqa: BLE001
+            result_holder["error"] = exc
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if result_holder["error"] is not None:
+        raise result_holder["error"]  # type: ignore[misc]
+    return result_holder["result"]
 
 
 @app.command("run")

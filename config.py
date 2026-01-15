@@ -34,7 +34,7 @@ DB_CONFIG = {
     'database': 'data_set_test',
     'charset': 'utf8mb4'
 }
-TABLE_NAME = "webspider_isbn_cip"
+TABLE_NAME = "webspider_book_execl_isbn_cip"
 
 # 列名中英文映射
 COLUMN_MAPPING = {
@@ -60,5 +60,6 @@ COLUMN_MAPPING = {
     "CIP信息": "cip_info",
     "cipInfo": "cip_info",
     "附加码": "additional_code",
-    "外文书名": "foreign_title"
+    "外文书名": "foreign_title",
+    "账号": "account"
 }

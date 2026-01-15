@@ -24,7 +24,6 @@ from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
-from ..common.protocol import protocol_to_legacy_field_nav_decision
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..extractor.llm import LLMDecider
 
@@ -330,58 +329,7 @@ class FieldExtractor:
                 print(f"[FieldExtractor] LLM 决策失败，继续尝试")
                 continue
 
-            # 修改原因：FieldDecider 侧虽已做协议兼容映射，但当 LLM 输出含零宽字符/结构异常时仍可能漏映射，
-            # 这里再兜底把 `extract(kind=field)` 转换为旧结构 `found_field/field_not_exist`，避免出现“未知操作: extract”而陷入循环。
-            decision = protocol_to_legacy_field_nav_decision(decision, field.name)
-
-            raw_action = decision.get("action")
-            action = str(raw_action).strip().lower() if raw_action is not None else ""
-            if isinstance(raw_action, str) and raw_action != action:
-                # 修改原因：LLM 偶发输出 action 含首尾空白，统一规整后再分发
-                decision["action"] = action
-            if action == "extract":
-                # 修改原因：极端情况下协议映射仍可能透传 extract（例如字段名不匹配/字段名含不可见字符），
-                # 这里兜底把 extract 视为字段结果，转成旧结构，确保流程可继续推进。
-                args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
-                merged: dict = {}
-                merged.update(decision)
-                merged.update(args)
-
-                kind = str(merged.get("kind") or "").lower().strip()
-                looks_like_field = any(
-                    k in merged for k in ("field_name", "field_value", "field_text", "found")
-                )
-                if kind in {"field", ""} and looks_like_field:
-                    found_raw = merged.get("found")
-                    if isinstance(found_raw, str):
-                        v = found_raw.strip().lower()
-                        found = v in {"true", "yes", "y", "1"} if v in {"true", "false", "yes", "no", "y", "n", "1", "0"} else None
-                    elif found_raw is None:
-                        found = None
-                    else:
-                        found = bool(found_raw)
-                    if found is None:
-                        # 修改原因：found 缺失/格式异常时，用 field_value/field_text 兜底判断
-                        found = bool(
-                        merged.get("field_value") or merged.get("field_text")
-                    )
-                    if found:
-                        decision = {
-                            "action": "found_field",
-                            "field_text": merged.get("field_value") or merged.get("field_text") or "",
-                            "field_value": merged.get("field_value") or "",
-                            "mark_id": merged.get("mark_id"),
-                            "target_text": merged.get("target_text") or "",
-                            "confidence": merged.get("confidence", 0.0),
-                            "reasoning": merged.get("reasoning") or merged.get("thinking") or "",
-                            "location_description": merged.get("location_description") or "",
-                        }
-                    else:
-                        decision = {
-                            "action": "field_not_exist",
-                            "reasoning": merged.get("reasoning") or merged.get("thinking") or "",
-                        }
-                    action = decision.get("action")
+            action = decision.get("action")
 
             if action == "scroll_down" and not might_contain:
                 clicked_ids = self._get_clicked_mark_ids(nav_steps, field.name)

@@ -1,21 +1,14 @@
-"""统一的 LLM 输出协议解析与兼容映射（protocol 字段可选）。
-
-修改原因：
-- 之前项目中存在多套“工具/动作协议”（decider、url_collector、field_extractor、disambiguate 等），
-  LLM 输出结构不一致，导致解析与维护成本高、鲁棒性差。
-- 现在统一为一套 action/args 输出结构，protocol 字段可选（兼容 `autospider.protocol.v1`），
-  让输出更短、降低模型出错率，同时保持旧逻辑可映射。
-"""
+"""统一的 LLM 输出协议解析与兼容映射（protocol 字段可选）。"""
 
 from __future__ import annotations
 
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 PROTOCOL_V1: str = "autospider.protocol.v1"
 
@@ -24,281 +17,58 @@ class ProtocolMessage(BaseModel):
     """LLM 统一协议消息（v1，可省略 protocol 字段）"""
 
     protocol: Literal["autospider.protocol.v1"] = Field(default=PROTOCOL_V1)
-    action: str = Field(..., description="动作类型（统一协议中的 action）")
-    args: dict[str, Any] = Field(default_factory=dict, description="动作参数（统一协议中的 args）")
+    action: str = Field(..., description="动作类型")
+    args: dict[str, Any] = Field(default_factory=dict, description="动作参数")
     thinking: str = Field(default="", description="思考过程（可选）")
 
 
-def _strip_code_fences(text: str) -> str:
-    if "```" not in text:
-        return text
-    cleaned = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE)
-    return cleaned.replace("```", "").strip()
+# ---------------------------------------------------------------------------
+# 文本清理工具
+# ---------------------------------------------------------------------------
 
-
-def _extract_json_object(text: str) -> str | None:
-    match = re.search(r"\{[\s\S]*\}", text)
-    return match.group(0) if match else None
+_QUOTE_TRANS = str.maketrans({
+    0x201C: '"',  # 左双引号 "
+    0x201D: '"',  # 右双引号 "
+    0x2018: "'",  # 左单引号 '
+    0x2019: "'",  # 右单引号 '
+    0x00A0: " ",  # 不间断空格
+})
 
 
 def _normalize_quotes(text: str) -> str:
-    # 常见的中文引号/全角符号替换，避免 LLM 输出“看起来像 JSON 但其实不是”的情况
-    return (
-        text.replace("“", '"')
-        .replace("”", '"')
-        .replace("‘", "'")
-        .replace("’", "'")
-        .replace("\u00a0", " ")
-    )
+    """替换中文引号/全角符号为标准ASCII字符"""
+    return text.translate(_QUOTE_TRANS)
+
+
+def _strip_code_fences(text: str) -> str:
+    """移除 Markdown 代码块标记"""
+    if "```" not in text:
+        return text
+    return re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE).replace("```", "").strip()
 
 
 def _cleanup_json_text(json_text: str) -> str:
-    # 修复常见的 JSON 问题：末尾多余逗号
-    cleaned = re.sub(r",\s*}", "}", json_text)
-    cleaned = re.sub(r",\s*]", "]", cleaned)
-    return cleaned
-
-
-def _extract_balanced_object(text: str, start_index: int) -> str | None:
-    """从 start_index 指向的 '{' 开始，提取一个按括号匹配的 JSON 对象子串（忽略字符串内的括号）。"""
-    if start_index < 0 or start_index >= len(text) or text[start_index] != "{":
-        return None
-
-    depth = 0
-    in_string = False
-    escape = False
-
-    for idx in range(start_index, len(text)):
-        ch = text[idx]
-
-        if in_string:
-            if escape:
-                escape = False
-                continue
-            if ch == "\\":
-                escape = True
-                continue
-            if ch == '"':
-                in_string = False
-            continue
-
-        if ch == '"':
-            in_string = True
-            continue
-
-        if ch == "{":
-            depth += 1
-            continue
-        if ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start_index : idx + 1]
-            continue
-
-    return None
-
-
-def _iter_json_object_candidates(text: str) -> list[str]:
-    """提取可能的 JSON 对象候选（优先使用括号匹配，避免贪婪正则跨越多个对象）。"""
-    candidates: list[str] = []
-    for m in re.finditer(r"\{", text):
-        obj = _extract_balanced_object(text, m.start())
-        if obj and obj not in candidates:
-            candidates.append(obj)
-    return candidates
-
-
-def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
-    """当 JSON 不可解析时，尽力从文本中“抢救”出关键信息。"""
-    if not text:
-        return None
-
-    cleaned = _normalize_quotes(_strip_code_fences(text))
-
-    def _pick_str(key: str) -> str | None:
-        m = re.search(rf'"{re.escape(key)}"\s*:\s*"([^"]*)"', cleaned)
-        return m.group(1) if m else None
-
-    def _pick_int(key: str) -> int | None:
-        m = re.search(rf'"{re.escape(key)}"\s*:\s*"?(?P<v>\d+)"?', cleaned)
-        if not m:
-            return None
-        try:
-            return int(m.group("v"))
-        except ValueError:
-            return None
-
-    def _pick_bool(key: str) -> bool | None:
-        m = re.search(
-            rf'"{re.escape(key)}"\s*:\s*(?P<v>true|false|\"true\"|\"false\"|1|0)',
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-        if not m:
-            return None
-        raw = m.group("v").strip().strip('"')
-        return _coerce_bool(raw)
-
-    def _pick_float(key: str) -> float | None:
-        m = re.search(rf'"{re.escape(key)}"\s*:\s*(?P<v>-?\d+(?:\.\d+)?)', cleaned)
-        if not m:
-            return None
-        try:
-            return float(m.group("v"))
-        except ValueError:
-            return None
-
-    action = _pick_str("action")
-    if not action:
-        return None
-
-    protocol = _pick_str("protocol")
-    thinking = _pick_str("thinking") or ""
-
-    # args 尝试：先截取 args 对象并解析；失败再从全局粗略提取
-    args: dict[str, Any] = {}
-    args_start = re.search(r'"args"\s*:\s*\{', cleaned)
-    has_args_block = bool(args_start)
-    if args_start:
-        obj = _extract_balanced_object(cleaned, args_start.end() - 1)
-        if obj:
-            try:
-                args = json.loads(_cleanup_json_text(obj))
-            except Exception:
-                args = {}
-
-    if not args:
-        # 修改原因：当 LLM 输出 JSON 存在轻微格式错误（例如 `"found"\n:true`）导致无法解析 args 时，
-        # 这里需要尽力把字段提取关键字段“抢救”出来，否则上层会误判为 field_not_exist。
-        for k in [
-            "kind",
-            "mark_id",
-            "target_text",
-            "text",
-            "key",
-            "url",
-            "reasoning",
-            "field_name",
-            "field_value",
-            "location_description",
-        ]:
-            v = _pick_str(k)
-            if v is not None:
-                args[k] = v
-        mark_id = _pick_int("mark_id")
-        if mark_id is not None:
-            args["mark_id"] = mark_id
-        found = _pick_bool("found")
-        if found is not None:
-            args["found"] = found
-        confidence = _pick_float("confidence")
-        if confidence is not None:
-            args["confidence"] = confidence
-
-        # scroll_delta 形如 [0,500]
-        sd = re.search(r'"scroll_delta"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]', cleaned)
-        if sd:
-            args["scroll_delta"] = [int(sd.group(1)), int(sd.group(2))]
-
-    if protocol == PROTOCOL_V1 or has_args_block:
-        out: dict[str, Any] = {"action": action, "args": args}
-        if thinking:
-            out["thinking"] = thinking
-        if protocol:
-            out["protocol"] = protocol
-        return out
-
-    # 非 v1 情况也返回“尽力而为”的 dict，让上层还能走 legacy 解析
-    out: dict[str, Any] = {"action": action}
-    if thinking:
-        out["thinking"] = thinking
-    out.update(args)
-    if protocol:
-        out["protocol"] = protocol
-    return out
-
-
-def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
-    """从 LLM 文本中提取并解析 JSON 对象"""
-    cleaned = _normalize_quotes(_strip_code_fences(text or ""))
-
-    # 1) 优先：使用括号匹配提取候选 JSON 对象，逐个尝试解析
-    for cand in _iter_json_object_candidates(cleaned):
-        try:
-            data = json.loads(_cleanup_json_text(cand))
-        except Exception:
-            continue
-        if isinstance(data, dict):
-            return data
-
-    # 2) 兼容：旧逻辑的贪婪匹配（少数情况下括号匹配提不到）
-    json_text = _extract_json_object(cleaned)
-    if json_text:
-        try:
-            data = json.loads(_cleanup_json_text(json_text))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-
-    # 3) 最后兜底：抢救式解析（可能不是严格 JSON）
-    return _salvage_json_like_dict(cleaned)
-
-
-def is_protocol_v1(data: dict[str, Any] | None) -> bool:
-    if not data or "action" not in data or "args" not in data:
-        return False
-    if "protocol" not in data:
-        return True
-    return data.get("protocol") == PROTOCOL_V1
-
-
-def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
-    if not is_protocol_v1(data):
-        return None
-    try:
-        normalized = dict(data)
-        normalized.setdefault("protocol", PROTOCOL_V1)
-        normalized.setdefault("args", {})
-        return ProtocolMessage.model_validate(normalized)
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# 兼容映射（把大协议映射为旧代码期望的结构）
-# ---------------------------------------------------------------------------
+    """修复常见 JSON 问题：末尾多余逗号"""
+    return re.sub(r",(\s*[}\]])", r"\1", json_text)
 
 
 def _normalize_field_name(value: str | None) -> str:
-    """尽量把字段名规整到可比较的形式（去空白/零宽字符等）。"""
+    """规范化字段名：去除空白和不可见字符"""
     if not value:
         return ""
-    text = _normalize_quotes(str(value))
-    cleaned_chars: list[str] = []
-    for ch in text:
-        if ch.isspace():
-            continue
-        # 去掉零宽空格、BOM 等不可见格式字符，避免“看起来一样但比较不相等”
-        if unicodedata.category(ch) == "Cf":
-            continue
-        cleaned_chars.append(ch)
-    return "".join(cleaned_chars).strip()
+    return "".join(
+        ch for ch in _normalize_quotes(str(value))
+        if not ch.isspace() and unicodedata.category(ch) != "Cf"
+    ).strip()
 
 
 def _normalize_action(value: Any | None) -> str:
-    """统一 action 的比较形式（去首尾空白 + 小写）。"""
-    if value is None:
-        return ""
-    return str(value).strip().lower()
+    """规范化 action：小写去首尾空白"""
+    return str(value).strip().lower() if value else ""
 
 
 def _coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
-    """把 LLM 输出里常见的 bool 表示统一成 bool。
-
-    修改原因：LLM 可能输出 true/false（bool）、"true"/"false"（字符串）、0/1（数字），
-    直接 bool("false") 会变成 True，导致字段存在性判断反转。
-    """
+    """将各种 bool 表示形式统一转换为 Python bool"""
     if value is None:
         return default
     if isinstance(value, bool):
@@ -311,360 +81,466 @@ def _coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
             return True
         if v in {"false", "no", "n", "0"}:
             return False
-        return default if default is not None else None
-    return bool(value)
+    return default
 
+
+# ---------------------------------------------------------------------------
+# JSON 提取与解析
+# ---------------------------------------------------------------------------
+
+def _extract_balanced_object(text: str, start: int) -> str | None:
+    """从指定位置提取括号匹配的 JSON 对象"""
+    if start < 0 or start >= len(text) or text[start] != "{":
+        return None
+
+    depth, in_string, escape = 0, False, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            escape = not escape and ch == "\\"
+            if not escape and ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _iter_json_candidates(text: str) -> list[str]:
+    """提取所有可能的 JSON 对象候选"""
+    seen: set[str] = set()
+    return [
+        obj for m in re.finditer(r"\{", text)
+        if (obj := _extract_balanced_object(text, m.start())) and obj not in seen and not seen.add(obj)  # type: ignore
+    ]
+
+
+@dataclass
+class _FieldExtractor:
+    """从文本中提取 JSON 字段值的辅助类"""
+    text: str
+
+    def _match(self, pattern: str) -> re.Match[str] | None:
+        return re.search(pattern, self.text, flags=re.IGNORECASE)
+
+    def string(self, key: str) -> str | None:
+        m = self._match(rf'"{re.escape(key)}"\s*:\s*"([^"]*)"')
+        return m.group(1) if m else None
+
+    def integer(self, key: str) -> int | None:
+        m = self._match(rf'"{re.escape(key)}"\s*:\s*"?(\d+)"?')
+        try:
+            return int(m.group(1)) if m else None
+        except ValueError:
+            return None
+
+    def boolean(self, key: str) -> bool | None:
+        m = self._match(rf'"{re.escape(key)}"\s*:\s*(true|false|"true"|"false"|1|0)')
+        return _coerce_bool(m.group(1).strip('"')) if m else None
+
+    def floating(self, key: str) -> float | None:
+        m = self._match(rf'"{re.escape(key)}"\s*:\s*(-?\d+(?:\.\d+)?)')
+        try:
+            return float(m.group(1)) if m else None
+        except ValueError:
+            return None
+
+
+def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
+    """尽力从格式错误的文本中抢救关键信息"""
+    if not text:
+        return None
+
+    cleaned = _normalize_quotes(_strip_code_fences(text))
+    ext = _FieldExtractor(cleaned)
+
+    action = ext.string("action")
+    if not action:
+        return None
+
+    # 提取 args 对象
+    args: dict[str, Any] = {}
+    args_match = re.search(r'"args"\s*:\s*\{', cleaned)
+    if args_match and (obj := _extract_balanced_object(cleaned, args_match.end() - 1)):
+        try:
+            args = json.loads(_cleanup_json_text(obj))
+        except Exception:
+            pass
+
+    # args 为空时提取常见字段
+    if not args:
+        for k in ["kind", "target_text", "text", "key", "url", "reasoning", "field_name", "field_value", "location_description"]:
+            if (v := ext.string(k)) is not None:
+                args[k] = v
+        if (v := ext.integer("mark_id")) is not None:
+            args["mark_id"] = v
+        if (v := ext.boolean("found")) is not None:
+            args["found"] = v
+        if (v := ext.floating("confidence")) is not None:
+            args["confidence"] = v
+        if sd := re.search(r'"scroll_delta"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]', cleaned):
+            args["scroll_delta"] = [int(sd.group(1)), int(sd.group(2))]
+
+    # 构建输出
+    out: dict[str, Any] = {"action": action}
+    if thinking := ext.string("thinking"):
+        out["thinking"] = thinking
+    if protocol := ext.string("protocol"):
+        out["protocol"] = protocol
+
+    if protocol == PROTOCOL_V1 or args_match:
+        out["args"] = args
+    else:
+        out.update(args)
+    return out
+
+
+def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
+    """从 LLM 文本中提取并解析 JSON 对象"""
+    cleaned = _normalize_quotes(_strip_code_fences(text or ""))
+
+    # 优先：括号匹配提取
+    for cand in _iter_json_candidates(cleaned):
+        try:
+            if isinstance(data := json.loads(_cleanup_json_text(cand)), dict):
+                return data
+        except Exception:
+            continue
+
+    # 兼容：贪婪正则匹配
+    if match := re.search(r"\{[\s\S]*\}", cleaned):
+        try:
+            if isinstance(data := json.loads(_cleanup_json_text(match.group(0))), dict):
+                return data
+        except Exception:
+            pass
+
+    # 兜底：抢救式解析
+    return _salvage_json_like_dict(cleaned)
+
+
+# ---------------------------------------------------------------------------
+# 协议解析核心
+# ---------------------------------------------------------------------------
+
+def _merge_args_with_top_level(data: dict[str, Any]) -> dict[str, Any]:
+    """合并 args 与顶层字段，规范化常见字段类型"""
+    raw_args = data.get("args") if isinstance(data.get("args"), dict) else {}
+    merged = dict(raw_args)
+
+    for key, value in data.items():
+        if key not in {"action", "args", "protocol", "thinking"} and merged.get(key) is None:
+            merged[key] = value
+
+    # 规范化常见字段
+    if merged.get("kind") is not None:
+        merged["kind"] = str(merged["kind"]).strip().lower()
+    if "found" in merged:
+        merged["found"] = _coerce_bool(merged.get("found"))
+    for field, conv in [("confidence", float), ("mark_id", int)]:
+        if merged.get(field) is not None:
+            try:
+                merged[field] = conv(merged[field])
+            except (TypeError, ValueError):
+                pass
+    return merged
+
+
+def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, Any] | None:
+    """统一协议解析入口：输出标准 action/args 结构"""
+    if payload is None:
+        return None
+
+    data = payload if isinstance(payload, dict) else parse_json_dict_from_llm(payload)
+    if not isinstance(data, dict) or not (action := _normalize_action(data.get("action"))):
+        return None
+
+    result: dict[str, Any] = {"action": action, "args": _merge_args_with_top_level(data)}
+    if thinking := data.get("thinking") or data.get("reasoning"):
+        result["thinking"] = thinking
+    if protocol := data.get("protocol"):
+        result["protocol"] = protocol
+    return result
+
+
+def is_protocol_v1(data: dict[str, Any] | None) -> bool:
+    """检查是否为 v1 协议格式"""
+    return bool(data and "action" in data and "args" in data and data.get("protocol", PROTOCOL_V1) == PROTOCOL_V1)
+
+
+def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
+    """转换为 ProtocolMessage 对象"""
+    if not is_protocol_v1(data):
+        return None
+    try:
+        return ProtocolMessage.model_validate({**data, "protocol": PROTOCOL_V1, "args": data.get("args", {})})
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 兼容映射辅助
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _ProtocolParts:
+    """协议解析后的核心部分"""
+    action: str
+    args: dict[str, Any]
+    thinking: str
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> "_ProtocolParts":
+        if msg := as_protocol_v1(data):
+            return cls(msg.action.lower(), msg.args or {}, msg.thinking or "")
+        return cls(
+            _normalize_action(data.get("action")),
+            data.get("args") if isinstance(data.get("args"), dict) else {},
+            data.get("thinking") or data.get("reasoning") or ""
+        )
+
+    def get_reasoning(self) -> str:
+        return self.args.get("reasoning") or self.thinking
+
+
+def _field_names_match(reported: str | None, expected: str) -> bool:
+    """检查字段名是否匹配（支持包含关系）"""
+    r, e = _normalize_field_name(reported), _normalize_field_name(expected)
+    return not r or not e or r == e or r in e or e in r
+
+
+def _extract_item_from_args(args: dict[str, Any]) -> dict[str, Any] | None:
+    """从 args 中提取 item 对象"""
+    if isinstance(item := args.get("item"), dict):
+        return item
+    if (items := args.get("items")) and isinstance(items[0], dict):
+        return items[0]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 兼容映射函数
+# ---------------------------------------------------------------------------
 
 def protocol_to_legacy_agent_action(data: dict[str, Any]) -> dict[str, Any]:
-    """映射到通用 Agent（Action）旧扁平字段结构"""
+    """映射到通用 Agent 旧扁平字段结构"""
     if not is_protocol_v1(data):
         return data
 
-    msg = as_protocol_v1(data)
-    if msg is None:
-        return data
+    parts = _ProtocolParts.from_data(data)
+    legacy: dict[str, Any] = {"action": parts.action, "thinking": parts.get_reasoning()}
 
-    args = msg.args or {}
-    action = (msg.action or "").lower()
-
-    legacy: dict[str, Any] = {
-        "action": action,
-        "thinking": msg.thinking or args.get("thinking") or args.get("reasoning") or "",
-    }
-
-    # 常见字段扁平化
     for key in ["mark_id", "target_text", "text", "key", "url", "timeout_ms", "expectation"]:
-        if key in args and args[key] is not None:
-            legacy[key] = args[key]
+        if parts.args.get(key) is not None:
+            legacy[key] = parts.args[key]
 
-    if "scroll_delta" in args and isinstance(args["scroll_delta"], (list, tuple)) and len(args["scroll_delta"]) == 2:
-        legacy["scroll_delta"] = list(args["scroll_delta"])
-
+    if isinstance(sd := parts.args.get("scroll_delta"), (list, tuple)) and len(sd) == 2:
+        legacy["scroll_delta"] = list(sd)
     return legacy
 
 
 def protocol_to_legacy_url_decision(data: dict[str, Any]) -> dict[str, Any]:
-    """映射到 URLCollector 探索阶段旧决策结构（select_detail_links / click_to_enter / ...）"""
+    """映射到 URLCollector 探索阶段旧决策结构"""
     if not is_protocol_v1(data):
         return data
 
-    msg = as_protocol_v1(data)
-    if msg is None:
-        return data
+    parts = _ProtocolParts.from_data(data)
+    purpose = (parts.args.get("purpose") or "").lower()
+    reasoning = parts.get_reasoning()
 
-    action = (msg.action or "").lower()
-    args = msg.args or {}
-    purpose = (args.get("purpose") or "").lower()
-    reasoning = args.get("reasoning") or msg.thinking or ""
-
-    if action == "select" and purpose in {"detail_links", "detail_link", "detail"}:
-        items = args.get("items") or []
-        mark_id_text_map: dict[str, str] = {}
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            mid = it.get("mark_id")
-            text = it.get("text") or it.get("target_text") or ""
-            if mid is None or not text:
-                continue
-            mark_id_text_map[str(mid)] = str(text)
-
-        return {
-            "action": "select_detail_links",
-            "mark_id_text_map": mark_id_text_map,
-            "reasoning": reasoning,
+    if parts.action == "select" and purpose in {"detail_links", "detail_link", "detail"}:
+        mark_id_text_map = {
+            str(it["mark_id"]): str(it.get("text") or it.get("target_text") or "")
+            for it in parts.args.get("items") or []
+            if isinstance(it, dict) and it.get("mark_id") is not None and (it.get("text") or it.get("target_text"))
         }
+        return {"action": "select_detail_links", "mark_id_text_map": mark_id_text_map, "reasoning": reasoning}
 
-    if action == "click":
-        return {
-            "action": "click_to_enter",
-            "mark_id": args.get("mark_id"),
-            "target_text": args.get("target_text") or "",
-            "reasoning": reasoning,
-        }
+    if parts.action == "click":
+        return {"action": "click_to_enter", "mark_id": parts.args.get("mark_id"), "target_text": parts.args.get("target_text") or "", "reasoning": reasoning}
 
-    if action == "scroll":
+    if parts.action == "scroll":
         return {"action": "scroll_down", "reasoning": reasoning}
 
-    if action == "report" and (args.get("kind") or "").lower() == "page_kind":
-        if (args.get("page_kind") or "").lower() == "detail":
-            return {"action": "current_is_detail", "reasoning": reasoning}
+    if parts.action == "report" and (parts.args.get("kind") or "").lower() == "page_kind" and (parts.args.get("page_kind") or "").lower() == "detail":
+        return {"action": "current_is_detail", "reasoning": reasoning}
 
     return data
 
 
 def protocol_to_legacy_pagination_result(data: dict[str, Any]) -> dict[str, Any]:
-    """映射分页按钮识别旧结构（found/mark_id/target_text）"""
+    """映射分页按钮识别旧结构"""
     if not is_protocol_v1(data):
         return data
 
-    msg = as_protocol_v1(data)
-    if msg is None:
+    parts = _ProtocolParts.from_data(data)
+    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {"pagination_next", "next_page"}:
         return data
 
-    args = msg.args or {}
-    if (msg.action or "").lower() != "select":
-        return data
-
-    purpose = (args.get("purpose") or "").lower()
-    if purpose not in {"pagination_next", "next_page"}:
-        return data
-
-    found = bool(args.get("found", True))
-    item = args.get("item")
-    if not isinstance(item, dict):
-        items = args.get("items") or []
-        item = items[0] if items and isinstance(items[0], dict) else None
-
-    mark_id = item.get("mark_id") if isinstance(item, dict) else None
-    target_text = (item.get("text") if isinstance(item, dict) else None) or args.get("target_text") or ""
-
+    item = _extract_item_from_args(parts.args)
     return {
-        "found": found,
-        "mark_id": mark_id,
-        "target_text": target_text,
-        "reasoning": args.get("reasoning") or msg.thinking or "",
+        "found": bool(parts.args.get("found", True)),
+        "mark_id": item.get("mark_id") if item else None,
+        "target_text": (item.get("text") if item else None) or parts.args.get("target_text") or "",
+        "reasoning": parts.get_reasoning()
     }
 
 
 def protocol_to_legacy_jump_widget_result(data: dict[str, Any]) -> dict[str, Any]:
-    """映射跳页控件识别旧结构（found/input_mark_id/button_mark_id/...）"""
+    """映射跳页控件识别旧结构"""
     if not is_protocol_v1(data):
         return data
 
-    msg = as_protocol_v1(data)
-    if msg is None:
+    parts = _ProtocolParts.from_data(data)
+    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {"jump_widget", "page_jump"}:
         return data
 
-    args = msg.args or {}
-    if (msg.action or "").lower() != "select":
-        return data
-
-    purpose = (args.get("purpose") or "").lower()
-    if purpose not in {"jump_widget", "page_jump"}:
-        return data
-
-    found = bool(args.get("found", True))
-    input_obj = args.get("input") if isinstance(args.get("input"), dict) else {}
-    button_obj = args.get("button") if isinstance(args.get("button"), dict) else {}
-
+    input_obj = parts.args.get("input") if isinstance(parts.args.get("input"), dict) else {}
+    button_obj = parts.args.get("button") if isinstance(parts.args.get("button"), dict) else {}
     return {
-        "found": found,
+        "found": bool(parts.args.get("found", True)),
         "input_mark_id": input_obj.get("mark_id"),
         "button_mark_id": button_obj.get("mark_id"),
         "input_text": input_obj.get("text") or "",
         "button_text": button_obj.get("text") or "",
-        "reasoning": args.get("reasoning") or msg.thinking or "",
+        "reasoning": parts.get_reasoning()
     }
 
 
+def _is_field_extract_like(merged: dict[str, Any]) -> bool:
+    """判断是否为字段提取相关动作"""
+    kind = str(merged.get("kind") or "").lower().strip()
+    if kind == "field":
+        return True
+    if kind:
+        return False
+    return any(k in merged for k in ("field_name", "field_value", "field_text", "found"))
+
+
+def _build_found_field_result(merged: dict[str, Any], reasoning: str) -> dict[str, Any]:
+    """构建 found_field 返回结构"""
+    return {
+        "action": "found_field",
+        "field_text": merged.get("field_value") or merged.get("field_text") or "",
+        "field_value": merged.get("field_value") or "",
+        "mark_id": merged.get("mark_id"),
+        "target_text": merged.get("target_text") or "",
+        "confidence": merged.get("confidence", 0.0),
+        "reasoning": reasoning,
+        "location_description": merged.get("location_description") or ""
+    }
+
+
+def _process_flat_field_extract(data: dict[str, Any], field_name: str) -> dict[str, Any] | None:
+    """处理扁平结构的字段提取"""
+    args = data.get("args") if isinstance(data.get("args"), dict) else {}
+    merged = {**data, **args}
+
+    if not _is_field_extract_like(merged) or not _field_names_match(merged.get("field_name"), field_name):
+        return None
+
+    found = _coerce_bool(merged.get("found"))
+    if found is None:
+        found = bool(merged.get("field_value") or merged.get("field_text"))
+
+    reasoning = merged.get("reasoning") or merged.get("thinking") or ""
+    return _build_found_field_result(merged, reasoning) if found else {"action": "field_not_exist", "reasoning": reasoning}
+
+
 def protocol_to_legacy_field_nav_decision(data: dict[str, Any], field_name: str) -> dict[str, Any]:
-    """映射字段提取“导航阶段”旧结构（found_field/field_not_exist/click/type/press/scroll_down）"""
-    # 修改原因：LLM 有时会输出扁平结构（没有 args），例如：
-    # {"action":"extract","kind":"field","field_name":"xx","found":true,"field_value":"..."}
-    # 这会导致上层拿到的 action=extract 无法被 FieldExtractor 识别（报“未知操作: extract”）。
-    # 因此这里同时兼容 v1（action/args）与扁平结构两种输出。
+    """映射字段提取"导航阶段"旧结构"""
     if not is_protocol_v1(data):
-        action = _normalize_action(data.get("action"))
-        if action != "extract":
-            return data
+        if _normalize_action(data.get("action")) == "extract":
+            if result := _process_flat_field_extract(data, field_name):
+                return result
+        return data
 
-        args = data.get("args") if isinstance(data.get("args"), dict) else {}
-        merged: dict[str, Any] = {}
-        merged.update(data)
-        merged.update(args)
+    parts = _ProtocolParts.from_data(data)
 
-        kind = str(merged.get("kind") or "").lower().strip()
-        if kind not in {"field", ""}:
-            return data
-        if kind != "field" and not any(
-            k in merged for k in ("field_name", "field_value", "field_text", "found")
-        ):
-            return data
-
-        # 修改原因：字段名偶发包含零宽字符/空白，严格相等会导致无法映射为 found_field
-        reported_name = _normalize_field_name(merged.get("field_name"))
-        expected_name = _normalize_field_name(field_name)
-        if reported_name and expected_name and reported_name != expected_name:
-            if reported_name not in expected_name and expected_name not in reported_name:
-                return data
-
-        found = _coerce_bool(merged.get("found"), default=None)
-        if found is None:
-            # 修改原因：当 found 字段缺失/格式异常时，用 field_value/field_text 作为兜底判断
-            found = bool(merged.get("field_value") or merged.get("field_text"))
-        reasoning = merged.get("reasoning") or merged.get("thinking") or ""
-        if found:
-            return {
-                "action": "found_field",
-                "field_text": merged.get("field_value") or merged.get("field_text") or "",
-                "field_value": merged.get("field_value") or "",
-                "mark_id": merged.get("mark_id"),
-                "target_text": merged.get("target_text") or "",
-                "confidence": merged.get("confidence", 0.0),
-                "reasoning": reasoning,
-                "location_description": merged.get("location_description") or "",
-            }
-        return {"action": "field_not_exist", "reasoning": reasoning}
-
-    msg = as_protocol_v1(data)
-    if msg is None:
-        # 修改原因：极端情况下 args 类型异常会导致 pydantic 校验失败，避免因此漏映射
-        action = _normalize_action(data.get("action"))
-        args = data.get("args") if isinstance(data.get("args"), dict) else {}
-        thinking = data.get("thinking") or data.get("reasoning") or ""
-    else:
-        action = _normalize_action(msg.action)
-        args = msg.args or {}
-        thinking = msg.thinking or ""
-
-    if action in {"click", "type", "press"}:
-        legacy = {"action": action, "reasoning": args.get("reasoning") or thinking or ""}
+    # 处理导航动作
+    if parts.action in {"click", "type", "press"}:
+        legacy = {"action": parts.action, "reasoning": parts.get_reasoning()}
         for key in ["mark_id", "target_text", "text", "key"]:
-            if key in args and args[key] is not None:
-                legacy[key] = args[key]
+            if parts.args.get(key) is not None:
+                legacy[key] = parts.args[key]
         return legacy
 
-    if action == "scroll":
-        return {"action": "scroll_down", "reasoning": args.get("reasoning") or thinking or ""}
+    if parts.action == "scroll":
+        return {"action": "scroll_down", "reasoning": parts.get_reasoning()}
 
-    kind = str(args.get("kind") or "").lower().strip()
-    looks_like_field = any(k in args for k in ("field_name", "field_value", "field_text", "found"))
-    if action == "extract" and (kind == "field" or (not kind and looks_like_field)):
-        # 统一：字段结果也走 extract；这里将其映射为旧的导航返回格式
-        reported_name = _normalize_field_name(args.get("field_name"))
-        expected_name = _normalize_field_name(field_name)
-        if reported_name and expected_name and reported_name != expected_name:
-            # 字段名不匹配时直接透传，交由上层决定是否重试
-            if reported_name not in expected_name and expected_name not in reported_name:
-                return data
-
-        found = _coerce_bool(args.get("found"), default=None)
-        if found is None:
-            found = bool(args.get("field_value") or args.get("field_text"))
-        if found:
-            return {
-                "action": "found_field",
-                "field_text": args.get("field_value") or args.get("field_text") or "",
-                "field_value": args.get("field_value") or "",
-                "mark_id": args.get("mark_id"),
-                "target_text": args.get("target_text") or "",
-                "confidence": args.get("confidence", 0.0),
-                "reasoning": args.get("reasoning") or thinking or "",
-                "location_description": args.get("location_description") or "",
-            }
-
-        return {
-            "action": "field_not_exist",
-            "reasoning": args.get("reasoning") or thinking or "",
-        }
+    # 处理字段提取
+    if parts.action == "extract":
+        merged = {**data, **parts.args}
+        if _is_field_extract_like(merged) and _field_names_match(parts.args.get("field_name"), field_name):
+            found = _coerce_bool(parts.args.get("found"))
+            if found is None:
+                found = bool(parts.args.get("field_value") or parts.args.get("field_text"))
+            reasoning = parts.get_reasoning()
+            return _build_found_field_result(merged, reasoning) if found else {"action": "field_not_exist", "reasoning": reasoning}
 
     return data
 
 
 def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: str) -> dict[str, Any]:
-    """映射字段提取“识别文本阶段”旧结构（found/field_value/confidence/...）"""
-    # 修改原因：识别文本阶段同样可能出现扁平结构（无 args），保持与导航阶段一致的兼容性。
-    if not is_protocol_v1(data):
-        action = _normalize_action(data.get("action"))
-        # 允许旧输出没有 action（直接 found/field_value），此时直接透传给上层
-        if action and action != "extract":
-            return data
-
-        args = data.get("args") if isinstance(data.get("args"), dict) else {}
-        merged: dict[str, Any] = {}
-        merged.update(data)
-        merged.update(args)
-
-        kind = str(merged.get("kind") or "").lower().strip()
-        if kind not in {"field", ""}:
-            return data
-        if kind != "field" and not any(
-            k in merged for k in ("field_name", "field_value", "field_text", "found")
-        ):
-            return data
-
-        reported_name = _normalize_field_name(merged.get("field_name"))
-        expected_name = _normalize_field_name(field_name)
-        if reported_name and expected_name and reported_name != expected_name:
-            if reported_name not in expected_name and expected_name not in reported_name:
-                return data
-
-        found = _coerce_bool(merged.get("found"), default=None)
-        if found is None:
-            found = bool(merged.get("field_value") or merged.get("field_text"))
+    """映射字段提取"识别文本阶段"旧结构"""
+    
+    def _build_extract_result(merged: dict[str, Any], found: bool, reasoning: str) -> dict[str, Any]:
         return {
             "found": found,
             "field_value": merged.get("field_value") or "",
             "confidence": merged.get("confidence", 0.0),
             "location_description": merged.get("location_description") or "",
-            "reasoning": merged.get("reasoning") or merged.get("thinking") or "",
+            "reasoning": reasoning,
             "mark_id": merged.get("mark_id"),
-            "target_text": merged.get("target_text") or "",
+            "target_text": merged.get("target_text") or ""
         }
 
-    msg = as_protocol_v1(data)
-    if msg is None:
-        # 修改原因：极端情况下 args 类型异常会导致 pydantic 校验失败，避免因此漏映射
-        args = data.get("args") if isinstance(data.get("args"), dict) else {}
-        thinking = data.get("thinking") or data.get("reasoning") or ""
+    if not is_protocol_v1(data):
         action = _normalize_action(data.get("action"))
-    else:
-        args = msg.args or {}
-        thinking = msg.thinking or ""
-        action = _normalize_action(msg.action)
-    if action != "extract":
-        return data
-
-    kind = str(args.get("kind") or "").lower().strip()
-    looks_like_field = any(k in args for k in ("field_name", "field_value", "field_text", "found"))
-    if kind != "field" and (kind or not looks_like_field):
-        return data
-
-    reported_name = _normalize_field_name(args.get("field_name"))
-    expected_name = _normalize_field_name(field_name)
-    if reported_name and expected_name and reported_name != expected_name:
-        if reported_name not in expected_name and expected_name not in reported_name:
+        if action and action != "extract":
             return data
 
-    found = _coerce_bool(args.get("found"), default=None)
+        args = data.get("args") if isinstance(data.get("args"), dict) else {}
+        merged = {**data, **args}
+
+        if not _is_field_extract_like(merged) or not _field_names_match(merged.get("field_name"), field_name):
+            return data
+
+        found = _coerce_bool(merged.get("found"))
+        if found is None:
+            found = bool(merged.get("field_value") or merged.get("field_text"))
+        return _build_extract_result(merged, found, merged.get("reasoning") or merged.get("thinking") or "")
+
+    parts = _ProtocolParts.from_data(data)
+    if parts.action != "extract":
+        return data
+
+    merged = {**data, **parts.args}
+    if not _is_field_extract_like(merged) or not _field_names_match(parts.args.get("field_name"), field_name):
+        return data
+
+    found = _coerce_bool(parts.args.get("found"))
     if found is None:
-        found = bool(args.get("field_value") or args.get("field_text"))
-    return {
-        "found": found,
-        "field_value": args.get("field_value") or "",
-        "confidence": args.get("confidence", 0.0),
-        "location_description": args.get("location_description") or "",
-        "reasoning": args.get("reasoning") or thinking or "",
-        "mark_id": args.get("mark_id"),
-        "target_text": args.get("target_text") or "",
-    }
+        found = bool(parts.args.get("field_value") or parts.args.get("field_text"))
+    return _build_extract_result(merged, found, parts.get_reasoning())
 
 
 def protocol_to_legacy_selected_mark(data: dict[str, Any]) -> dict[str, Any]:
-    """映射“从多个候选中选择一个”的旧结构（selected_mark_id）"""
+    """映射"从多个候选中选择一个"的旧结构"""
     if not is_protocol_v1(data):
         return data
 
-    msg = as_protocol_v1(data)
-    if msg is None:
+    parts = _ProtocolParts.from_data(data)
+    if parts.action != "select":
         return data
 
-    args = msg.args or {}
-    if (msg.action or "").lower() != "select":
-        return data
+    selected = parts.args.get("selected_mark_id")
+    if selected is None and (item := _extract_item_from_args(parts.args)):
+        selected = item.get("mark_id")
 
-    selected = args.get("selected_mark_id")
-    if selected is None:
-        item = args.get("item")
-        if isinstance(item, dict):
-            selected = item.get("mark_id")
-        else:
-            items = args.get("items") or []
-            if items and isinstance(items[0], dict):
-                selected = items[0].get("mark_id")
-
-    return {
-        "selected_mark_id": selected,
-        "reasoning": args.get("reasoning") or msg.thinking or "",
-    }
+    return {"selected_mark_id": selected, "reasoning": parts.get_reasoning()}

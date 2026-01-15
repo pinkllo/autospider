@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..common.config import config
+
 from .models import FieldExtractionResult, PageExtractionRecord
 
 if TYPE_CHECKING:
@@ -28,6 +30,8 @@ class BatchXPathExtractor:
         self.fields_config = fields_config
         self.output_dir = Path(output_dir)
         self.timeout_ms = timeout_ms
+        # 修改原因：批量提取时页面经常异步渲染，增加统一的页面稳定等待（可通过 env PAGE_LOAD_DELAY 调整）
+        self.page_load_delay = config.url_collector.page_load_delay
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.required_fields = {
@@ -36,6 +40,22 @@ class BatchXPathExtractor:
 
     async def run(self, urls: list[str]) -> dict:
         """执行批量提取流程"""
+        # 修改原因：URL 文件可能包含重复或空行，先去重以避免重复爬取。
+        original_count = len(urls)
+        unique_urls: list[str] = []
+        seen: set[str] = set()
+        for url in urls:
+            if not url:
+                continue
+            cleaned = url.strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            unique_urls.append(cleaned)
+        if len(unique_urls) != original_count:
+            print(f"[BatchXPathExtractor] URL 去重: {original_count} -> {len(unique_urls)}")
+        urls = unique_urls
+
         print(f"\n{'='*60}")
         print(f"[BatchXPathExtractor] 开始批量字段提取")
         print(f"[BatchXPathExtractor] 目标字段: {[f.get('name') for f in self.fields_config]}")
@@ -129,7 +149,7 @@ class BatchXPathExtractor:
         await self._ensure_page()
         try:
             await self.page.goto(url, wait_until="domcontentloaded")
-            await asyncio.sleep(1)
+            await self._wait_for_stable()
         except Exception as e:
             if self._is_closed_error(e):
                 await self._recover_and_reload(url)
@@ -152,7 +172,17 @@ class BatchXPathExtractor:
     async def _recover_and_reload(self, url: str) -> None:
         await self._reopen_page()
         await self.page.goto(url, wait_until="domcontentloaded")
-        await asyncio.sleep(1)
+        await self._wait_for_stable()
+
+    async def _wait_for_stable(self) -> None:
+        # 修改原因：页面加载/异步渲染偏慢时，避免过快进入 XPath 提取导致超时。
+        if self.page_load_delay > 0:
+            await asyncio.sleep(self.page_load_delay)
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+        except Exception:
+            # networkidle 可能因长连接不触发，超时直接继续
+            pass
 
     async def _reopen_page(self) -> None:
         context = None
