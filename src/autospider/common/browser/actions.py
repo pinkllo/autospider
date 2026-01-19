@@ -45,6 +45,8 @@ class ActionExecutor:
                 return await self._execute_wait(action, step_index)
             elif action.action == ActionType.EXTRACT:
                 return await self._execute_extract(action, mark_id_to_xpath, step_index)
+            elif action.action == ActionType.GUARD:
+                return await self._execute_guard()
             elif action.action == ActionType.GO_BACK:
                 return await self._execute_go_back(action, step_index)
             elif action.action == ActionType.DONE:
@@ -268,6 +270,36 @@ class ActionExecutor:
         )
 
         return ActionResult(success=True), script_step
+
+    async def _execute_guard(self) -> tuple[ActionResult, ScriptStep | None]:
+        """Force trigger login takeover when the model detects login/anti-bot UI."""
+        try:
+            import browser_manager.handlers as _handlers  # noqa: F401
+            from browser_manager.guard import PageGuard
+            from browser_manager.registry import get_registry
+            from browser_manager.handlers.login_handler import LoginHandler
+        except Exception as e:
+            return ActionResult(success=False, error=f"Guard import failed: {e}"), None
+
+        # Ensure a guard is attached for future navigations
+        guard = getattr(self.page, "_page_guard", None)
+        if guard is None:
+            guard = PageGuard()
+            guard.attach_to_page(self.page)
+            setattr(self.page, "_guard_attached", True)
+            setattr(self.page, "_page_guard", guard)
+
+        # Force run the login handler regardless of detect() outcome
+        try:
+            registry = get_registry()
+            handler = registry.get_all_handlers().get("人工登录接管")
+            if handler is None:
+                handler = LoginHandler(auth_file=None)
+                registry.register(handler)
+            await handler.handle(self.page)
+            return ActionResult(success=True), None
+        except Exception as e:
+            return ActionResult(success=False, error=str(e)), None
 
     async def _execute_extract(
         self,

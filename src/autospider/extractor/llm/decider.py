@@ -455,6 +455,8 @@ class LLMDecider:
             # 常见同义/历史动作名
             "scroll_down": "scroll",
             "scroll_up": "scroll",
+            "login_guard": "guard",
+            "handle_login": "guard",
         }
         action_str = action_aliases.get(action_str, action_str)
 

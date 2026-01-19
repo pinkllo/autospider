@@ -13,6 +13,7 @@ from playwright.async_api import Page
 # 引入新的浏览器引擎
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
 from browser_manager.engine import get_browser_engine, BrowserEngine, shutdown_browser_engine
+from browser_manager.guard import PageGuard
 
 from ..config import config
 
@@ -58,10 +59,19 @@ class BrowserSession:
                 "height": self.viewport_height,
             },
             timeout=config.browser.timeout_ms,
+            auth_file=str(Path.cwd() / ".auth" / "default.json"),
         )
         
         # 进入上下文获取页面
         self._page = await self._page_context.__aenter__()
+
+        # Enable anomaly guard (login/risk-control, etc.)
+        self._attach_guard(self._page)
+        try:
+            self._page.context.on("page", lambda new_page: self._attach_guard(new_page))
+        except Exception:
+            # Keep main page usable if context events are not available
+            pass
         
         return self._page
 
@@ -97,6 +107,50 @@ class BrowserSession:
         except Exception:
             # 超时不算错误,继续执行
             pass
+
+    def _attach_guard(self, page: Page) -> None:
+        """Attach guard to a page and block after navigations until handled."""
+        if getattr(page, "_guard_attached", False):
+            return
+
+        # 触发内置处理器注册（仅副作用）
+        import browser_manager.handlers as _handlers  # noqa: F401
+
+        guard = PageGuard()
+        guard.attach_to_page(page)
+
+        setattr(page, "_guard_attached", True)
+        setattr(page, "_page_guard", guard)
+
+        original_goto = page.goto
+        original_go_back = page.go_back
+        original_reload = page.reload
+        original_wait_for_load_state = page.wait_for_load_state
+
+        async def guarded_goto(*args, **kwargs):
+            result = await original_goto(*args, **kwargs)
+            await guard.run_inspection(page)
+            return result
+
+        async def guarded_go_back(*args, **kwargs):
+            result = await original_go_back(*args, **kwargs)
+            await guard.run_inspection(page)
+            return result
+
+        async def guarded_reload(*args, **kwargs):
+            result = await original_reload(*args, **kwargs)
+            await guard.run_inspection(page)
+            return result
+
+        async def guarded_wait_for_load_state(*args, **kwargs):
+            result = await original_wait_for_load_state(*args, **kwargs)
+            await guard.run_inspection(page)
+            return result
+
+        page.goto = guarded_goto
+        page.go_back = guarded_go_back
+        page.reload = guarded_reload
+        page.wait_for_load_state = guarded_wait_for_load_state
 
 
 @asynccontextmanager

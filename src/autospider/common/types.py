@@ -120,6 +120,7 @@ class ActionType(str, Enum):
     NAVIGATE = "navigate"
     WAIT = "wait"
     EXTRACT = "extract"
+    GUARD = "guard"
     GO_BACK = "go_back"  # 返回上一页
     DONE = "done"
     RETRY = "retry"
