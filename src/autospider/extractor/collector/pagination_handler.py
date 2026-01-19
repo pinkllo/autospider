@@ -8,8 +8,15 @@ import re
 from typing import TYPE_CHECKING
 
 from ...common.config import config
-from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks
+from ...common.browser.actions import ActionExecutor
+from ...common.som import (
+    build_mark_id_to_xpath_map,
+    capture_screenshot_with_marks,
+    clear_overlay,
+    inject_and_scan,
+)
 from ...common.som.text_first import resolve_single_mark_id
+from ...common.types import Action, ActionType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -586,29 +593,48 @@ class PaginationHandler:
                     print(f"[Pagination-LLM] mark_id 无效，无法点击: {mark_id_raw}")
                     return False
 
-                mark_id = str(mark_id_value)  # data-som-id 是字符串
-                
-                # 点击（使用 data-som-id 属性）
-                locator = self.page.locator(f'[data-som-id="{mark_id}"]')
-                count = await locator.count()
-                if count > 0:
-                    print(f"[Pagination-LLM] 尝试点击 mark_id={mark_id}...")
-                    
-                    from ..checkpoint.rate_controller import get_random_delay
-                    delay = get_random_delay(
-                        config.url_collector.action_delay_base,
-                        config.url_collector.action_delay_random
-                    )
-                    await asyncio.sleep(delay)
-                    
-                    await locator.first.click(timeout=5000)
-                    await asyncio.sleep(config.url_collector.page_load_delay)
-                    
-                    self.current_page_num += 1
-                    print(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
-                    return True
-                else:
-                    print(f"[Pagination-LLM] 未找到 mark_id={mark_id} 的元素")
+                mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
+                executor = ActionExecutor(self.page)
+
+                print(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
+                from ..checkpoint.rate_controller import get_random_delay
+
+                delay = get_random_delay(
+                    config.url_collector.action_delay_base,
+                    config.url_collector.action_delay_random,
+                )
+                await asyncio.sleep(delay)
+
+                result, _ = await executor.execute(
+                    Action(
+                        action=ActionType.CLICK,
+                        mark_id=mark_id_value,
+                        target_text=target_text or None,
+                        timeout_ms=5000,
+                    ),
+                    mark_id_to_xpath,
+                    step_index=0,
+                )
+
+                new_page = getattr(executor, "_new_page", None)
+                if new_page is not None:
+                    # Pagination should not open a new tab. Close it to avoid leaking pages.
+                    try:
+                        await new_page.close()
+                    except Exception:
+                        pass
+                    executor._new_page = None
+                    print("[Pagination-LLM] Unexpected new tab opened; treat as failure.")
+                    return False
+
+                if not result.success:
+                    print(f"[Pagination-LLM] 点击失败: {result.error}")
+                    return False
+
+                await asyncio.sleep(config.url_collector.page_load_delay)
+                self.current_page_num += 1
+                print(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
+                return True
             else:
                 print(f"[Pagination-LLM] 未找到下一页: {data.get('reasoning', '') if data else ''}")
         except Exception as e:

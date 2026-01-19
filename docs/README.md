@@ -6,10 +6,14 @@ AutoSpider 是一个基于大语言模型的智能网页自动化工具，能够
 
 ## 📚 文档目录
 
+### 🏗️ 架构与流程
+- [项目流程图](architecture_flowchart.md) - 系统架构和工作流程
+
 ### 🏗️ 核心模块
 - [Common 模块](common/README.md) - 基础设施和公共工具
 - [Crawler 模块](crawler/README.md) - 批量网页数据采集引擎
 - [Extractor 模块](extractor/README.md) - 智能规则发现引擎
+- [Field 模块](field/README.md) - 自动字段建模与提取
 - [Prompts 模块](prompts/README.md) - 提示词管理中枢
 
 ### 🔧 工具模块
@@ -72,6 +76,10 @@ cp .env.example .env
 ### Extractor 模块
 
 智能规则发现引擎，通过 LLM 理解页面语义，自动分析和提取关键信息。
+
+### Field 模块
+
+自动字段建模与提取模块，通过少量样本页自动推导稳定的 XPath 提取规则，实现高效、准确的数据抓取。
 
 ### Prompts 模块
 

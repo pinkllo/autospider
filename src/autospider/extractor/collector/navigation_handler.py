@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from ...common.browser import ActionExecutor
+from ...common.browser.click_utils import click_and_capture_new_page
 from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks, build_mark_id_to_xpath_map, format_marks_for_llm, set_overlay_visibility
 from ...common.types import AgentState, RunInput, ActionType
 
@@ -253,16 +254,18 @@ class NavigationHandler:
                                         f"[Replay] 点击: {target_text[:30]}... (xpath: {xpath[:50]}...)"
                                     )
                                     try:
-                                        context = self.page.context
-                                        async with context.expect_page(timeout=3000) as new_page_info:
-                                            await locator.first.click(timeout=5000)
-                                        new_page = await new_page_info.value
-                                        await new_page.wait_for_load_state(
-                                            "domcontentloaded", timeout=10000
+                                        new_page = await click_and_capture_new_page(
+                                            page=self.page,
+                                            locator=locator.first,
+                                            click_timeout_ms=5000,
+                                            expect_page_timeout_ms=3000,
+                                            load_state="domcontentloaded",
+                                            load_timeout_ms=10000,
                                         )
-                                        self.page = new_page
-                                        self.list_url = self.page.url
-                                        print(f"[Replay] ✓ 切换到新标签页: {self.page.url}")
+                                        if new_page is not None:
+                                            self.page = new_page
+                                            self.list_url = self.page.url
+                                            print(f"[Replay] ✓ 切换到新标签页: {self.page.url}")
                                     except Exception:
                                         pass
                                     await asyncio.sleep(1)

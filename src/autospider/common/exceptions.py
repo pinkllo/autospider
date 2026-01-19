@@ -75,19 +75,20 @@ class ValidationError(AutoSpiderError):
     pass
 
 
-# class MarkIdValidationError(ValidationError):
-#     """mark_id 验证失败
+class MarkIdValidationError(ValidationError):
+    """mark_id 验证失败
     
-#     当 LLM 选择的 mark_id 与实际元素文本不匹配时抛出。
-#     """
-#     def __init__(self, mark_id: int, expected_text: str, actual_text: str | None = None):
-#         message = f"mark_id {mark_id} 验证失败: 期望 '{expected_text}'"
-#         if actual_text:
-#             message += f", 实际 '{actual_text}'"
-#         super().__init__(message)
-#         self.mark_id = mark_id
-#         self.expected_text = expected_text
-#         self.actual_text = actual_text
+    当 LLM 选择的 mark_id 与实际元素文本不匹配时抛出。
+    """
+
+    def __init__(self, mark_id: int, expected_text: str, actual_text: str | None = None):
+        message = f"mark_id {mark_id} 验证失败: 期望 '{expected_text}'"
+        if actual_text:
+            message += f", 实际 '{actual_text}'"
+        super().__init__(message)
+        self.mark_id = mark_id
+        self.expected_text = expected_text
+        self.actual_text = actual_text
 
 
 class URLValidationError(ValidationError):

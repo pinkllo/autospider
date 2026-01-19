@@ -29,7 +29,7 @@ class TaskPlan(BaseModel):
 
 
 # Prompt模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "planner.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "planner.yaml")
 
 
 class TaskPlanner:

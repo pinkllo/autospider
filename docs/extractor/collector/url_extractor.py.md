@@ -1,237 +1,336 @@
-# url_extractor.py - URL 提取器
+# URL Extractor - URL 提取器
 
-url_extractor.py 模块提供 URL 提取功能，负责从元素中提取 URL。
+## 📋 基本信息
 
----
+### 文件路径
+`d:\autospider\src\autospider\extractor\collector\url_extractor.py`
 
-## 📁 文件路径
+### 核心功能
+URL 提取器，负责从页面元素中提取详情页 URL，支持从 href 属性提取和通过点击元素获取 URL 两种方式。
 
-```
-src/autospider/extractor/collector/url_extractor.py
-```
+### 设计理念
+通过多种策略从页面元素中提取 URL，确保在各种情况下都能准确获取详情页链接。
 
----
+## 📁 函数目录
 
-## 📑 函数目录
+### 主类
+- `URLExtractor` - URL 提取器
 
-### 🚀 核心类
-- `URLExtractor` - URL 提取器主类
+### 核心方法
+- `extract_from_element` - 从元素中提取 URL（优先从 href，否则点击获取）
+- `click_and_get_url` - 点击元素并获取新页面的 URL
+- `click_element_and_get_url` - 点击 playwright 元素并获取新页面的 URL（用于收集阶段）
 
-### 🔧 主要方法
-- `extract_from_element()` - 从元素中提取 URL
-- `click_and_get_url()` - 点击元素并获取新页面的 URL
-- `click_element_and_get_url()` - 点击 locator 并获取 URL
+## 🎯 核心功能详解
 
----
+### URLExtractor 类
 
-## 🚀 核心功能
+**功能说明**：URL 提取器，负责从页面元素中提取详情页 URL。
 
-### URLExtractor
+**初始化参数**：
+| 参数名 | 类型 | 描述 | 默认值 |
+|--------|------|------|--------|
+| page | `Page` | Playwright 页面对象 | 必填 |
+| list_url | `str` | 列表页 URL | 必填 |
 
-URL 提取器，负责从页面元素中提取详情页 URL。
+**核心属性**：
+| 属性名 | 类型 | 描述 |
+|--------|------|------|------|
+| page | `Page` | Playwright 页面对象 |
+| list_url | `str` | 列表页 URL |
 
-```python
-from autospider.extractor.collector.url_extractor import URLExtractor
+### 核心方法
 
-# 创建 URL 提取器
-extractor = URLExtractor(page, list_url)
+#### extract_from_element()
 
-# 从元素中提取 URL
-url = await extractor.extract_from_element(
-    element=element,
-    snapshot=snapshot,
-    nav_steps=nav_steps
-)
+**功能**：从元素中提取 URL，优先从 href 属性提取，否则通过点击获取。
 
-print(f"提取的 URL: {url}")
-```
+**参数**：
+| 参数名 | 类型 | 描述 |
+|--------|------|------|
+| element | `ElementMark` | 页面元素标记 |
+| snapshot | `SoMSnapshot` | 页面快照 |
+| nav_steps | `list[dict] | None` | 导航步骤列表 |
 
-### 提取策略
+**返回值**：`str | None` - 提取的 URL 或 None（提取失败时）
 
-使用两种策略提取 URL：
+**执行流程**：
+1. 优先从元素的 href 属性提取 URL
+2. 如果 href 不存在，调用 click_and_get_url 方法通过点击获取 URL
+3. 返回提取的 URL 或 None
 
-**策略 1: 从 href 提取**
-```python
-if element.href:
-    url = urljoin(self.list_url, element.href)
-    return url
-```
+#### click_and_get_url()
 
-**策略 2: 点击获取**
-```python
-url = await self.click_and_get_url(element, nav_steps=nav_steps)
-return url
-```
+**功能**：点击元素并获取新页面的 URL。
 
----
+**参数**：
+| 参数名 | 类型 | 描述 |
+|--------|------|------|
+| element | `ElementMark` | 页面元素标记 |
+| nav_steps | `list[dict] | None` | 导航步骤列表 |
 
-## 💡 特性说明
+**返回值**：`str | None` - 获取的 URL 或 None（获取失败时）
 
-### 优先从 href 提取
+**执行流程**：
+1. 隐藏覆盖层
+2. 优先使用 data-som-id 定位元素
+3. 如果 data-som-id 失效，使用 XPath 后备定位
+4. 监听新标签页打开
+5. 如果打开了新标签页，获取 URL 并关闭新标签页
+6. 如果没有新标签页，检查当前页面 URL 是否变化
+7. 如果 URL 变化，返回新 URL 并返回列表页
+8. 如果 URL 未变化，尝试返回上一页或重新加载列表页
 
-优先从元素的 href 属性提取 URL，避免不必要的点击：
+#### click_element_and_get_url()
 
-```python
-if element.href:
-    url = urljoin(self.list_url, element.href)
-    print(f"✓ 从 href 提取: {url[:60]}...")
-    return url
-```
+**功能**：点击 playwright 元素并获取新页面的 URL，用于收集阶段。
 
-### 新标签页检测
+**参数**：
+| 参数名 | 类型 | 描述 |
+|--------|------|------|
+| element_locator | `Locator` | Playwright 元素定位器 |
+| nav_steps | `list[dict]` | 导航步骤列表 |
 
-自动检测新标签页的打开：
+**返回值**：`str | None` - 获取的 URL 或 None（获取失败时）
 
-```python
-context = self.page.context
-pages_before = len(context.pages)
+**执行流程**：
+1. 监听新标签页打开
+2. 点击元素
+3. 如果打开了新标签页，获取 URL 并关闭新标签页
+4. 如果没有新标签页，检查当前页面 URL 是否变化
+5. 如果 URL 变化，返回新 URL 并返回列表页
+6. 如果 URL 未变化，尝试返回上一页或重新加载列表页
 
-# 点击元素
-await element.click()
+## 🚀 特性说明
 
-# 检查是否有新标签页打开
-pages_after = len(context.pages)
-if pages_after > pages_before:
-    new_page = context.pages[-1]
-    url = new_page.url
-```
+### 多种提取策略
+- 优先从 href 属性提取 URL，快速高效
+- 当 href 不存在时，通过点击元素获取 URL，确保准确性
+- 支持多种元素定位方式，提高成功率
 
-### 导航步骤重放
+### 智能元素定位
+- 优先使用 data-som-id 定位元素，稳定可靠
+- 当 data-som-id 失效时，使用 XPath 后备定位，提高容错性
+- 支持多种 XPath 候选，按优先级尝试
 
-在返回列表页时重放导航步骤：
+### 新标签页处理
+- 支持监听新标签页打开
+- 支持处理延迟打开的新标签页
+- 获取 URL 后自动关闭新标签页，保持环境整洁
 
-```python
-# 返回列表页
-await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
+### URL 变化检测
+- 检测当前页面 URL 是否变化
+- 检测 URL hash 是否变化
+- 智能处理 URL 未变化的情况
 
-# 重放导航步骤
-if nav_steps:
-    for step in nav_steps:
-        # 执行导航步骤
-        pass
-```
+### 自动恢复机制
+- 当操作失败时，自动尝试返回列表页
+- 自动重新执行导航步骤，恢复到正确状态
+- 提高系统的鲁棒性和容错性
 
----
+### 详细日志
+- 提供详细的操作日志，便于调试
+- 记录提取过程中的关键步骤
+- 显示 URL 变化情况
 
-## 🔧 使用示例
+## 💡 使用示例
 
 ### 基本使用
 
 ```python
 from autospider.extractor.collector.url_extractor import URLExtractor
 
-# 创建 URL 提取器
-extractor = URLExtractor(page, list_url="https://example.com/list")
-
-# 从元素中提取 URL
-url = await extractor.extract_from_element(
-    element=element,
-    snapshot=snapshot,
-    nav_steps=[]
-)
-
-print(f"提取的 URL: {url}")
+async def main():
+    # 假设已有 page 和 list_url
+    extractor = URLExtractor(page, list_url)
+    
+    # 假设已有 element 和 snapshot
+    url = await extractor.extract_from_element(element, snapshot)
+    
+    if url:
+        print(f"提取到 URL: {url}")
+    else:
+        print("提取 URL 失败")
 ```
 
 ### 点击获取 URL
 
 ```python
-# 点击元素并获取 URL
-url = await extractor.click_and_get_url(
-    element=element,
-    nav_steps=nav_steps
-)
+from autospider.extractor.collector.url_extractor import URLExtractor
 
-print(f"点击后获取的 URL: {url}")
+async def main():
+    # 假设已有 page 和 list_url
+    extractor = URLExtractor(page, list_url)
+    
+    # 假设已有 element
+    url = await extractor.click_and_get_url(element, nav_steps)
+    
+    if url:
+        print(f"通过点击获取到 URL: {url}")
+    else:
+        print("点击获取 URL 失败")
 ```
 
-### 使用 locator
+### 收集阶段使用
 
 ```python
-# 使用 locator 提取 URL
-locator = page.locator("//a[@class='product-link']")
+from autospider.extractor.collector.url_extractor import URLExtractor
 
-url = await extractor.click_element_and_get_url(
-    locator=locator,
-    nav_steps=nav_steps
-)
-
-print(f"提取的 URL: {url}")
+async def main():
+    # 假设已有 page 和 list_url
+    extractor = URLExtractor(page, list_url)
+    
+    # 假设已有 element_locator
+    url = await extractor.click_element_and_get_url(element_locator, nav_steps)
+    
+    if url:
+        print(f"收集阶段获取到 URL: {url}")
+    else:
+        print("收集阶段获取 URL 失败")
 ```
 
----
+## 🔍 最佳实践
 
-## 📝 最佳实践
+### 优先使用 href 提取
+- href 属性提取是最快、最可靠的方式
+- 建议在页面设计时为可点击元素添加 href 属性
+- 对于动态生成的内容，确保 JavaScript 正确设置 href 属性
 
-### URL 提取
+### 合理设计 XPath 候选
+- 为元素提供多个 XPath 候选，按优先级排序
+- 优先使用稳定的属性（如 ID、class、data-* 属性）
+- 避免使用位置相关的 XPath，提高稳定性
 
-1. **优先使用 href**：优先从 href 属性提取 URL
-2. **验证 URL 有效性**：验证提取的 URL 是否有效
-3. **处理相对路径**：正确处理相对路径转换为绝对路径
+### 优化点击操作
+- 确保页面加载完成后再执行点击操作
+- 对于动态加载的元素，增加适当的等待时间
+- 避免在短时间内频繁点击相同元素
 
-### 新标签页处理
+### 处理导航步骤
+- 确保导航步骤正确反映页面的筛选状态
+- 当返回列表页后，重新执行导航步骤，恢复筛选状态
+- 定期更新导航步骤，确保准确性
 
-1. **检测新标签页**：自动检测新标签页的打开
-2. **切换到新标签页**：自动切换到新标签页
-3. **关闭旧标签页**：根据需要关闭旧标签页
+### 监控日志输出
+- 关注提取过程中的日志信息
+- 分析失败原因，优化提取策略
+- 调整提取参数，提高成功率
 
-### 导航步骤重放
+## 🐛 故障排除
 
-1. **保存导航步骤**：保存导航步骤以便重放
-2. **重放导航步骤**：在返回列表页时重放导航步骤
-3. **验证重放结果**：验证导航步骤重放是否成功
+### 问题：无法找到元素
 
----
+**可能原因**：
+1. 元素已从 DOM 中移除
+2. 元素被滚动到可视区域外
+3. data-som-id 失效
+4. XPath 候选不正确
 
-## 🔍 故障排除
+**解决方案**：
+1. 确保页面加载完成后再执行提取操作
+2. 先滚动到元素位置，再执行点击操作
+3. 更新 XPath 候选，使用更稳定的定位方式
+4. 增加等待时间，确保元素完全加载
 
-### 常见问题
+### 问题：点击后 URL 未变化
 
-1. **URL 提取失败**
-   - 检查元素是否有 href 属性
-   - 验证元素是否可点击
-   - 确认页面加载完成
+**可能原因**：
+1. 点击操作未触发导航
+2. 页面使用了 SPA 路由，URL 未更新
+3. 网站有反爬机制，阻止了点击操作
 
-2. **新标签页处理失败**
-   - 检查新标签页是否正确打开
-   - 验证标签页切换逻辑是否正确
-   - 确认 URL 是否正确获取
+**解决方案**：
+1. 检查元素是否可点击
+2. 检查页面是否使用了 SPA 路由
+3. 增加延迟和随机波动，模拟真实用户行为
+4. 尝试不同的点击方式（如模拟鼠标事件）
 
-3. **导航步骤重放失败**
-   - 检查导航步骤是否正确
-   - 验证元素选择器是否有效
-   - 确认页面状态是否正确
+### 问题：返回列表页失败
 
-### 调试技巧
+**可能原因**：
+1. 页面已被重定向到其他域名
+2. 网站有反爬机制，阻止了返回操作
+3. 网络连接问题
 
-```python
-# 检查元素信息
-print(f"元素 tag: {element.tag}")
-print(f"元素 text: {element.text}")
-print(f"元素 href: {element.href}")
-print(f"元素 role: {element.role}")
+**解决方案**：
+1. 使用绝对 URL 重新加载列表页
+2. 增加等待时间，确保网络连接稳定
+3. 优化网络请求，减少超时情况
 
-# 检查提取的 URL
-print(f"提取的 URL: {url}")
-print(f"URL 长度: {len(url)}")
+### 问题：导航步骤重放失败
 
-# 检查页面状态
-print(f"当前 URL: {page.url}")
-print(f"标签页数: {len(page.context.pages)}")
-```
+**可能原因**：
+1. 导航步骤不正确
+2. 页面结构发生变化
+3. 网站有反爬机制，阻止了导航操作
 
----
+**解决方案**：
+1. 重新生成导航步骤
+2. 优化导航步骤，使用更稳定的定位方式
+3. 增加延迟和随机波动，模拟真实用户行为
 
 ## 📚 方法参考
 
-### URLExtractor 方法
+### URLExtractor 类方法
 
-| 方法 | 参数 | 返回值 | 说明 |
-|------|------|--------|------|
-| `extract_from_element()` | element, snapshot, nav_steps | str \| None | 从元素中提取 URL |
-| `click_and_get_url()` | element, nav_steps | str \| None | 点击元素并获取新页面的 URL |
-| `click_element_and_get_url()` | locator, nav_steps | str \| None | 点击 locator 并获取 URL |
+| 方法名 | 参数 | 返回值 | 描述 |
+|--------|------|--------|------|
+| `extract_from_element` | element, snapshot, nav_steps=None | `str | None` | 从元素中提取 URL（优先从 href，否则点击获取） |
+| `click_and_get_url` | element, nav_steps=None | `str | None` | 点击元素并获取新页面的 URL |
+| `click_element_and_get_url` | element_locator, nav_steps=None | `str | None` | 点击 playwright 元素并获取新页面的 URL（用于收集阶段） |
+
+## 🔄 依赖关系
+
+- `playwright.async_api` - Playwright 异步 API
+- `urllib.parse` - URL 处理
+- `asyncio` - 异步编程
+- `autospider.common.som` - SoM 相关功能
+
+## 📝 设计模式
+
+- **策略模式**：支持多种 URL 提取策略
+- **容错设计**：提供多种后备方案，提高成功率
+- **自动恢复**：当操作失败时，自动尝试恢复
+- **详细日志**：便于调试和监控
+
+## 🚀 性能优化
+
+### 时间复杂度
+- 提取操作：O(1)（直接从 href 提取）或 O(1)（点击操作，主要受网络延迟影响）
+
+### 空间复杂度
+- O(1)，不占用大量内存
+
+### 优化建议
+
+1. **优先从 href 提取**：避免不必要的点击操作
+2. **合理设置等待时间**：平衡速度和成功率
+3. **优化 XPath 候选**：使用更稳定的定位方式
+4. **减少导航步骤**：简化页面状态恢复
+5. **增加日志级别**：便于调试和监控
+
+## 📌 版本历史
+
+| 版本 | 更新内容 | 日期 |
+|------|----------|------|
+| 1.0 | 初始版本 | 2026-01-01 |
+| 1.1 | 增加文本优先的 mark_id 解析 | 2026-01-10 |
+| 1.2 | 优化点击获取 URL 逻辑 | 2026-01-15 |
+| 1.3 | 增加导航步骤重放功能 | 2026-01-18 |
+| 1.4 | 优化新标签页处理 | 2026-01-19 |
+
+## 🔮 未来规划
+
+- 支持更多 URL 提取策略
+- 优化点击操作，减少不必要的等待
+- 增加智能等待机制，根据页面加载情况动态调整等待时间
+- 支持并行提取，提高提取效率
+- 增加 URL 验证功能，确保提取的 URL 有效
+
+## 📄 许可证
+
+MIT License
 
 ---
 
-*最后更新: 2026-01-08*
+最后更新: 2026-01-19

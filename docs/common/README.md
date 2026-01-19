@@ -11,6 +11,7 @@ common/
 ├── __init__.py              # 模块导出
 ├── config.py                # 配置管理（Pydantic 模型）
 ├── types.py                 # 核心数据类型定义
+├── protocol.py              # 统一协议解析与兼容映射
 ├── browser/                 # 浏览器操作
 │   ├── __init__.py
 │   ├── actions.py          # 动作执行器
@@ -18,11 +19,15 @@ common/
 ├── som/                    # Set-of-Mark 标注系统
 │   ├── __init__.py
 │   ├── api.py              # SoM Python API
-│   └── inject.js           # 注入脚本
-└── storage/                # 持久化存储
+│   ├── inject.js           # 注入脚本
+│   └── text_first.py       # 文本优先解析逻辑
+├── storage/                # 持久化存储
+│   ├── __init__.py
+│   ├── persistence.py      # 持久化基类
+│   └── redis_manager.py    # Redis 管理器
+└── utils/                  # 内部工具
     ├── __init__.py
-    ├── persistence.py      # 持久化基类
-    └── redis_manager.py    # Redis 管理器
+    └── fuzzy_search.py     # HTML 模糊搜索与 XPath 定位
 ```
 
 ---
@@ -52,6 +57,12 @@ common/
 - `ScriptStep` - XPath 脚本步骤
 - `XPathScript` - 完整的 XPath 脚本
 - `AgentState` - Agent 状态
+
+### 📜 统一协议 (protocol.py)
+- `ProtocolMessage` - 标准协议消息模型
+- `parse_protocol_message(payload)` - 统一协议解析入口
+- `parse_json_dict_from_llm(text)` - LLM 文本解析工具
+- `protocol_to_legacy_*` - 一系列旧版兼容映射函数
 
 ### 🎯 动作执行器 (actions.py)
 - `ActionExecutor` - 动作执行器主类
@@ -84,6 +95,11 @@ common/
 - `get_metadata(item)` - 获取元数据
 - `get_count()` - 获取总数
 - `get_active_count()` - 获取活跃数量
+
+### 🔍 模糊搜索工具 (utils/fuzzy_search.py)
+- `FuzzyTextSearcher` - 模糊搜索主类
+- `search_in_html(html, target)` - 在 HTML 中搜索目标文本
+- `TextMatch` - 匹配结果数据模型
 
 ---
 

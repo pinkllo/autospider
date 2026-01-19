@@ -442,7 +442,7 @@ class ConfigGenerator:
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
         if element:
             url = await self.url_extractor.click_and_get_url(
-                element, nav_steps=self.nav_steps
+                element, snapshot, nav_steps=self.nav_steps
             )
             if url and url not in self.visited_detail_urls:
                 visit = DetailPageVisit(

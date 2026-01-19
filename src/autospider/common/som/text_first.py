@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 PROMPT_TEMPLATE_PATH = str(
-    Path(__file__).parent.parent.parent.parent.parent / "prompts" / "disambiguate_by_text.yaml"
+    Path(__file__).parent.parent.parent / "prompts" / "disambiguate_by_text.yaml"
 )
 
 

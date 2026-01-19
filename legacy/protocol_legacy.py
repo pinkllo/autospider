@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# NOTE: Deprecated legacy copy. Prefer:
+#   autospider.common.protocol
+
 import json
 import re
 import unicodedata
@@ -297,7 +300,7 @@ class _ProtocolParts:
     @classmethod
     def from_data(cls, data: dict[str, Any]) -> "_ProtocolParts":
         if msg := as_protocol_v1(data):
-            return cls(_normalize_action(msg.action), msg.args or {}, msg.thinking or "")
+            return cls(msg.action.lower(), msg.args or {}, msg.thinking or "")
         return cls(
             _normalize_action(data.get("action")),
             data.get("args") if isinstance(data.get("args"), dict) else {},

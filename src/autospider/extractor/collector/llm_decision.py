@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent.parent.parent / "prompts" / "url_collector.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "url_collector.yaml")
 
 
 class LLMDecisionMaker:

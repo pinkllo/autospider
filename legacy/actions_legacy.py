@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+# NOTE: Deprecated legacy copy. Prefer:
+#   autospider.common.browser.actions.ActionExecutor
+
 import asyncio
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
-from .click_utils import click_and_capture_new_page
 
 if TYPE_CHECKING:
     from ..types import SoMSnapshot
@@ -102,17 +104,24 @@ class ActionExecutor:
             if await locator.count() == 0:
                 return ActionResult(success=False, error=f"Element not found for mark_id {action.mark_id}"), None
 
-        new_page = await click_and_capture_new_page(
-            page=self.page,
-            locator=locator,
-            click_timeout_ms=action.timeout_ms,
-            expect_page_timeout_ms=3000,
-            load_state="domcontentloaded",
-            load_timeout_ms=10000,
-        )
-        if new_page is not None:
-            print(f"[Click] Detected new tab: {new_page.url}")
+        # 记录当前页面数量
+        context = self.page.context
+        pages_before = len(context.pages)
+        
+        # 使用 expect_page 监听新页面（无论是 target="_blank" 还是 JS window.open）
+        try:
+            async with context.expect_page(timeout=3000) as new_page_info:
+                await locator.click(timeout=action.timeout_ms)
+            
+            # 有新页面打开
+            new_page = await new_page_info.value
+            await new_page.wait_for_load_state("domcontentloaded")
+            print(f"[Click] 检测到新标签页打开: {new_page.url}")
             self._new_page = new_page
+            
+        except Exception:
+            # 没有新页面打开，普通点击
+            pass
 
         # 等待页面响应
         await asyncio.sleep(0.5)
