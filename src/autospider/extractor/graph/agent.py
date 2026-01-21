@@ -377,11 +377,10 @@ class SoMAgent:
                 state["step_index"],
             )
 
-            # 检查是否有新页面打开（处理 target="_blank" 链接）
+            # 同步新标签页引用（executor 内部已经切换了 self.page）
             if hasattr(self.executor, '_new_page') and self.executor._new_page:
-                print(f"[Act] 检测到新标签页，切换到新页面")
+                print(f"[Act] 同步新标签页到 Agent: {self.executor._new_page.url}")
                 self.page = self.executor._new_page
-                self.executor.page = self.executor._new_page
                 self.executor._new_page = None
 
             print(f"[Act] 执行结果: {'成功' if result.success else '失败'}")

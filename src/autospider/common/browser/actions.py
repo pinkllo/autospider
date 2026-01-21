@@ -19,6 +19,22 @@ class ActionExecutor:
 
     def __init__(self, page: Page):
         self.page = page
+        try:
+            from browser_manager.guard import PageGuard
+            from browser_manager.guarded_page import GuardedPage
+        except Exception:
+            return
+
+        if isinstance(page, GuardedPage):
+            return
+
+        guard = getattr(page, "_page_guard", None)
+        if guard is None:
+            guard = PageGuard()
+            guard.attach_to_page(page)
+            setattr(page, "_guard_attached", True)
+            setattr(page, "_page_guard", guard)
+        self.page = GuardedPage(page, guard)
 
     async def execute(
         self,
@@ -46,10 +62,10 @@ class ActionExecutor:
                 return await self._execute_wait(action, step_index)
             elif action.action == ActionType.EXTRACT:
                 return await self._execute_extract(action, mark_id_to_xpath, step_index)
-            elif action.action == ActionType.GUARD:
-                return await self._execute_guard()
             elif action.action == ActionType.GO_BACK:
                 return await self._execute_go_back(action, step_index)
+            elif action.action == ActionType.GO_BACK_TAB:
+                return await self._execute_go_back_tab(step_index)
             elif action.action == ActionType.DONE:
                 return ActionResult(success=True), None
             elif action.action == ActionType.RETRY:
@@ -78,6 +94,34 @@ class ActionExecutor:
             except Exception:
                 continue
         return None, None
+
+    def _attach_guard_best_effort(self, page: Page):
+        try:
+            import browser_manager.handlers as _handlers  # noqa: F401
+            from browser_manager.guard import PageGuard
+            from browser_manager.guarded_page import GuardedPage
+
+            guard = getattr(page, "_page_guard", None)
+            if guard is None:
+                guard = PageGuard()
+                guard.attach_to_page(page)
+                setattr(page, "_guard_attached", True)
+                setattr(page, "_page_guard", guard)
+            return GuardedPage(page, guard)
+        except Exception:
+            return page
+
+    def _unwrap_page(self, page):
+        try:
+            return page.unwrap()
+        except Exception:
+            return page
+
+    def _is_page_closed(self, page) -> bool:
+        try:
+            return bool(page.is_closed())
+        except Exception:
+            return False
 
     async def _execute_click(
         self,
@@ -112,7 +156,10 @@ class ActionExecutor:
         )
         if new_page is not None:
             print(f"[Click] Detected new tab: {new_page.url}")
-            self._new_page = new_page
+            # 立即切换到新页面，确保后续操作在正确的页面上执行
+            self._previous_page = self.page
+            self.page = new_page
+            self._new_page = new_page  # 同时保留引用供外部使用
 
         # 等待页面响应
         await asyncio.sleep(0.5)
@@ -196,17 +243,19 @@ class ActionExecutor:
         """执行按键动作"""
         key = action.key or "Enter"
 
+        locator = None
         if action.mark_id is not None:
             xpaths = mark_id_to_xpath.get(action.mark_id, [])
             locator, used_xpath = await self._find_element_by_xpath_list(xpaths)
-            if locator:
-                await locator.press(key)
-            else:
-                await self.page.keyboard.press(key)
+            if not locator:
                 used_xpath = None
         else:
-            await self.page.keyboard.press(key)
             used_xpath = None
+
+        if locator:
+            await locator.press(key)
+        else:
+            await self.page.keyboard.press(key)
 
         script_step = ScriptStep(
             step=step_index,
@@ -281,36 +330,6 @@ class ActionExecutor:
 
         return ActionResult(success=True), script_step
 
-    async def _execute_guard(self) -> tuple[ActionResult, ScriptStep | None]:
-        """Force trigger login takeover when the model detects login/anti-bot UI."""
-        try:
-            import browser_manager.handlers as _handlers  # noqa: F401
-            from browser_manager.guard import PageGuard
-            from browser_manager.registry import get_registry
-            from browser_manager.handlers.login_handler import LoginHandler
-        except Exception as e:
-            return ActionResult(success=False, error=f"Guard import failed: {e}"), None
-
-        # Ensure a guard is attached for future navigations
-        guard = getattr(self.page, "_page_guard", None)
-        if guard is None:
-            guard = PageGuard()
-            guard.attach_to_page(self.page)
-            setattr(self.page, "_guard_attached", True)
-            setattr(self.page, "_page_guard", guard)
-
-        # Force run the login handler regardless of detect() outcome
-        try:
-            registry = get_registry()
-            handler = registry.get_all_handlers().get("人工登录接管")
-            if handler is None:
-                handler = LoginHandler(auth_file=None)
-                registry.register(handler)
-            await handler.handle(self.page)
-            return ActionResult(success=True), None
-        except Exception as e:
-            return ActionResult(success=False, error=str(e)), None
-
     async def _execute_extract(
         self,
         action: Action,
@@ -384,3 +403,56 @@ class ActionExecutor:
             return ActionResult(success=True, new_url=self.page.url), None
         except Exception as e:
             return ActionResult(success=False, error=f"无法返回: {str(e)}"), None
+
+    async def _execute_go_back_tab(
+        self,
+        step_index: int,
+    ) -> tuple[ActionResult, ScriptStep | None]:
+        """返回上一个标签页（关闭当前页并切回）"""
+        try:
+            current_page = self.page
+            raw_current = self._unwrap_page(current_page)
+
+            opener = None
+            try:
+                opener = getattr(raw_current, "opener", None)
+                if callable(opener):
+                    opener = opener()
+            except Exception:
+                opener = None
+
+            target_page = opener or getattr(self, "_previous_page", None)
+
+            if target_page is None:
+                try:
+                    pages = list(raw_current.context.pages)
+                    for candidate in reversed(pages):
+                        if candidate is raw_current:
+                            continue
+                        target_page = candidate
+                        break
+                except Exception:
+                    target_page = None
+
+            if target_page is None:
+                return ActionResult(success=False, error="无法找到可切回的标签页"), None
+
+            # 关闭当前页，切回目标页
+            try:
+                if current_page is not target_page and not self._is_page_closed(current_page):
+                    await current_page.close()
+            except Exception:
+                pass
+
+            if hasattr(target_page, "unwrap"):
+                wrapped_target = target_page
+            elif hasattr(target_page, "context"):
+                wrapped_target = self._attach_guard_best_effort(target_page)
+            else:
+                wrapped_target = target_page
+
+            self.page = wrapped_target
+            self._new_page = wrapped_target
+            return ActionResult(success=True, new_url=self.page.url), None
+        except Exception as e:
+            return ActionResult(success=False, error=f"无法返回上一个标签页: {str(e)}"), None

@@ -30,6 +30,7 @@ browser_manager 模块
 
 # 核心接口
 from .engine import BrowserEngine, get_browser_engine
+from .guarded_page import GuardedPage
 
 # 处理器注册接口
 from .registry import (
@@ -51,6 +52,7 @@ __all__ = [
     # 核心
     "BrowserEngine",
     "get_browser_engine",
+    "GuardedPage",
     # 注册表
     "register_handler",
     "get_handlers",

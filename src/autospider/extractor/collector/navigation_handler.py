@@ -354,6 +354,31 @@ class NavigationHandler:
                 except Exception as e:
                     print(f"[Replay] ✗ 返回失败: {e}")
                     step_success = False
+            elif action_type == "go_back_tab":
+                try:
+                    print(f"[Replay] 返回上一个标签页")
+                    current_page = self.page
+                    raw_current = current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
+                    pages = list(raw_current.context.pages)
+                    target_page = None
+                    for candidate in reversed(pages):
+                        if candidate is raw_current:
+                            continue
+                        target_page = candidate
+                        break
+                    if target_page is None:
+                        step_success = False
+                    else:
+                        try:
+                            await current_page.close()
+                        except Exception:
+                            pass
+                        self.page = target_page
+                        self.list_url = self.page.url
+                        await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"[Replay] ✗ 返回标签页失败: {e}")
+                    step_success = False
             else:
                 continue
             

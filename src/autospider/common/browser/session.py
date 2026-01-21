@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,9 +10,9 @@ from typing import TYPE_CHECKING, AsyncGenerator
 from playwright.async_api import Page
 
 # 引入新的浏览器引擎
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "common"))
-from browser_manager.engine import get_browser_engine, BrowserEngine, shutdown_browser_engine
-from browser_manager.guard import PageGuard
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "common"))
+from browser_manager.engine import get_browser_engine, BrowserEngine
+from browser_manager.guarded_page import GuardedPage
 
 from ..config import config
 
@@ -40,14 +39,14 @@ class BrowserSession:
         self.slow_mo = slow_mo if slow_mo is not None else config.browser.slow_mo
 
         self._engine: BrowserEngine | None = None
-        self._page: Page | None = None
+        self._page: Page | GuardedPage | None = None
         self._page_context = None
 
-    async def start(self) -> Page:
+    async def start(self) -> Page | GuardedPage:
         """启动浏览器并返回 Page"""
         # 获取全局浏览器引擎
         self._engine = await get_browser_engine(
-            headless=self.headless,
+            default_headless=self.headless,
             default_timeout=config.browser.timeout_ms,
         )
         
@@ -64,14 +63,6 @@ class BrowserSession:
         
         # 进入上下文获取页面
         self._page = await self._page_context.__aenter__()
-
-        # Enable anomaly guard (login/risk-control, etc.)
-        self._attach_guard(self._page)
-        try:
-            self._page.context.on("page", lambda new_page: self._attach_guard(new_page))
-        except Exception:
-            # Keep main page usable if context events are not available
-            pass
         
         return self._page
 
@@ -89,7 +80,7 @@ class BrowserSession:
         # 注意: 不关闭全局引擎,因为它是单例,可能被其他会话使用
 
     @property
-    def page(self) -> Page | None:
+    def page(self) -> Page | GuardedPage | None:
         return self._page
 
     async def navigate(self, url: str, wait_until: str = "domcontentloaded") -> None:
@@ -108,49 +99,25 @@ class BrowserSession:
             # 超时不算错误,继续执行
             pass
 
-    def _attach_guard(self, page: Page) -> None:
-        """Attach guard to a page and block after navigations until handled."""
-        if getattr(page, "_guard_attached", False):
-            return
 
-        # 触发内置处理器注册（仅副作用）
-        import browser_manager.handlers as _handlers  # noqa: F401
+async def shutdown_browser_engine() -> None:
+    """关闭全局浏览器引擎（兼容导出）。"""
+    try:
+        import browser_manager.engine as _engine_mod
+    except Exception:
+        return
 
-        guard = PageGuard()
-        guard.attach_to_page(page)
+    engine = getattr(_engine_mod, "_browser_engine", None)
+    if engine is None:
+        return
 
-        setattr(page, "_guard_attached", True)
-        setattr(page, "_page_guard", guard)
-
-        original_goto = page.goto
-        original_go_back = page.go_back
-        original_reload = page.reload
-        original_wait_for_load_state = page.wait_for_load_state
-
-        async def guarded_goto(*args, **kwargs):
-            result = await original_goto(*args, **kwargs)
-            await guard.run_inspection(page)
-            return result
-
-        async def guarded_go_back(*args, **kwargs):
-            result = await original_go_back(*args, **kwargs)
-            await guard.run_inspection(page)
-            return result
-
-        async def guarded_reload(*args, **kwargs):
-            result = await original_reload(*args, **kwargs)
-            await guard.run_inspection(page)
-            return result
-
-        async def guarded_wait_for_load_state(*args, **kwargs):
-            result = await original_wait_for_load_state(*args, **kwargs)
-            await guard.run_inspection(page)
-            return result
-
-        page.goto = guarded_goto
-        page.go_back = guarded_go_back
-        page.reload = guarded_reload
-        page.wait_for_load_state = guarded_wait_for_load_state
+    try:
+        await engine.close()
+    finally:
+        try:
+            setattr(_engine_mod, "_browser_engine", None)
+        except Exception:
+            pass
 
 
 @asynccontextmanager

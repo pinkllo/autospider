@@ -124,3 +124,8 @@ def enable_handler(name: str) -> bool:
 def disable_handler(name: str) -> bool:
     """禁用指定名称的处理器"""
     return get_registry().disable(name)
+
+
+def clear_handlers() -> None:
+    """清空所有处理器（主要用于测试）"""
+    get_registry().clear()

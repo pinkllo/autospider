@@ -120,8 +120,8 @@ class ActionType(str, Enum):
     NAVIGATE = "navigate"
     WAIT = "wait"
     EXTRACT = "extract"
-    GUARD = "guard"
-    GO_BACK = "go_back"  # 返回上一页
+    GO_BACK = "go_back"  # 返回当前标签页上一页
+    GO_BACK_TAB = "go_back_tab"  # 返回上一标签页
     DONE = "done"
     RETRY = "retry"
 

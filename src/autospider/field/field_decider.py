@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).resolve().parents[3] / "prompts" / "field_extractor.yaml")
+PROMPT_TEMPLATE_PATH = str(Path(__file__).resolve().parents[1] / "prompts" / "field_extractor.yaml")
 
 
 class FieldDecider:

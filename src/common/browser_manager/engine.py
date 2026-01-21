@@ -1,3 +1,9 @@
+"""
+异步浏览器引擎
+
+提供全局唯一的 Browser 实例管理，集成 PageGuard 自动监控机制。
+所有页面自动启用异常拦截，业务代码无需手动配置处理器。
+"""
 import asyncio
 import os
 from contextlib import asynccontextmanager
@@ -6,13 +12,17 @@ from playwright.async_api import async_playwright, Browser, Playwright, Page
 from playwright_stealth import Stealth
 from loguru import logger
 
+from .guard import PageGuard
+# 导入 handlers 包触发所有内置处理器的自动注册
+from . import handlers
+
+
 class BrowserEngine:
     """
     异步浏览器引擎：
-    1. 管理全局唯一的 Browser 实例（资源复用）。
-    2. 提供 Context 级别的隔离（每个任务独立的 Cookie/代理）。
-    3. 自动处理 Event Loop 崩溃恢复。
-    4. 集成 playwright-stealth 反检测。
+    1. 管理全局唯一的 Browser 实例。
+    2. 集成 PageGuard 巡检机制，实现业务无感的异常拦截。
+    3. 所有通过 page() 获取的页面自动启用监控。
     """
 
     def __init__(
@@ -27,12 +37,11 @@ class BrowserEngine:
     ):
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
-        self._stealth_context: Optional[Any] = None  # Stealth 上下文管理器实例
+        self._stealth_context: Optional[Any] = None
         self._current_headless: bool = default_headless
         self._lock = asyncio.Lock()
         self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
         
-        # 配置存储（避免可变默认参数问题）
         self.default_headless = default_headless
         self.default_viewport = default_viewport or {"width": 1920, "height": 1080}
         self.default_user_agent = default_user_agent
@@ -40,7 +49,6 @@ class BrowserEngine:
         self.max_retries = max_retries
         self.default_timeout = default_timeout
         
-        # 核心反爬参数
         self.default_launch_args = default_launch_args or [
             "--no-sandbox",
             "--disable-setuid-sandbox",
@@ -52,243 +60,195 @@ class BrowserEngine:
 
     async def _ensure_browser(self, headless: bool):
         """
-        确保全局 Browser 实例存活且可用。
-        注意：代理不再此处配置，移至 Context 级别。
+        确保全局 Browser 实例存活且可用
+        
+        此方法是浏览器生命周期管理的核心，负责：
+        1. 检测浏览器是否需要（重新）启动
+        2. 处理 Event Loop 切换场景（如在不同协程环境中调用）
+        3. 处理 headless 模式切换
+        4. 带重试机制的浏览器启动
+        
+        Args:
+            headless: 是否以无头模式运行浏览器
+            
+        Note:
+            - 使用 asyncio.Lock 保证线程安全，防止并发创建多个浏览器实例
+            - 集成 playwright_stealth 绕过反爬虫检测
         """
+        # 获取当前运行的事件循环，用于检测是否发生 Loop 切换
         current_loop = asyncio.get_running_loop()
         
+        # 使用锁保护，确保同一时间只有一个协程能操作浏览器实例
         async with self._lock:
             should_restart = False
-
-            # 1. 灾难恢复：Loop 变更检测
+            
+            # === 判断是否需要重启浏览器的三个条件 ===
+            
+            # 条件1: Event Loop 发生变化（例如在新线程中调用）
+            # 这种情况下旧的浏览器实例无法在新 Loop 中使用，必须重建
             if self._browser and self._owner_loop and self._owner_loop != current_loop:
-                logger.warning(f"Event Loop changed ({id(self._owner_loop)} -> {id(current_loop)}). Restarting browser...")
-                self._browser = None
-                self._playwright = None
+                logger.warning("Event Loop changed. Restarting browser...")
+                should_restart = True
+            
+            # 条件2: 浏览器实例不存在或已断开连接
+            # 可能是首次启动，或浏览器意外崩溃
+            elif not self._browser or not self._browser.is_connected():
+                should_restart = True
+            
+            # 条件3: headless 模式需要切换
+            # Playwright 不支持动态切换 headless，必须重启浏览器
+            elif self._current_headless != headless:
+                logger.info(f"Switching Headless Mode: {headless}")
                 should_restart = True
 
-            # 2. 状态检测
-            if self._browser:
-                try:
-                    if not self._browser.is_connected():
-                        should_restart = True
-                except Exception:
-                    should_restart = True
-            else:
-                should_restart = True
-
-            # 3. 配置变更检测
-            if self._current_headless != headless:
-                logger.info(f"Switching Headless Mode: {self._current_headless} -> {headless}")
-                should_restart = True
-
+            # 如果不需要重启，直接返回，复用现有实例
             if not should_restart:
                 return
 
-            # --- 执行重启流程 ---
+            # === 执行重启流程 ===
             
-            # 关闭旧实例
+            # 清理旧的浏览器实例（仅在同一 Loop 中才能安全关闭）
             if self._browser and self._owner_loop == current_loop:
-                try:
+                try: 
                     await self._browser.close()
-                except Exception:
-                    pass
+                except: 
+                    pass  # 忽略关闭时的异常，可能浏览器已经崩溃
 
-            # 启动 Playwright（包装 Stealth 以自动应用反爬策略）
+            # 初始化 Playwright（仅首次调用时执行）
+            # 使用 Stealth 插件包装，绕过网站的自动化检测
             if not self._playwright:
-                # 使用 Stealth 包装 async_playwright，手动管理上下文
                 self._stealth_context = Stealth().use_async(async_playwright())
                 self._playwright = await self._stealth_context.__aenter__()
 
-            # 启动 Browser (重试机制)
+            # 带重试机制的浏览器启动
+            # 网络环境不稳定时，浏览器下载/启动可能失败
             for attempt in range(self.max_retries + 1):
                 try:
-                    logger.info(f"Launching {self.default_browser_type} (Headless: {headless})...")
-                    
+                    # 动态获取浏览器启动器（chromium/firefox/webkit）
                     launcher = getattr(self._playwright, self.default_browser_type)
+                    
+                    # 启动浏览器实例
                     self._browser = await launcher.launch(
                         headless=headless,
-                        args=self.default_launch_args,
-                        # 注意：这里不传 proxy，实现全局无代理，Context 级按需代理
+                        args=self.default_launch_args  # 传入启动参数（如禁用沙箱等）
                     )
                     
+                    # 记录当前状态，供后续检测使用
                     self._current_headless = headless
                     self._owner_loop = current_loop
-                    logger.info("Browser launched successfully.")
-                    break
+                    break  # 启动成功，退出重试循环
+                    
                 except Exception as e:
-                    logger.error(f"Browser launch failed (Attempt {attempt + 1}): {e}")
-                    if attempt == self.max_retries:
-                        raise RuntimeError(f"Failed to launch browser after {self.max_retries} retries") from e
+                    # 达到最大重试次数，抛出异常
+                    if attempt == self.max_retries: 
+                        raise e
+                    # 否则继续重试（循环自动进入下一次迭代）
 
     @asynccontextmanager
     async def page(
         self,
         auth_file: Optional[str] = None,
         headless: Optional[bool] = None,
-        viewport: Optional[Dict[str, int]] = None,
-        user_agent: Optional[str] = None,
-        extra_http_headers: Optional[Dict[str, str]] = None,
-        referer: Optional[str] = None,
-        proxy: Optional[Dict[str, str]] = None,  # 代理现在在这里处理
-        locale: Optional[str] = None,
-        geolocation: Optional[Dict[str, float]] = None,
-        permissions: Optional[List[str]] = None,
+        proxy: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
-        # 移除了 use_persistent_context，因为它破坏了单例模式，建议用 storage_state 代替
+        enable_guard: bool = True,  # 是否启用异常监控，默认启用
+        auto_load_cookie: bool = True,  # 是否自动加载默认 Cookie 文件
+        **context_kwargs
     ) -> AsyncGenerator[Page, None]:
         """
-        获取一个功能完备的 Page 对象。
+        获取一个 Page 对象。
+        
+        Args:
+            auth_file: Cookie 状态文件路径，用于登录态复用（None 时使用默认路径）
+            headless: 是否无头模式
+            proxy: 代理配置，如 {"server": "http://proxy:8080"}
+            timeout: 页面默认超时（毫秒）
+            enable_guard: 是否启用 PageGuard 自动监控（默认 True）
+            auto_load_cookie: 是否自动加载默认 Cookie 文件（默认 True）
+            **context_kwargs: 传递给 browser.new_context 的其他参数
         """
-        # 1. 确保底层浏览器就绪
         use_headless = headless if headless is not None else self.default_headless
         await self._ensure_browser(use_headless)
 
-        # 2. 构建 Context 配置 (隔离环境的核心)
-        context_options = {
-            "viewport": viewport or self.default_viewport,
-            "user_agent": user_agent or self.default_user_agent,
+        # 处理 auth_file 默认路径
+        # 使用当前工作目录（运行时通常是项目根目录）下的 .auth/default.json
+        if auth_file is None and auto_load_cookie:
+            auth_file = os.path.join(os.getcwd(), '.auth', 'default.json')
+
+        # 构建 Context 配置
+        options = {
+            "viewport": self.default_viewport,
+            "user_agent": self.default_user_agent,
             "ignore_https_errors": True,
+            **context_kwargs
         }
-        
-        # 可选参数：只在非空时添加
-        if extra_http_headers:
-            context_options["extra_http_headers"] = extra_http_headers
-        if locale:
-            context_options["locale"] = locale
-        if geolocation:
-            context_options["geolocation"] = geolocation
-        if permissions:
-            context_options["permissions"] = permissions
-        
-        # 代理设置 (Context 级别)
-        if proxy:
-            context_options["proxy"] = proxy
-            
-        # Referer 处理
-        if referer:
-            if "extra_http_headers" not in context_options:
-                context_options["extra_http_headers"] = {}
-            context_options["extra_http_headers"]["Referer"] = referer
-
-        # 身份状态加载 (Cookie)
+        if proxy: 
+            options["proxy"] = proxy
         if auth_file and os.path.exists(auth_file):
-            context_options["storage_state"] = auth_file
-            logger.debug(f"Loaded storage state: {auth_file}")
+            logger.debug(f"[Engine] 自动加载 Cookie: {auth_file}")
+            options["storage_state"] = auth_file
 
-        context = None
-        page = None
-        
+        context = await self._browser.new_context(**options)
+        page = await context.new_page()
+        page.set_default_timeout(timeout or self.default_timeout)
+
+        # 自动挂载 PageGuard（使用全局注册表中的处理器）
+        # 启用 Guard 时返回 GuardedPage 代理类，实现业务代码无感等待
+        guard = None
+        if enable_guard:
+            from .guarded_page import GuardedPage
+            
+            guard = PageGuard()
+            guard.attach_to_page(page)
+            # 在初始导航前运行一次检查
+            asyncio.create_task(guard.run_inspection(page))
+            
+            # 监听新页面事件，自动为新页面挂载 Guard
+            # 这确保了通过 window.open, target="_blank" 或中间键打开的新标签页也能被监控
+            def _on_new_page(new_page: Page):
+                logger.debug(f"[Engine] 检测到新页面打开: {new_page.url}")
+                guard.attach_to_page(new_page)
+                # 新页面打开后立即执行一次巡检
+                asyncio.create_task(guard.run_inspection(new_page))
+            
+            context.on("page", _on_new_page)
+
         try:
-            # 3. 创建隔离的上下文 (Ephemeral Context)
-            context = await self._browser.new_context(**context_options)
-            
-            # 授权地理位置 (如果有)
-            if geolocation:
-                await context.grant_permissions(permissions or ["geolocation"])
-
-            # 4. 创建页面
-            page = await context.new_page()
-            page.set_default_timeout(timeout or self.default_timeout)
-
-            # 5. Stealth 已在 playwright 启动时自动应用，无需额外操作
-            
-            yield page
-            
-        except Exception as e:
-            logger.error(f"Error during page creation/usage: {e}")
-            raise
+            # 返回 GuardedPage 代理（如果启用了 Guard）
+            # 否则返回原生 Page
+            if enable_guard and guard:
+                yield GuardedPage(page, guard)
+            else:
+                yield page
         finally:
-            # 6. 资源自动回收
-            if page:
-                try:
-                    await page.close()
-                except Exception:
-                    pass
-            if context:
-                try:
-                    await context.close()
-                except Exception:
-                    pass
+            await page.close()
+            await context.close()
 
     async def close(self):
         """彻底关闭引擎"""
         current_loop = asyncio.get_running_loop()
         if self._browser and self._owner_loop == current_loop:
-            try:
-                await self._browser.close()
-            except Exception:
-                pass
-        
-        # 退出 Stealth 上下文管理器
+            await self._browser.close()
         if self._stealth_context and self._owner_loop == current_loop:
-            try:
-                await self._stealth_context.__aexit__(None, None, None)
-            except Exception:
-                pass
-        
+            await self._stealth_context.__aexit__(None, None, None)
         self._browser = None
         self._playwright = None
-        self._stealth_context = None
-        logger.info("BrowserEngine shutdown.")
 
 
 # ========== 全局单例管理 ==========
-
 _browser_engine: Optional[BrowserEngine] = None
 _engine_lock = asyncio.Lock()
 
-
-async def get_browser_engine(
-    headless: Optional[bool] = None,
-    **override_config: Any
-) -> BrowserEngine:
+async def get_browser_engine(**config) -> BrowserEngine:
     """
-    获取全局 BrowserEngine 单例（懒加载模式）。
+    获取全局 BrowserEngine 单例。
     
-    第一次调用时会创建实例，后续调用返回同一实例。
-    引擎内部已支持动态切换 headless 模式，无需重新创建实例。
-    
-    Args:
-        headless: 是否无头模式，None 时使用默认值 True
-        **override_config: 首次初始化时的其他覆盖配置，如 default_timeout 等
-                          （注意：仅在首次创建时生效）
-    
-    Returns:
-        全局共享的 BrowserEngine 实例
-    
-    Examples:
-        >>> engine = await get_browser_engine()
-        >>> async with engine.page() as page:
-        ...     await page.goto("https://example.com")
+    首次调用时可传入配置参数初始化引擎，后续调用忽略参数返回已有实例。
     """
     global _browser_engine
     
+    # 懒加载：仅在首次调用时创建实例
     async with _engine_lock:
         if _browser_engine is None:
-            init_headless = headless if headless is not None else True
-            _browser_engine = BrowserEngine(
-                default_headless=init_headless,
-                **override_config
-            )
-            logger.info("BrowserEngine initialized (lazy mode).")
+            _browser_engine = BrowserEngine(**config)
         return _browser_engine
-
-
-async def shutdown_browser_engine() -> None:
-    """
-    关闭全局浏览器引擎。
-    
-    应在程序退出时调用，确保浏览器进程正确关闭。
-    
-    Examples:
-        >>> import atexit
-        >>> import asyncio
-        >>> atexit.register(lambda: asyncio.run(shutdown_browser_engine()))
-    """
-    global _browser_engine
-    
-    async with _engine_lock:
-        if _browser_engine is not None:
-            await _browser_engine.close()
-            _browser_engine = None

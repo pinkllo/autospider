@@ -12,17 +12,18 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
+    from browser_manager.guarded_page import GuardedPage
 
 
 async def click_and_capture_new_page(
     *,
-    page: "Page",
+    page: "Page | GuardedPage",
     locator: "Locator",
     click_timeout_ms: int = 5000,
     expect_page_timeout_ms: int = 3000,
     load_state: str = "domcontentloaded",
     load_timeout_ms: int = 10000,
-) -> "Page | None":
+) -> "Page | GuardedPage | None":
     """Click a locator and capture a newly opened page if any.
 
     Notes:
@@ -51,5 +52,27 @@ async def click_and_capture_new_page(
         except Exception:
             pass
 
+    if new_page is not None:
+        new_page = _ensure_guarded_page(new_page)
+
     return new_page
 
+
+def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
+    try:
+        import browser_manager.handlers as _handlers  # noqa: F401
+        from browser_manager.guard import PageGuard
+        from browser_manager.guarded_page import GuardedPage
+    except Exception:
+        return page
+
+    if isinstance(page, GuardedPage):
+        return page
+
+    guard = getattr(page, "_page_guard", None)
+    if guard is None:
+        guard = PageGuard()
+        guard.attach_to_page(page)
+        setattr(page, "_guard_attached", True)
+        setattr(page, "_page_guard", guard)
+    return GuardedPage(page, guard)

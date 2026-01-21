@@ -348,11 +348,11 @@ class LLMDecider:
 
         # 循环检测警告
         if self._detect_loop():
-            parts.append(f"## 🚨 严重警告：检测到循环操作！\n你正在重复之前的操作序列！请立即改变策略：\n- 如果在找目标，尝试使用 go_back 返回上一页\n- 如果已经尝试多个项目都没找到，使用 done 结束任务\n- 不要再重复相同的点击或滚动！")
+            parts.append(f"## 🚨 严重警告：检测到循环操作！\n你正在重复之前的操作序列！请立即改变策略：\n- 如果在找目标，尝试使用 go_back 返回上一页\n- 如果当前是新标签页需要返回旧页，使用 go_back_tab\n- 如果已经尝试多个项目都没找到，使用 done 结束任务\n- 不要再重复相同的点击或滚动！")
 
         # 滚动次数警告
         if self.scroll_count >= self.max_consecutive_scrolls - 1:
-            parts.append(f"## ⚠️ 滚动警告\n你已经连续滚动了 {self.scroll_count} 次！请停止滚动，尝试其他操作（如点击链接、输入搜索等）。如果确实找不到目标，请使用 go_back 返回或 done 结束任务。")
+            parts.append(f"## ⚠️ 滚动警告\n你已经连续滚动了 {self.scroll_count} 次！请停止滚动，尝试其他操作（如点击链接、输入搜索等）。如果确实找不到目标，请使用 go_back 返回；若在新标签页，使用 go_back_tab；或直接 done 结束任务。")
         elif self.scroll_count >= 3:
             parts.append(f"## ⚠️ 注意\n已连续滚动 {self.scroll_count} 次。如果目标不在当前页面，考虑其他方式查找。")
 
@@ -362,7 +362,7 @@ class LLMDecider:
         is_fully_scrolled = self.is_page_fully_scrolled(page_url)
         
         if is_fully_scrolled:
-            parts.append(f"## 🔴 重要：当前页面已完整滚动过！\n此页面你已经从头滚到尾又滚回来了，**不要再滚动这个页面**！\n- 如果没找到目标，说明目标不在这个页面\n- 请点击其他链接进入新页面，或使用 go_back 返回")
+            parts.append(f"## 🔴 重要：当前页面已完整滚动过！\n此页面你已经从头滚到尾又滚回来了，**不要再滚动这个页面**！\n- 如果没找到目标，说明目标不在这个页面\n- 请点击其他链接进入新页面，或使用 go_back 返回；若在新标签页，使用 go_back_tab")
 
         # 页面滚动状态
         if scroll_info:
@@ -455,8 +455,6 @@ class LLMDecider:
             # 常见同义/历史动作名
             "scroll_down": "scroll",
             "scroll_up": "scroll",
-            "login_guard": "guard",
-            "handle_login": "guard",
         }
         action_str = action_aliases.get(action_str, action_str)
 

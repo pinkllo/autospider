@@ -18,6 +18,25 @@ from .base import BaseAnomalyHandler
 _OVERLAY_STYLE = "position:fixed;top:0;left:0;width:100%;z-index:2147483647;font-family:sans-serif;text-align:center;padding:15px;box-shadow:0 4px 12px rgba(0,0,0,0.15);box-sizing:border-box;"
 _BUTTON_STYLE = "margin-left:20px;padding:8px 24px;color:white;background-color:#28a745;border:none;border-radius:5px;cursor:pointer;font-weight:bold;"
 
+# 通用登录弹窗选择器（用于检测弹窗存在/消失）
+# 这些选择器设计为通用的，适用于大多数网站
+LOGIN_POPUP_SELECTORS = [
+    # iframe 相关（最常见）
+    "iframe[src*='login']",
+    "iframe[src*='passport']",
+    "iframe[src*='signin']",
+    "iframe[src*='auth']",
+    # 弹窗容器
+    "[class*='login-modal']",
+    "[class*='login-dialog']",
+    "[class*='login-box']",
+    "[class*='loginModal']",
+    "[class*='loginDialog']",
+    # 遮罩层
+    "[class*='login'][class*='mask']",
+    "[class*='login'][class*='overlay']",
+]
+
 
 class LoginHandler(BaseAnomalyHandler):
     """
@@ -79,20 +98,22 @@ class LoginHandler(BaseAnomalyHandler):
     def name(self) -> str:
         return "人工登录接管"
 
-    async def detect(self, page: Page) -> bool:
+    def _is_login_url(self, url: str) -> bool:
         """
-        检测是否需要登录：
-        1. URL 路径/域名包含登录关键词（更精确的匹配）
-        2. 如果指定了成功标识元素且该元素不存在
+        检查 URL 是否为登录页
+        
+        Args:
+            url: 要检查的 URL
+            
+        Returns:
+            bool: 是登录页返回 True
         """
         from urllib.parse import urlparse
         
-        parsed_url = urlparse(page.url.lower())
+        parsed_url = urlparse(url.lower())
         # 只检查域名和路径，避免误匹配查询参数中的关键词
         check_text = f"{parsed_url.netloc}{parsed_url.path}"
         
-        # 1. 检查 URL 特征（使用更精确的路径匹配）
-        is_login_url = False
         for keyword in self.login_keywords:
             # 检查是否作为路径段出现（如 /login, /passport/）
             # 或作为子域名出现（如 login.taobao.com）
@@ -100,17 +121,48 @@ class LoginHandler(BaseAnomalyHandler):
                 f"{keyword}." in check_text or 
                 f".{keyword}" in check_text or
                 check_text.endswith(f"/{keyword}")):
-                is_login_url = True
-                break
+                return True
+        return False
+
+    async def detect(self, page: Page) -> bool:
+        """
+        检测是否需要登录：
+        1. 主页面 URL 包含登录关键词
+        2. 任意 iframe 的 URL 包含登录关键词
+        3. 登录弹窗元素可见
+        4. 如果指定了成功标识元素且该元素不存在
+        """
+        # 1. 检查主页面 URL
+        if self._is_login_url(page.url):
+            logger.debug(f"[登录检测] 主页面是登录页: {page.url}")
+            return True
         
-        # 2. 检查成功标志元素 (如果已配置)
-        needs_login = False
+        # 2. 遍历所有 frames 检测 iframe 登录
+        for frame in page.frames:
+            if frame == page.main_frame or not frame.url:
+                continue
+            if self._is_login_url(frame.url):
+                logger.debug(f"[登录检测] 发现登录 iframe: {frame.url}")
+                return True
+        
+        # 3. 检查登录弹窗元素（使用统一选择器列表）
+        for selector in LOGIN_POPUP_SELECTORS:
+            try:
+                element = await page.query_selector(selector)
+                if element and await element.is_visible():
+                    logger.debug(f"[登录检测] 发现登录元素: {selector}")
+                    return True
+            except:
+                pass
+        
+        # 4. 检查成功标志元素 (如果已配置)
         if self.success_selector:
             element = await page.query_selector(self.success_selector)
             if not element or not await element.is_visible():
-                needs_login = True
+                logger.debug(f"[登录检测] 成功标识元素不存在: {self.success_selector}")
+                return True
         
-        return is_login_url or needs_login
+        return False
 
 
     async def handle(self, page: Page) -> None:
@@ -120,10 +172,12 @@ class LoginHandler(BaseAnomalyHandler):
         2. 注入提示横幅
         3. 并行监控三种成功条件
         4. 任一条件满足后保存状态
+        5. 如果是 iframe 弹窗模式，刷新页面以应用登录状态
         """
         logger.warning(">>> 触发人工登录模式 <<<")
         
         success_reason = None
+        is_iframe_popup_mode = not self._is_login_url(page.url)
         
         try:
             # 1. 记录初始状态
@@ -141,10 +195,28 @@ class LoginHandler(BaseAnomalyHandler):
                 logger.success(f">>> 检测到登录成功: {success_reason} <<<")
                 # 只有检测到成功时才保存状态
                 await self._save_auth_state(page)
+                
+                # 4. 如果是 iframe 弹窗模式，刷新页面以应用登录状态
+                # 因为主页面没有发生跳转，需要刷新才能显示登录后的内容
+                if is_iframe_popup_mode:
+                    logger.info("[登录处理] iframe 模式：刷新所有页面以应用登录状态")
+                    # 刷新 Context 中的所有页面（包括新打开的标签页）
+                    for p in page.context.pages:
+                        try:
+                            # 忽略已关闭的页面
+                            if p.is_closed():
+                                continue
+                                
+                            logger.debug(f"[登录处理] 正在刷新页面: {p.url}")
+                            await p.reload()
+                            # 简单的等待，不需要严格等待每个人页面完全加载，避免阻塞太久
+                            # await p.wait_for_load_state("domcontentloaded")
+                        except Exception as e:
+                            logger.warning(f"[登录处理] 刷新页面失败: {e}")
             else:
                 logger.warning(">>> 等待超时，未检测到登录成功，不保存状态 <<<")
             
-            # 4. 移除 UI
+            # 5. 移除 UI
             await self._remove_banner(page)
             
         except Exception as e:
@@ -168,19 +240,22 @@ class LoginHandler(BaseAnomalyHandler):
 
     async def _wait_for_login_success(self, page: Page) -> Optional[str]:
         """
-        并行监控多种登录成功条件。
+        监控登录成功条件。
         
         判定成功的条件（任一满足）：
-        1. URL 离开登录页（加上可选的 Cookie 变化验证）
-        2. 用户手动点击确认按钮
-        
-        注意：单独的 Cookie 变化不再作为成功条件，因为访问登录页时
-        服务器会设置会话 Cookie，容易误判。
+        1. 用户手动点击确认按钮（最高优先级）
+        2. URL 离开登录页（主页面跳转场景）
+        3. 登录弹窗消失 + Cookie 变化（iframe 弹窗场景）
         
         Returns:
             成功原因字符串，超时返回 None
         """
         start_time = asyncio.get_event_loop().time()
+        
+        # 检测是否是 iframe 弹窗场景（主页 URL 不是登录页）
+        is_iframe_popup_mode = not self._is_login_url(page.url)
+        if is_iframe_popup_mode:
+            logger.debug("[登录等待] 识别为 iframe 弹窗模式")
         
         while True:
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -192,17 +267,24 @@ class LoginHandler(BaseAnomalyHandler):
             if self._user_confirmed:
                 return "用户点击确认按钮"
             
-            # 检测方式 2: URL 重定向（离开登录页）
-            url_result = await self._check_url_redirect(page)
-            if url_result:
-                # 额外验证：检查是否有新的 Cookie（可选日志）
-                cookie_info = await self._check_cookie_change(page)
-                if cookie_info:
-                    logger.debug(f"验证通过: {cookie_info}")
-                return url_result
+            # 检测方式 2: URL 重定向（主页面跳转场景）
+            if not is_iframe_popup_mode:
+                url_result = await self._check_url_redirect(page)
+                if url_result:
+                    # URL 离开登录页后，额外验证 Cookie 变化以确保真正登录成功
+                    cookie_info = await self._check_cookie_change(page)
+                    if cookie_info:
+                        logger.info(f"[登录成功] {url_result}, {cookie_info}")
+                        return url_result
+                    else:
+                        # URL 变化但无 Cookie，可能是刷新或失败重定向，继续等待
+                        logger.debug("[URL检测] URL 变化但无新 Cookie，继续等待...")
             
-            # Cookie 变化仅作为日志记录，不单独触发成功
-            # （因为访问登录页时服务器就会设置会话 Cookie）
+            # 检测方式 3: 弹窗消失检测（iframe 弹窗场景）
+            if is_iframe_popup_mode:
+                popup_result = await self._check_popup_dismissed(page)
+                if popup_result:
+                    return popup_result
             
             # 更新横幅状态
             remaining = int(self.max_wait_time - elapsed)
@@ -210,6 +292,37 @@ class LoginHandler(BaseAnomalyHandler):
             
             # 等待下一轮检测
             await asyncio.sleep(self.detection_interval)
+
+    async def _check_popup_dismissed(self, page: Page) -> Optional[str]:
+        """
+        检测登录弹窗/iframe 是否已消失（表示登录完成或用户关闭）
+        
+        Returns:
+            如果检测到弹窗消失且有 Cookie 变化，返回成功原因；否则返回 None
+        """
+        # 使用统一的登录弹窗选择器
+        popup_exists = False
+        for selector in LOGIN_POPUP_SELECTORS:
+            try:
+                element = await page.query_selector(selector)
+                if element and await element.is_visible():
+                    popup_exists = True
+                    break
+            except:
+                pass
+        
+        if popup_exists:
+            # 弹窗仍存在，继续等待
+            return None
+        
+        # 弹窗消失了，检查是否有 Cookie 变化
+        cookie_info = await self._check_cookie_change(page)
+        if cookie_info:
+            logger.info(f"[弹窗检测] 登录弹窗已消失，{cookie_info}")
+            return f"登录弹窗消失 + {cookie_info}"
+        
+        # 弹窗消失但没有 Cookie 变化，继续等待
+        return None
 
     async def _check_url_redirect(self, page: Page) -> Optional[str]:
         """
@@ -221,7 +334,7 @@ class LoginHandler(BaseAnomalyHandler):
         current_url = page.url.lower()
         
         # 检查是否仍在登录页
-        is_still_login = any(k in current_url for k in self.login_keywords)
+        is_still_login = self._is_login_url(current_url)
         
         # 详细调试日志
         logger.debug(f"[URL检测] 当前: {current_url[:80]}...")
@@ -266,24 +379,13 @@ class LoginHandler(BaseAnomalyHandler):
             return None
 
     async def _inject_banner(self, page: Page) -> None:
-        """注入登录提示横幅"""
-        logger.debug("[横幅] 准备注入横幅...")
-        
-        # 等待 body 元素存在
-        try:
-            await page.wait_for_selector('body', timeout=10000)
-            logger.debug("[横幅] body 元素已就绪")
-        except Exception as e:
-            logger.warning(f"[横幅] 等待 body 超时: {e}")
-            return
+        """注入登录提示横幅（在所有页面）"""
+        logger.debug("[横幅] 准备注入横幅到所有页面...")
         
         js_code = f"""
         () => {{
             // 检查 body 是否存在
-            if (!document.body) {{
-                console.error('document.body 不存在');
-                return false;
-            }}
+            if (!document.body) return false;
             
             // 移除旧横幅
             const old = document.getElementById('__guard_overlay__');
@@ -303,7 +405,9 @@ class LoginHandler(BaseAnomalyHandler):
             `;
             
             document.body.appendChild(div);
-            document.body.style.marginTop = '60px';
+            try {{
+                document.body.style.marginTop = '60px';
+            }} catch(e) {{}}
             
             // 绑定确认按钮事件
             document.getElementById('__guard_confirm_btn__').onclick = () => {{
@@ -314,52 +418,79 @@ class LoginHandler(BaseAnomalyHandler):
         }}
         """
         
+        # 遍历上下文中的所有页面注入
         try:
-            result = await page.evaluate(js_code)
-            if result:
-                logger.debug("[横幅] 横幅注入成功")
-            else:
-                logger.warning("[横幅] 横幅注入失败（body 不存在）")
+            pages = page.context.pages
+            for p in pages:
+                if p.is_closed(): continue
+                try:
+                    # 只有当页面 DOM 加载完成后才能注入
+                    # 将超时设置短一点，避免卡住
+                    # await p.wait_for_selector('body', timeout=2000)
+                    
+                    result = await p.evaluate(js_code)
+                    if result:
+                        logger.debug(f"[横幅] 横幅注入成功: {p.url}")
+                    else:
+                        logger.debug(f"[横幅] 横幅注入跳过（body 不存在）: {p.url}")
+                except Exception as e:
+                    logger.debug(f"[横幅] 注入跳过页面 {p.url}: {e}")
         except Exception as e:
-            logger.error(f"[横幅] 横幅注入出错: {e}")
+            logger.error(f"[横幅] 遍历页面出错: {e}")
         
         # 监听用户点击确认按钮
         asyncio.create_task(self._poll_user_confirmation(page))
 
     async def _poll_user_confirmation(self, page: Page) -> None:
-        """轮询检查用户是否点击了确认按钮"""
+        """轮询所有页面检查用户是否点击了确认按钮"""
         while not self._user_confirmed:
-            try:
-                confirmed = await page.evaluate("() => window.__guard_user_confirmed__ === true")
-                if confirmed:
-                    self._user_confirmed = True
-                    logger.debug("用户点击了确认按钮")
-                    return
-            except:
-                return  # 页面可能已关闭
+            for p in page.context.pages:
+                if p.is_closed(): continue
+                try:
+                    confirmed = await p.evaluate("() => window.__guard_user_confirmed__ === true")
+                    if confirmed:
+                        self._user_confirmed = True
+                        logger.debug(f"用户点击了确认按钮 (在页面 {p.url})")
+                        return
+                except:
+                    pass
             await asyncio.sleep(0.5)
 
     async def _update_banner_countdown(self, page: Page, remaining: int) -> None:
-        """更新横幅上的倒计时"""
+        """更新所有页面上的倒计时"""
+        js_code = f"""
+        () => {{
+            const el = document.getElementById('__guard_countdown__');
+            if (el) el.textContent = '剩余 {remaining} 秒';
+        }}
+        """
         try:
-            await page.evaluate(f"""
-                () => {{
-                    const el = document.getElementById('__guard_countdown__');
-                    if (el) el.textContent = '剩余 {remaining} 秒';
-                }}
-            """)
+            pages = page.context.pages
+            for p in pages:
+                if p.is_closed(): continue
+                try:
+                    await p.evaluate(js_code)
+                except:
+                    pass
         except:
             pass
 
     async def _remove_banner(self, page: Page) -> None:
-        """移除横幅"""
+        """从所有页面移除横幅"""
+        js_code = """
+        () => {
+            document.getElementById('__guard_overlay__')?.remove();
+            document.body.style.marginTop = '';
+        }
+        """
         try:
-            await page.evaluate("""
-                () => {
-                    document.getElementById('__guard_overlay__')?.remove();
-                    document.body.style.marginTop = '';
-                }
-            """)
+            pages = page.context.pages
+            for p in pages:
+                if p.is_closed(): continue
+                try:
+                    await p.evaluate(js_code)
+                except:
+                    pass
         except:
             pass
 

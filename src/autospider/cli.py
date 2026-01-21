@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import signal
 import threading
 import sys
 from pathlib import Path
@@ -39,19 +41,45 @@ def run_async_safely(coro):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        # 没有运行中的事件循环，直接使用 asyncio.run
+        try:
+            return asyncio.run(coro)
+        except KeyboardInterrupt:
+            # Ctrl+C 中断时，asyncio.run 会自动清理
+            raise
 
+    # 已有运行中的事件循环，需要在新线程中创建新的事件循环
     result_holder: dict[str, object] = {"result": None, "error": None}
 
     def _runner():
-        loop = asyncio.new_event_loop()
+        loop = None
         try:
+            loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             result_holder["result"] = loop.run_until_complete(coro)
+        except KeyboardInterrupt:
+            # Ctrl+C 中断，取消所有任务
+            result_holder["error"] = KeyboardInterrupt("用户中断")
+            if loop:
+                # 取消所有待处理的任务
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # 等待所有任务完成取消
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         except Exception as exc:  # noqa: BLE001
             result_holder["error"] = exc
         finally:
-            loop.close()
+            if loop:
+                try:
+                    # 关闭所有异步生成器
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    # 关闭所有异步 executor
+                    loop.run_until_complete(loop.shutdown_default_executor())
+                except Exception:
+                    pass
+                finally:
+                    loop.close()
             asyncio.set_event_loop(None)
 
     thread = threading.Thread(target=_runner, daemon=True)
@@ -544,14 +572,24 @@ async def _run_config_generator(
     """异步运行配置生成器"""
     from .extractor.config_generator import generate_collection_config
     
-    async with create_browser_session(headless=headless, close_engine=True) as session:
-        return await generate_collection_config(
-            page=session.page,
-            list_url=list_url,
-            task_description=task,
-            explore_count=explore_count,
-            output_dir=output_dir,
-        )
+    session = None
+    try:
+        async with create_browser_session(headless=headless, close_engine=True) as session:
+            return await generate_collection_config(
+                page=session.page,
+                list_url=list_url,
+                task_description=task,
+                explore_count=explore_count,
+                output_dir=output_dir,
+            )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # 确保浏览器会话被正确清理
+        if session:
+            try:
+                await session.stop()
+            except Exception:
+                pass
+        raise KeyboardInterrupt("用户中断")
 
 
 async def _run_batch_collector(
