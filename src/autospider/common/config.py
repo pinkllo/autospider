@@ -168,7 +168,7 @@ class FieldExtractorConfig(BaseModel):
     )
     # 导航最大步数
     max_nav_steps: int = Field(
-        default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "10"))
+        default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "20"))
     )
     # 模糊匹配阈值
     fuzzy_match_threshold: float = Field(

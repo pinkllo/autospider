@@ -153,6 +153,21 @@ class ActionExecutor:
         await locator.click()
         await locator.fill(action.text, timeout=action.timeout_ms)
 
+        pressed_key = action.key
+        if not pressed_key:
+            target_hint = f"{action.target_text or ''} {action.expectation or ''}"
+            if "搜索" in target_hint or "search" in target_hint.lower():
+                pressed_key = "Enter"
+
+        if pressed_key:
+            try:
+                await locator.press(pressed_key, timeout=action.timeout_ms)
+            except Exception:
+                try:
+                    await self.page.keyboard.press(pressed_key)
+                except Exception:
+                    pass
+
         # 生成脚本步骤（使用占位符语法）
         # 检测是否应该参数化
         value = action.text
@@ -166,6 +181,7 @@ class ActionExecutor:
             target_xpath=used_xpath,
             xpath_alternatives=xpaths[:5],
             value=value,
+            key=pressed_key,
             description=action.thinking or f"在元素 [{action.mark_id}] 输入文本",
         )
 
