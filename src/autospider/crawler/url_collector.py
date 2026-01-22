@@ -69,6 +69,9 @@ class URLCollector(BaseCollector):
         self.detail_visits: list[DetailPageVisit] = []
         self.step_index = 0
         self.visited_detail_urls: set[str] = set()
+        self.common_pattern: CommonPattern | None = None
+
+
         
         # 初始化额外组件
         self.decider = LLMDecider()
@@ -188,6 +191,13 @@ class URLCollector(BaseCollector):
             self.common_detail_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
             if self.common_detail_xpath:
                 print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
+                # 填充 common_pattern 以便 CLI 显示
+                from ..extractor.collector.models import CommonPattern
+                self.common_pattern = CommonPattern(
+                    xpath_pattern=self.common_detail_xpath,
+                    confidence=0.8,  # 默认置信度，XPathExtractor 内部有更详细的判断
+                    source_visits=self.detail_visits
+                )
             else:
                 print(f"[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
         
@@ -252,12 +262,13 @@ class URLCollector(BaseCollector):
         crawler_script = await self._generate_crawler_script()
         
         # 6. 保存结果
+        print(f"\n[Phase 6] 保存结果 (collected_urls.json / urls.txt / spider.py)...")
         result = self._create_result()
+        await self._save_result(result, crawler_script)
+        
         print(f"\n[Complete] 收集完成!")
         print(f"  - 探索了 {len(self.detail_visits)} 个详情页")
         print(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
-        
-        await self._save_result(result, crawler_script)
         
         return result
     
@@ -562,7 +573,7 @@ class URLCollector(BaseCollector):
         """创建结果对象"""
         return URLCollectorResult(
             detail_visits=self.detail_visits,
-            common_pattern=None,
+            common_pattern=self.common_pattern,
             collected_urls=self.collected_urls,
             list_page_url=self.list_url,
             task_description=self.task_description,

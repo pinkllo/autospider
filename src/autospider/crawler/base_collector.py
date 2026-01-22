@@ -36,7 +36,7 @@ from ..common.som.text_first import resolve_mark_ids_from_map
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..common.storage.redis_manager import RedisManager
+    from ..common.storage.redis_manager import RedisQueueManager
 
 # 日志器
 logger = get_logger(__name__)
@@ -100,7 +100,7 @@ class BaseCollector(ABC):
         self.pagination_handler: PaginationHandler | None = None
         
         # Redis 管理器
-        self.redis_manager: "RedisManager | None" = None
+        self.redis_manager: "RedisQueueManager | None" = None
         self._init_redis_manager()
     
     def _init_redis_manager(self) -> None:
@@ -109,9 +109,9 @@ class BaseCollector(ABC):
             return
         
         try:
-            from ..common.storage.redis_manager import RedisManager
+            from ..common.storage.redis_manager import RedisQueueManager
             
-            self.redis_manager = RedisManager(
+            self.redis_manager = RedisQueueManager(
                 host=config.redis.host,
                 port=config.redis.port,
                 password=config.redis.password,
@@ -184,10 +184,12 @@ class BaseCollector(ABC):
         if self.redis_manager:
             client = await self.redis_manager.connect()
             if client:
-                urls = await self.redis_manager.load_items()
+                # 从 Hash 中读取所有已收集的 URL（用于去重）
+                items = await self.redis_manager.get_all_items()
+                urls = [data["url"] for data in items.values() if "url" in data]
                 if urls:
                     loaded_urls.extend(urls)
-                    logger.info(f"从 Redis 加载了 {len(urls)} 个历史 URL")
+                    logger.info(f"从 Redis 加载了 {len(urls)} 个历史 URL（用于去重）")
 
         file_urls = self.progress_persistence.load_collected_urls()
         if file_urls:
@@ -314,7 +316,7 @@ class BaseCollector(ABC):
                         if url not in self.collected_urls:
                             self.collected_urls.append(url)
                             if self.redis_manager:
-                                await self.redis_manager.save_item(url)
+                                await self.redis_manager.push_task(url)
                             logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
                         continue
                 except Exception as e:
@@ -328,7 +330,7 @@ class BaseCollector(ABC):
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
                         if self.redis_manager:
-                            await self.redis_manager.save_item(url)
+                            await self.redis_manager.push_task(url)
                         logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
             
             return len(self.collected_urls) > urls_before
@@ -468,7 +470,7 @@ class BaseCollector(ABC):
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
                                 if self.redis_manager:
-                                    await self.redis_manager.save_item(url)
+                                    await self.redis_manager.push_task(url)
                 
                 # 检查是否有新 URL
                 current_count = len(self.collected_urls)

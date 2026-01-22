@@ -1,6 +1,6 @@
 # cli.py - CLI 入口
 
-cli.py 模块提供命令行接口，支持运行 Agent 和其他操作。
+`cli.py` 模块提供 AutoSpider 的命令行接口，支持自动生成配置、批量采集以及一键式 URL 收集。
 
 ---
 
@@ -12,133 +12,117 @@ src/autospider/cli.py
 
 ---
 
-## 📑 函数目录
+## 📑 命令总览
 
 ### 🚀 核心命令
-- `run` - 运行 Agent
-- `collect` - 收集详情页 URL
-- `generate-config` - 生成配置文件
+- `collect-urls` - 一键式收集详情页 URL（完整流程）
+- `generate-config` - 探索并生成爬取配置文件（第一阶段）
+- `batch-collect` - 基于配置文件进行批量收集（第二阶段）
 
 ---
 
 ## 🚀 核心功能
 
-### run 命令
+### 1. collect-urls 命令
 
-运行 Agent 执行自动化任务。
-
-```bash
-autospider run \
-  --start-url https://example.com \
-  --task "收集商品价格信息" \
-  --target-text "价格" \
-  --max-steps 20 \
-  --output-dir output
-```
-
-### collect 命令
-
-收集详情页 URL。
+执行完整的 URL 收集流程：识别目标、探索提取模式、遍历翻页收集。
 
 ```bash
-autospider collect \
-  --list-url https://example.com/list \
-  --task "收集商品详情页链接" \
+autospider collect-urls \
+  --list-url "https://example.com/list" \
+  --task "收集招标公告详情页" \
   --explore-count 3 \
-  --output-dir output
+  --output "output"
 ```
 
-### generate-config 命令
+**参数说明：**
 
-生成配置文件。
-
-```bash
-autospider generate-config \
-  --list-url https://example.com/list \
-  --task "收集商品详情页链接" \
-  --explore-count 3 \
-  --output-dir output
-```
+| 参数 | 短参数 | 类型 | 默认值 | 说明 |
+|------|--------|------|--------|------|
+| `--list-url` | `-u` | string | (必填) | 列表页 URL |
+| `--task` | `-t` | string | (必填) | 任务描述（自然语言） |
+| `--explore-count` | `-n` | int | 3 | 探索详情页的数量，用于提取模式 |
+| `--headless` | | bool | False | 是否开启无头模式 |
+| `--output` | `-o` | string | "output" | 输出目录 |
+| `--dry-run` | | bool | False | 预览模式，只验证参数不实际执行 |
 
 ---
 
-## 💡 特性说明
+### 2. generate-config 命令
 
-### Typer 集成
+仅执行探索阶段，生成包含导航步骤、XPath、分页控件等信息的 `collection_config.json`。
 
-使用 Typer 提供现代化的 CLI 体验。
+```bash
+autospider generate-config \
+  --list-url "https://example.com/list" \
+  --task "收集招标公告详情页" \
+  --output "output"
+```
 
-### Rich 输出
+**参数说明：**
 
-使用 Rich 提供美观的命令行输出。
+| 参数 | 短参数 | 类型 | 默认值 | 说明 |
+|------|--------|------|--------|------|
+| `--list-url` | `-u` | string | (必填) | 列表页 URL |
+| `--task` | `-t` | string | (必填) | 任务描述 |
+| `--explore-count` | `-n` | int | 3 | 探索数量 |
+| `--headless` | | bool | False | 是否无头模式 |
+| `--output` | `-o` | string | "output" | 输出目录 |
+
+---
+
+### 3. batch-collect 命令
+
+读取已生成的配置文件，执行高效的批量采集。支持断点续爬。
+
+```bash
+autospider batch-collect \
+  --config-path "output/collection_config.json" \
+  --output "output"
+```
+
+**参数说明：**
+
+| 参数 | 短参数 | 类型 | 默认值 | 说明 |
+|------|--------|------|--------|------|
+| `--config-path` | `-c` | string | (必填) | 配置文件路径 |
+| `--headless` | | bool | False | 是否无头模式 |
+| `--output` | `-o` | string | "output" | 输出目录 |
+
+---
+
+## 💡 技术特性
+
+### 🛡️ 安全执行 (run_async_safely)
+
+CLI 内部通过 `run_async_safely` 函数管理异步任务。它确保了：
+- 在 Windows 环境下对 `KeyboardInterrupt` (Ctrl+C) 的优雅处理。
+- 自动清理 Playwright 浏览器进程，防止残留。
+- 支持在已有事件循环的环境中嵌套运行。
+
+### 🎨 交互式 UI
+
+- **Rich Panel**: 使用面板展示配置和结果摘要。
+- **Progress & Spinner**: 在采集过程中提供实时的动画状态提示。
+- **Rich Table**: 格式化展示探索到的详情页及其元数据。
 
 ---
 
 ## 🔧 使用示例
 
-### 运行 Agent
-
+### 一键收集示例
 ```bash
-# 基本使用
-autospider run \
-  --start-url https://example.com \
-  --task "收集商品价格信息" \
-  --target-text "价格"
-
-# 完整参数
-autospider run \
-  --start-url https://example.com \
-  --task "收集商品价格信息" \
-  --target-text "价格" \
-  --max-steps 20 \
-  --output-dir output \
-  --headless
+autospider collect-urls -u "https://bulletin.cebpubservice.com/" -t "收集招标公告" --no-headless
 ```
 
-### 收集 URL
-
+### 分阶段执行示例
 ```bash
-# 基本使用
-autospider collect \
-  --list-url https://example.com/list \
-  --task "收集商品详情页链接"
-
-# 完整参数
-autospider collect \
-  --list-url https://example.com/list \
-  --task "收集商品详情页链接" \
-  --explore-count 5 \
-  --max-pages 40 \
-  --target-url-count 400 \
-  --output-dir output
+# 1. 生成配置
+autospider generate-config -u "https://example.com/list" -t "采集新闻"
+# 2. 检查 output/collection_config.json 后进行批量采集
+autospider batch-collect -c output/collection_config.json
 ```
 
 ---
 
-## 📚 命令参考
-
-### run 命令
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `--start-url` | string | 起始 URL |
-| `--task` | string | 任务描述 |
-| `--target-text` | string | 目标提取文本 |
-| `--max-steps` | int | 最大步骤数 |
-| `--output-dir` | string | 输出目录 |
-| `--headless` | bool | 是否无头模式 |
-
-### collect 命令
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `--list-url` | string | 列表页 URL |
-| `--task` | string | 任务描述 |
-| `--explore-count` | int | 探索详情页数量 |
-| `--max-pages` | int | 最大翻页次数 |
-| `--target-url-count` | int | 目标 URL 数量 |
-| `--output-dir` | string | 输出目录 |
-
----
-
-*最后更新: 2026-01-08*
+*最后更新: 2026-01-22*

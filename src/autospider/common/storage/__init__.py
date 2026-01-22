@@ -1,6 +1,6 @@
 """Common Storage模块 - 存储层"""
 
-from .redis_manager import RedisManager
+from .redis_manager import RedisQueueManager
 from .persistence import (
     CollectionConfig,
     CollectionProgress,
@@ -9,7 +9,7 @@ from .persistence import (
 )
 
 __all__ = [
-    "RedisManager",
+    "RedisQueueManager",
     "CollectionConfig",
     "CollectionProgress",
     "ConfigPersistence",

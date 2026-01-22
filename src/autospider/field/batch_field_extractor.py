@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
-from ..common.storage import RedisManager
+from ..common.storage import RedisQueueManager
 
 from .models import (
     FieldDefinition,
@@ -43,7 +43,7 @@ class BatchFieldExtractor:
         self,
         page: "Page",
         fields: list[FieldDefinition],
-        redis_manager: RedisManager | None = None,
+        redis_manager: RedisQueueManager | None = None,
         explore_count: int = 3,
         validate_count: int = 2,
         output_dir: str = "output",
@@ -76,6 +76,9 @@ class BatchFieldExtractor:
             output_dir=output_dir,
         )
         self.xpath_extractor = FieldXPathExtractor()
+        
+        # 任务映射：URL -> (stream_id, data_id)
+        self.task_mapping: dict[str, tuple[str, str]] = {}
     
     async def run(self, urls: list[str] | None = None) -> BatchExtractionResult:
         """
@@ -163,17 +166,42 @@ class BatchFieldExtractor:
         return result
     
     async def _get_urls_from_redis(self) -> list[str]:
-        """从 Redis 获取 URL 列表"""
+        """从 Redis 队列获取待处理的 URL"""
         if not self.redis_manager:
             print(f"[BatchFieldExtractor] ⚠ 未配置 Redis 管理器")
             return []
         
         try:
+            import socket
+            import os
+            
             await self.redis_manager.connect()
-            items = await self.redis_manager.get_active_items()
-            urls = list(items)
-            print(f"[BatchFieldExtractor] 从 Redis 获取了 {len(urls)} 个 URL")
+            
+            # 使用队列模式获取任务
+            consumer_name = f"extractor-{socket.gethostname()}-{os.getpid()}"
+            total_needed = self.explore_count + self.validate_count
+            
+            tasks = await self.redis_manager.fetch_task(
+                consumer_name=consumer_name,
+                block_ms=0,  # 非阻塞
+                count=total_needed
+            )
+            
+            if not tasks:
+                print(f"[BatchFieldExtractor] ⚠ 队列中无待处理任务")
+                return []
+            
+            urls = []
+            for stream_id, data_id, data in tasks:
+                url = data.get("url")
+                if url:
+                    urls.append(url)
+                    # 记录任务映射，用于后续 ACK
+                    self.task_mapping[url] = (stream_id, data_id)
+            
+            print(f"[BatchFieldExtractor] 从 Redis 队列获取了 {len(urls)} 个任务")
             return urls
+            
         except Exception as e:
             print(f"[BatchFieldExtractor] Redis 读取失败: {e}")
             return []
@@ -282,6 +310,51 @@ class BatchFieldExtractor:
             json.dump(detail_data, f, ensure_ascii=False, indent=2)
         
         print(f"[BatchFieldExtractor] 详细结果已保存: {detail_path}")
+        
+        # ACK 处理成功的任务
+        if self.redis_manager and self.task_mapping:
+            print(f"\n[BatchFieldExtractor] 处理任务 ACK...")
+            acked_count = 0
+            failed_count = 0
+            
+            # 处理探索阶段的记录
+            for record in result.exploration_records:
+                if record.url in self.task_mapping:
+                    stream_id, data_id = self.task_mapping[record.url]
+                    
+                    if record.success:
+                        # 成功：发送 ACK
+                        await self.redis_manager.ack_task(stream_id)
+                        acked_count += 1
+                    else:
+                        # 失败：标记失败（带重试机制）
+                        await self.redis_manager.fail_task(
+                            stream_id,
+                            data_id,
+                            "字段提取失败",
+                            max_retries=config.redis.max_retries
+                        )
+                        failed_count += 1
+            
+            # 处理校验阶段的记录
+            for record in result.validation_records:
+                if record.url in self.task_mapping:
+                    stream_id, data_id = self.task_mapping[record.url]
+                    
+                    if record.success:
+                        await self.redis_manager.ack_task(stream_id)
+                        acked_count += 1
+                    else:
+                        await self.redis_manager.fail_task(
+                            stream_id,
+                            data_id,
+                            "XPath 校验失败",
+                            max_retries=config.redis.max_retries
+                        )
+                        failed_count += 1
+            
+            print(f"  ✓ ACK: {acked_count} 个任务")
+            print(f"  ✗ FAIL: {failed_count} 个任务")
     
     def _print_record_summary(self, record: PageExtractionRecord) -> None:
         """打印单页提取结果摘要"""

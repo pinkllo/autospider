@@ -64,7 +64,12 @@ class AgentConfig(BaseModel):
 class RedisConfig(BaseModel):
     """Redis 配置
     
-    RedisManager 是一个通用的 Redis 管理工具，支持任何项目使用。
+    RedisQueueManager 是一个基于 Stream 的可靠消息队列，支持：
+    - ACK 确认机制
+    - 故障转移（自动捞回超时任务）
+    - 多消费者并发（Consumer Group）
+    - 自动去重（基于 Hash）
+    
     通过 key_prefix 可以为不同项目或功能设置独立的命名空间。
     """
     enabled: bool = Field(default_factory=lambda: os.getenv("REDIS_ENABLED", "false").lower() == "true")
@@ -74,6 +79,20 @@ class RedisConfig(BaseModel):
     db: int = Field(default_factory=lambda: int(os.getenv("REDIS_DB", "0")))
     # key_prefix: Redis 键的前缀，用于命名空间隔离（如 "autospider:urls"）
     key_prefix: str = Field(default_factory=lambda: os.getenv("REDIS_KEY_PREFIX", "autospider:urls"))
+    
+    # ===== 队列配置 =====
+    # 任务超时时间（毫秒），超过此时间未 ACK 的任务会被其他消费者捞回
+    task_timeout_ms: int = Field(default_factory=lambda: int(os.getenv("REDIS_TASK_TIMEOUT_MS", "300000")))
+    # 消费者名称（默认使用主机名+进程ID）
+    consumer_name: str | None = Field(default_factory=lambda: os.getenv("REDIS_CONSUMER_NAME", None))
+    # 是否自动恢复超时任务
+    auto_recover: bool = Field(default_factory=lambda: os.getenv("REDIS_AUTO_RECOVER", "true").lower() == "true")
+    # 每次获取任务的数量
+    fetch_batch_size: int = Field(default_factory=lambda: int(os.getenv("REDIS_FETCH_BATCH_SIZE", "10")))
+    # 阻塞等待时间（毫秒），0 表示非阻塞
+    fetch_block_ms: int = Field(default_factory=lambda: int(os.getenv("REDIS_FETCH_BLOCK_MS", "5000")))
+    # 最大重试次数（失败任务的重试上限）
+    max_retries: int = Field(default_factory=lambda: int(os.getenv("REDIS_MAX_RETRIES", "3")))
 
 
 class URLCollectorConfig(BaseModel):

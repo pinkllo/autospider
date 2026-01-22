@@ -214,7 +214,7 @@ class ActionExecutor:
                     await self.page.keyboard.press(pressed_key)
                 except Exception:
                     pass
-
+        print("........................................................................")
         # 生成脚本步骤（使用占位符语法）
         # 检测是否应该参数化
         value = action.text
