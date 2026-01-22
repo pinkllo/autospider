@@ -34,9 +34,7 @@ class BatchXPathExtractor:
         self.page_load_delay = config.url_collector.page_load_delay
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.required_fields = {
-            f.get("name"): f.get("required", True) for f in fields_config
-        }
+        self.required_fields = {f.get("name"): f.get("required", True) for f in fields_config}
 
     async def run(self, urls: list[str]) -> dict:
         """执行批量提取流程"""
@@ -57,7 +55,7 @@ class BatchXPathExtractor:
         urls = unique_urls
 
         print(f"\n{'='*60}")
-        print(f"[BatchXPathExtractor] 开始批量字段提取")
+        print("[BatchXPathExtractor] 开始批量字段提取")
         print(f"[BatchXPathExtractor] 目标字段: {[f.get('name') for f in self.fields_config]}")
         print(f"[BatchXPathExtractor] URL 数量: {len(urls)}")
         print(f"{'='*60}\n")

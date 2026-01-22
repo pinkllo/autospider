@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,14 +27,14 @@ def _get_inject_js() -> str:
 async def inject_and_scan(page: "Page") -> SoMSnapshot:
     """
     注入 SoM 脚本并扫描页面
-    
+
     返回带有标注的 SoMSnapshot
     """
     js_code = _get_inject_js()
-    
+
     # 执行注入脚本
     result = await page.evaluate(js_code)
-    
+
     # 解析结果
     marks = []
     for mark_data in result.get("marks", []):
@@ -49,7 +48,7 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
             )
             for c in mark_data.get("xpath_candidates", [])
         ]
-        
+
         # 解析边界框
         bbox_data = mark_data["bbox"]
         bbox = BoundingBox(
@@ -58,7 +57,7 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
             width=bbox_data["width"],
             height=bbox_data["height"],
         )
-        
+
         # 创建 ElementMark
         mark = ElementMark(
             mark_id=mark_data["mark_id"],
@@ -78,7 +77,7 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
             z_index=mark_data.get("z_index", 0),
         )
         marks.append(mark)
-    
+
     # 解析滚动信息
     scroll_info = None
     if "scroll_info" in result and result["scroll_info"]:
@@ -93,7 +92,7 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
             can_scroll_down=scroll_data.get("can_scroll_down", True),
             can_scroll_up=scroll_data.get("can_scroll_up", False),
         )
-    
+
     # 创建快照
     snapshot = SoMSnapshot(
         url=result["url"],
@@ -104,14 +103,14 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
         timestamp=result["timestamp"],
         scroll_info=scroll_info,
     )
-    
+
     return snapshot
 
 
 async def capture_screenshot_with_marks(page: "Page") -> tuple[bytes, str]:
     """
     截图（包含 SoM 标注框）
-    
+
     返回: (screenshot_bytes, base64_encoded)
     """
     screenshot_bytes = await page.screenshot(full_page=False)
@@ -289,7 +288,7 @@ async def get_element_by_mark_id(page: "Page", mark_id: int):
 def build_mark_id_to_xpath_map(snapshot: SoMSnapshot) -> dict[int, list[str]]:
     """
     构建 mark_id 到 xpath 列表的映射
-    
+
     返回的 xpath 列表按稳定性排序（最稳定的在前）
     """
     mapping = {}
@@ -306,13 +305,13 @@ def build_mark_id_to_xpath_map(snapshot: SoMSnapshot) -> dict[int, list[str]]:
 def format_marks_for_llm(snapshot: SoMSnapshot, max_marks: int = 50) -> str:
     """
     格式化 marks 信息供 LLM 使用
-    
+
     返回紧凑的文本格式，便于 LLM 理解
     """
     lines = []
     for mark in snapshot.marks[:max_marks]:
         parts = [f"[{mark.mark_id}]", mark.tag]
-        
+
         if mark.role:
             parts.append(f"role={mark.role}")
         if mark.text:
@@ -327,14 +326,14 @@ def format_marks_for_llm(snapshot: SoMSnapshot, max_marks: int = 50) -> str:
             parts.append(f"href={href}")
         if mark.input_type:
             parts.append(f"type={mark.input_type}")
-        
+
         # 添加归一化坐标（帮助 LLM 定位）
         cx, cy = mark.center_normalized
         parts.append(f"@({cx:.2f},{cy:.2f})")
-        
+
         lines.append(" ".join(parts))
-    
+
     if len(snapshot.marks) > max_marks:
         lines.append(f"... 和其他 {len(snapshot.marks) - max_marks} 个元素")
-    
+
     return "\n".join(lines)

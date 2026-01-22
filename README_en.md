@@ -54,7 +54,7 @@ cp .env.example .env
 
 **Key Settings:**
 - `API_KEY`: Multi-modal LLM API Key
-- `API_BASE`: API base URL (default: SiliconFlow)
+- `API_BASE`: API base URL
 - `MODEL`: Multi-modal model to use (recommended: `Qwen3-VL-235B-A22B-Instruct`)
 
 ### 2. Crawling Behavior

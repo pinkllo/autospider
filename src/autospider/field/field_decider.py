@@ -35,10 +35,10 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("field_extractor.yaml")
 
 class FieldDecider:
     """字段提取 LLM 决策器
-    
+
     封装所有字段提取相关的 LLM 调用。
     """
-    
+
     def __init__(
         self,
         page: "Page",
@@ -46,7 +46,7 @@ class FieldDecider:
     ):
         """
         初始化字段决策器
-        
+
         Args:
             page: Playwright 页面对象
             decider: 多模态 LLM 决策器（已配置好的）
@@ -90,7 +90,13 @@ class FieldDecider:
             except ValueError:
                 pass
 
-        for key in ["field_value", "field_text", "reasoning", "location_description", "target_text"]:
+        for key in [
+            "field_value",
+            "field_text",
+            "reasoning",
+            "location_description",
+            "target_text",
+        ]:
             value_match = re.search(rf'"{key}"\s*:\s*"([^"]*)', text)
             if value_match:
                 data[key] = value_match.group(1)
@@ -204,11 +210,7 @@ class FieldDecider:
         input_roles = {"textbox", "searchbox"}
 
         for mark in snapshot.marks:
-            if (
-                mark.tag not in input_tags
-                and mark.role not in input_roles
-                and not mark.input_type
-            ):
+            if mark.tag not in input_tags and mark.role not in input_roles and not mark.input_type:
                 continue
 
             label = self._get_candidate_label(mark)
@@ -279,7 +281,7 @@ class FieldDecider:
             filtered.append(mark.mark_id)
 
         return filtered[:max_candidates]
-    
+
     async def decide_navigation(
         self,
         snapshot: "SoMSnapshot",
@@ -292,29 +294,29 @@ class FieldDecider:
     ) -> dict | None:
         """
         决定导航操作
-        
+
         根据当前页面状态和目标字段，决定下一步操作：
         - found_field: 已找到目标字段
         - click: 点击元素展开更多
         - scroll_down: 向下滚动
         - field_not_exist: 字段不存在
-        
+
         Args:
             snapshot: SoM 快照
             screenshot_base64: 截图 Base64
             field: 目标字段定义
             nav_steps_count: 已执行的导航步数
             scroll_info: 滚动状态信息
-            
+
         Returns:
             决策结果字典，包含 action 和相关参数
         """
         current_url = self.page.url
-        
+
         print(f"[FieldDecider] 导航决策 - 字段: {field.name}")
         print(f"[FieldDecider] 当前页面: {current_url[:80]}...")
         print(f"[FieldDecider] 已执行步数: {nav_steps_count}")
-        
+
         # 构建滚动状态描述
         scroll_status = "无滚动信息"
         if scroll_info:
@@ -329,7 +331,7 @@ class FieldDecider:
             page_text_hit_text = "是"
         elif page_text_hit is False:
             page_text_hit_text = "否"
-        
+
         # 加载 Prompt
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -339,10 +341,8 @@ class FieldDecider:
         clickable_candidates_text, clickable_candidates_count = (
             self._build_clickable_candidates_text(snapshot)
         )
-        input_candidates_text, input_candidates_count = (
-            self._build_input_candidates_text(snapshot)
-        )
-        
+        input_candidates_text, input_candidates_count = self._build_input_candidates_text(snapshot)
+
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="navigate_to_field_user_message",
@@ -359,17 +359,22 @@ class FieldDecider:
                 "input_candidates": input_candidates_text,
                 "input_candidates_count": input_candidates_count,
                 "page_text_hit": page_text_hit_text,
-            }
+            },
         )
-        
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_message},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_message},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"},
+                    },
+                ]
+            ),
         ]
-        
+
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
@@ -381,14 +386,15 @@ class FieldDecider:
                 data = protocol_to_legacy_field_nav_decision(data, field.name)
                 print(f"[FieldDecider] 决策: {data.get('action')}")
                 return data
-            print(f"[FieldDecider] 响应中未找到 JSON")
+            print("[FieldDecider] 响应中未找到 JSON")
         except Exception as e:
             print(f"[FieldDecider] 决策失败: {e}")
             import traceback
+
             traceback.print_exc()
-        
+
         return None
-    
+
     async def extract_field_text(
         self,
         screenshot_base64: str,
@@ -396,21 +402,21 @@ class FieldDecider:
     ) -> dict | None:
         """
         让 LLM 识别并输出字段文本
-        
+
         Args:
             screenshot_base64: 截图 Base64
             field: 目标字段定义
-            
+
         Returns:
             提取结果字典，包含 found, field_value, confidence 等
         """
         print(f"[FieldDecider] 提取字段文本 - 字段: {field.name}")
-        
+
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
             section="extract_field_text_system_prompt",
         )
-        
+
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="extract_field_text_user_message",
@@ -419,17 +425,22 @@ class FieldDecider:
                 "field_description": field.description,
                 "field_data_type": field.data_type,
                 "field_example": field.example or "",
-            }
+            },
         )
-        
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_message},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_message},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"},
+                    },
+                ]
+            ),
         ]
-        
+
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
@@ -442,13 +453,13 @@ class FieldDecider:
                 if data.get("found"):
                     print(f"[FieldDecider] 提取到值: {data.get('field_value', '')[:50]}...")
                 else:
-                    print(f"[FieldDecider] 未找到字段")
+                    print("[FieldDecider] 未找到字段")
                 return data
         except Exception as e:
             print(f"[FieldDecider] 提取失败: {e}")
-        
+
         return None
-    
+
     async def select_correct_match(
         self,
         screenshot_base64: str,
@@ -457,28 +468,25 @@ class FieldDecider:
     ) -> dict | None:
         """
         从多个候选中选择正确的匹配
-        
+
         Args:
             screenshot_base64: 截图 Base64（候选元素已用 SoM 标注）
             field: 目标字段定义
             candidates: 候选列表，每个元素包含 mark_id 和 text
-            
+
         Returns:
             选择结果字典，包含 selected_mark_id 和 reasoning
         """
         print(f"[FieldDecider] 多候选消歧 - 字段: {field.name}, 候选数: {len(candidates)}")
-        
+
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
             section="select_match_system_prompt",
         )
-        
+
         # 构建候选列表文本
-        candidates_text = "\n".join([
-            f"- **[{c['mark_id']}]** {c['text']}"
-            for c in candidates
-        ])
-        
+        candidates_text = "\n".join([f"- **[{c['mark_id']}]** {c['text']}" for c in candidates])
+
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="select_match_user_message",
@@ -486,17 +494,22 @@ class FieldDecider:
                 "field_name": field.name,
                 "field_description": field.description,
                 "candidates": candidates,
-            }
+            },
         )
-        
+
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=[
-                {"type": "text", "text": user_message},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
-            ]),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": user_message},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"},
+                    },
+                ]
+            ),
         ]
-        
+
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
@@ -510,9 +523,9 @@ class FieldDecider:
                 return data
         except Exception as e:
             print(f"[FieldDecider] 消歧失败: {e}")
-        
+
         return None
-    
+
     async def check_field_in_page_text(
         self,
         page_text: str,
@@ -520,13 +533,13 @@ class FieldDecider:
     ) -> bool:
         """
         检查页面文本中是否包含目标字段的相关内容
-        
+
         这是一个快速检查，用于在调用视觉 LLM 之前预判字段是否存在。
-        
+
         Args:
             page_text: 页面的 innerText
             field: 目标字段定义
-            
+
         Returns:
             是否可能包含目标字段
         """
@@ -538,9 +551,7 @@ class FieldDecider:
 
         cleaned_text = page_text
         if "<" in cleaned_text:
-            cleaned_text = re.sub(
-                r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", cleaned_text
-            )
+            cleaned_text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", cleaned_text)
             cleaned_text = re.sub(r"(?s)<[^>]+>", " ", cleaned_text)
         cleaned_text = re.sub(r"\s+", " ", cleaned_text)
 
@@ -548,5 +559,5 @@ class FieldDecider:
         for keyword in keywords:
             if keyword.lower() in page_text_lower:
                 return True
-        
+
         return False

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -64,12 +62,8 @@ class ElementMark(BaseModel):
     placeholder: str | None = Field(default=None, description="placeholder")
     href: str | None = Field(default=None, description="链接地址")
     input_type: str | None = Field(default=None, description="input 类型")
-    clickability_reason: str | None = Field(
-        default=None, description="可点击性判定依据"
-    )
-    clickability_confidence: float | None = Field(
-        default=None, description="可点击性置信度"
-    )
+    clickability_reason: str | None = Field(default=None, description="可点击性判定依据")
+    clickability_confidence: float | None = Field(default=None, description="可点击性置信度")
     bbox: BoundingBox = Field(..., description="边界框")
     center_normalized: tuple[float, float] = Field(..., description="归一化中心坐标 (0-1)")
     xpath_candidates: list[XPathCandidate] = Field(
@@ -81,7 +75,7 @@ class ElementMark(BaseModel):
 
 class ScrollInfo(BaseModel):
     """页面滚动状态信息"""
-    
+
     scroll_top: int = Field(default=0, description="当前滚动位置（像素）")
     scroll_height: int = Field(default=0, description="页面总高度（像素）")
     client_height: int = Field(default=0, description="可视区域高度（像素）")
@@ -195,9 +189,7 @@ class XPathScript(BaseModel):
     target_text: str = Field(..., description="提取目标")
     steps: list[ScriptStep] = Field(default_factory=list)
     extracted_result: str | None = Field(default=None, description="最终提取结果")
-    variables: dict[str, str] = Field(
-        default_factory=dict, description="变量定义（用于参数化）"
-    )
+    variables: dict[str, str] = Field(default_factory=dict, description="变量定义（用于参数化）")
     created_at: str = Field(default="", description="创建时间")
 
 

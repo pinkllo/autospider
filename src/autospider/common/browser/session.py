@@ -17,12 +17,12 @@ from browser_manager.guarded_page import GuardedPage
 from ..config import config
 
 if TYPE_CHECKING:
-    from ..types import RunInput
+    pass
 
 
 class BrowserSession:
     """浏览器会话管理器 - 兼容层
-    
+
     在内部使用BrowserEngine实现,保持向后兼容的API
     """
 
@@ -49,7 +49,7 @@ class BrowserSession:
             default_headless=self.headless,
             default_timeout=config.browser.timeout_ms,
         )
-        
+
         # 创建页面上下文
         self._page_context = self._engine.page(
             headless=self.headless,
@@ -60,10 +60,10 @@ class BrowserSession:
             timeout=config.browser.timeout_ms,
             auth_file=str(Path.cwd() / ".auth" / "default.json"),
         )
-        
+
         # 进入上下文获取页面
         self._page = await self._page_context.__aenter__()
-        
+
         return self._page
 
     async def stop(self) -> None:
@@ -74,7 +74,7 @@ class BrowserSession:
                 await self._page_context.__aexit__(None, None, None)
             except Exception:
                 pass
-        
+
         self._page = None
         self._page_context = None
         # 注意: 不关闭全局引擎,因为它是单例,可能被其他会话使用

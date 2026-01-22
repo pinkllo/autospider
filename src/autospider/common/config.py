@@ -19,7 +19,9 @@ class LLMConfig(BaseModel):
     api_base: str = Field(
         default_factory=lambda: os.getenv("BAILIAN_API_BASE", "https://api.siliconflow.cn/v1")
     )
-    model: str = Field(default_factory=lambda: os.getenv("BAILIAN_MODEL", "Qwen3-VL-235B-A22B-Instruct"))
+    model: str = Field(
+        default_factory=lambda: os.getenv("BAILIAN_MODEL", "Qwen3-VL-235B-A22B-Instruct")
+    )
     # Planner 专用模型配置（可选，默认使用主模型）
     planner_model: str | None = Field(
         default_factory=lambda: os.getenv("SILICON_PLANNER_MODEL", None)
@@ -37,19 +39,11 @@ class LLMConfig(BaseModel):
 class BrowserConfig(BaseModel):
     """浏览器配置"""
 
-    headless: bool = Field(
-        default_factory=lambda: os.getenv("HEADLESS", "false").lower() == "true"
-    )
-    viewport_width: int = Field(
-        default_factory=lambda: int(os.getenv("VIEWPORT_WIDTH", "1280"))
-    )
-    viewport_height: int = Field(
-        default_factory=lambda: int(os.getenv("VIEWPORT_HEIGHT", "720"))
-    )
+    headless: bool = Field(default_factory=lambda: os.getenv("HEADLESS", "false").lower() == "true")
+    viewport_width: int = Field(default_factory=lambda: int(os.getenv("VIEWPORT_WIDTH", "1280")))
+    viewport_height: int = Field(default_factory=lambda: int(os.getenv("VIEWPORT_HEIGHT", "720")))
     slow_mo: int = Field(default_factory=lambda: int(os.getenv("SLOW_MO", "0")))
-    timeout_ms: int = Field(
-        default_factory=lambda: int(os.getenv("STEP_TIMEOUT_MS", "30000"))
-    )
+    timeout_ms: int = Field(default_factory=lambda: int(os.getenv("STEP_TIMEOUT_MS", "30000")))
 
 
 class AgentConfig(BaseModel):
@@ -63,34 +57,49 @@ class AgentConfig(BaseModel):
 
 class RedisConfig(BaseModel):
     """Redis 配置
-    
+
     RedisQueueManager 是一个基于 Stream 的可靠消息队列，支持：
     - ACK 确认机制
     - 故障转移（自动捞回超时任务）
     - 多消费者并发（Consumer Group）
     - 自动去重（基于 Hash）
-    
+
     通过 key_prefix 可以为不同项目或功能设置独立的命名空间。
     """
-    enabled: bool = Field(default_factory=lambda: os.getenv("REDIS_ENABLED", "false").lower() == "true")
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv("REDIS_ENABLED", "false").lower() == "true"
+    )
     host: str = Field(default_factory=lambda: os.getenv("REDIS_HOST", "localhost"))
     port: int = Field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))
     password: str | None = Field(default_factory=lambda: os.getenv("REDIS_PASSWORD", None))
     db: int = Field(default_factory=lambda: int(os.getenv("REDIS_DB", "0")))
     # key_prefix: Redis 键的前缀，用于命名空间隔离（如 "autospider:urls"）
-    key_prefix: str = Field(default_factory=lambda: os.getenv("REDIS_KEY_PREFIX", "autospider:urls"))
-    
+    key_prefix: str = Field(
+        default_factory=lambda: os.getenv("REDIS_KEY_PREFIX", "autospider:urls")
+    )
+
     # ===== 队列配置 =====
     # 任务超时时间（毫秒），超过此时间未 ACK 的任务会被其他消费者捞回
-    task_timeout_ms: int = Field(default_factory=lambda: int(os.getenv("REDIS_TASK_TIMEOUT_MS", "300000")))
+    task_timeout_ms: int = Field(
+        default_factory=lambda: int(os.getenv("REDIS_TASK_TIMEOUT_MS", "300000"))
+    )
     # 消费者名称（默认使用主机名+进程ID）
-    consumer_name: str | None = Field(default_factory=lambda: os.getenv("REDIS_CONSUMER_NAME", None))
+    consumer_name: str | None = Field(
+        default_factory=lambda: os.getenv("REDIS_CONSUMER_NAME", None)
+    )
     # 是否自动恢复超时任务
-    auto_recover: bool = Field(default_factory=lambda: os.getenv("REDIS_AUTO_RECOVER", "true").lower() == "true")
+    auto_recover: bool = Field(
+        default_factory=lambda: os.getenv("REDIS_AUTO_RECOVER", "true").lower() == "true"
+    )
     # 每次获取任务的数量
-    fetch_batch_size: int = Field(default_factory=lambda: int(os.getenv("REDIS_FETCH_BATCH_SIZE", "10")))
+    fetch_batch_size: int = Field(
+        default_factory=lambda: int(os.getenv("REDIS_FETCH_BATCH_SIZE", "10"))
+    )
     # 阻塞等待时间（毫秒），0 表示非阻塞
-    fetch_block_ms: int = Field(default_factory=lambda: int(os.getenv("REDIS_FETCH_BLOCK_MS", "5000")))
+    fetch_block_ms: int = Field(
+        default_factory=lambda: int(os.getenv("REDIS_FETCH_BLOCK_MS", "5000"))
+    )
     # 最大重试次数（失败任务的重试上限）
     max_retries: int = Field(default_factory=lambda: int(os.getenv("REDIS_MAX_RETRIES", "3")))
 
@@ -99,26 +108,18 @@ class URLCollectorConfig(BaseModel):
     """URL 收集器配置"""
 
     # 探索阶段进入的详情页数量
-    explore_count: int = Field(
-        default_factory=lambda: int(os.getenv("EXPLORE_COUNT", "3"))
-    )
+    explore_count: int = Field(default_factory=lambda: int(os.getenv("EXPLORE_COUNT", "3")))
     # 最大滚动次数（单页）
-    max_scrolls: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_SCROLLS", "5"))
-    )
+    max_scrolls: int = Field(default_factory=lambda: int(os.getenv("MAX_SCROLLS", "5")))
     # 连续无新 URL 的滚动次数后停止
     no_new_url_threshold: int = Field(
         default_factory=lambda: int(os.getenv("NO_NEW_URL_THRESHOLD", "2"))
     )
     # 目标 URL 数量（达到后停止收集）
-    target_url_count: int = Field(
-        default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "400"))
-    )
+    target_url_count: int = Field(default_factory=lambda: int(os.getenv("TARGET_URL_COUNT", "400")))
     # 最大翻页次数（分页收集）
-    max_pages: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_PAGES", "40"))
-    )
-    
+    max_pages: int = Field(default_factory=lambda: int(os.getenv("MAX_PAGES", "40")))
+
     # ===== 爬取间隔配置（反爬虫） =====
     # 页面操作基础延迟（秒）
     action_delay_base: float = Field(
@@ -133,14 +134,12 @@ class URLCollectorConfig(BaseModel):
         default_factory=lambda: float(os.getenv("PAGE_LOAD_DELAY", "1.5"))
     )
     # 滚动操作延迟（秒）
-    scroll_delay: float = Field(
-        default_factory=lambda: float(os.getenv("SCROLL_DELAY", "0.5"))
-    )
+    scroll_delay: float = Field(default_factory=lambda: float(os.getenv("SCROLL_DELAY", "0.5")))
     # 调试：打印延迟信息
     debug_delay: bool = Field(
         default_factory=lambda: os.getenv("DEBUG_DELAY", "true").lower() == "true"
     )
-    
+
     # ===== mark_id 验证配置 =====
     # 是否启用 mark_id 与文本的验证
     validate_mark_id: bool = Field(
@@ -158,16 +157,12 @@ class URLCollectorConfig(BaseModel):
     max_validation_retries: int = Field(
         default_factory=lambda: int(os.getenv("MAX_VALIDATION_RETRIES", "1"))
     )
-    
+
     # ===== 自适应速率控制配置（反爬虫） =====
     # 退避因子（遭遇反爬时延迟倍增因子）
-    backoff_factor: float = Field(
-        default_factory=lambda: float(os.getenv("BACKOFF_FACTOR", "1.5"))
-    )
+    backoff_factor: float = Field(default_factory=lambda: float(os.getenv("BACKOFF_FACTOR", "1.5")))
     # 最大降速等级
-    max_backoff_level: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_BACKOFF_LEVEL", "3"))
-    )
+    max_backoff_level: int = Field(default_factory=lambda: int(os.getenv("MAX_BACKOFF_LEVEL", "3")))
     # 连续成功多少页后恢复一级速度
     credit_recovery_pages: int = Field(
         default_factory=lambda: int(os.getenv("CREDIT_RECOVERY_PAGES", "5"))
@@ -176,19 +171,13 @@ class URLCollectorConfig(BaseModel):
 
 class FieldExtractorConfig(BaseModel):
     """字段提取器配置"""
-    
+
     # 探索阶段的 URL 数量
-    explore_count: int = Field(
-        default_factory=lambda: int(os.getenv("FIELD_EXPLORE_COUNT", "3"))
-    )
+    explore_count: int = Field(default_factory=lambda: int(os.getenv("FIELD_EXPLORE_COUNT", "3")))
     # 校验阶段的 URL 数量
-    validate_count: int = Field(
-        default_factory=lambda: int(os.getenv("FIELD_VALIDATE_COUNT", "2"))
-    )
+    validate_count: int = Field(default_factory=lambda: int(os.getenv("FIELD_VALIDATE_COUNT", "2")))
     # 导航最大步数
-    max_nav_steps: int = Field(
-        default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "20"))
-    )
+    max_nav_steps: int = Field(default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "20")))
     # 模糊匹配阈值
     fuzzy_match_threshold: float = Field(
         default_factory=lambda: float(os.getenv("FIELD_FUZZY_THRESHOLD", "0.8"))

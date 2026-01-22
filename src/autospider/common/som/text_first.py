@@ -9,8 +9,6 @@ from __future__ import annotations
 - 为提升鲁棒性，全项目统一使用“文本优先、歧义重选、未命中报错”的策略。
 """
 
-import json
-import re
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -51,7 +49,12 @@ async def resolve_mark_ids_from_map(
 
     final_ids = list(resolved_mark_ids)
 
-    retries = max(1, int(max_retries if max_retries is not None else config.url_collector.max_validation_retries))
+    retries = max(
+        1,
+        int(
+            max_retries if max_retries is not None else config.url_collector.max_validation_retries
+        ),
+    )
     allow_partial = len(mark_id_text_map) > 1  # 修改原因：批量选择时，允许少量未命中不阻断全局流程
 
     for r in results:
@@ -71,7 +74,9 @@ async def resolve_mark_ids_from_map(
                 if allow_partial:
                     print(f"[TextFirst] ⚠ 歧义重选失败，已跳过该条: text='{r.llm_text[:60]}'")
                     continue
-                raise ValueError(f"歧义重选失败: text='{r.llm_text}' candidates={r.candidate_mark_ids}")
+                raise ValueError(
+                    f"歧义重选失败: text='{r.llm_text}' candidates={r.candidate_mark_ids}"
+                )
             final_ids.append(selected)
             continue
 

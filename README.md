@@ -68,7 +68,7 @@ cp .env.example .env
 
 **关键配置项：**
 - `API_KEY`: 多模态 LLM 的 API Key
-- `API_BASE`: API 基础路径（默认为 SiliconFlow）
+- `API_BASE`: API 基础路径
 - `MODEL`: 使用的多模态模型（推荐 `Qwen3-VL-235B-A22B-Instruct`）
 
 ### 2. 爬取行为配置

@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 
 from ...common.browser import ActionExecutor
 from ...common.browser.click_utils import click_and_capture_new_page
-from ...common.som import clear_overlay, inject_and_scan, capture_screenshot_with_marks, build_mark_id_to_xpath_map, format_marks_for_llm, set_overlay_visibility
+from ...common.som import (
+    clear_overlay,
+    inject_and_scan,
+    capture_screenshot_with_marks,
+    build_mark_id_to_xpath_map,
+    format_marks_for_llm,
+    set_overlay_visibility,
+)
 from ...common.types import AgentState, RunInput, ActionType
 
 if TYPE_CHECKING:
@@ -18,7 +25,7 @@ if TYPE_CHECKING:
 
 class NavigationHandler:
     """导航处理器，负责导航阶段的筛选操作和步骤重放"""
-    
+
     def __init__(
         self,
         page: "Page",
@@ -36,21 +43,21 @@ class NavigationHandler:
         self.screenshots_dir = screenshots_dir
         self.executor: ActionExecutor | None = None
         self.nav_steps: list[dict] = []
-    
+
     async def run_navigation_phase(self) -> bool:
         """
         导航阶段：让 LLM 根据任务描述进行筛选操作
-        
+
         Returns:
             是否成功完成导航
         """
         if not self.decider:
             return False
-        
+
         # 初始化执行器
         if not self.executor:
             self.executor = ActionExecutor(self.page)
-        
+
         # 设置决策器的任务计划
         self.decider.task_plan = f"""任务分析: 你需要先在列表页进行筛选操作，达到以下目标：
 {self.task_description}
@@ -65,32 +72,32 @@ class NavigationHandler:
 
         nav_step = 0
         filter_done = False
-        
+
         while nav_step < self.max_nav_steps and not filter_done:
             nav_step += 1
             print(f"\n[Nav] ----- 导航步骤 {nav_step} -----")
-            
+
             # 1. 观察：注入 SoM 并截图
             try:
                 await clear_overlay(self.page)
                 await asyncio.sleep(0.2)
                 snapshot = await inject_and_scan(self.page)
                 screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-                
+
                 # 保存截图
                 if self.screenshots_dir:
                     screenshot_path = self.screenshots_dir / f"nav_{nav_step:03d}.png"
                     screenshot_path.write_bytes(screenshot_bytes)
-                
+
                 # 构建 mark_id -> xpath 映射
                 mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
                 marks_text = format_marks_for_llm(snapshot)
-                
+
                 print(f"[Nav] 发现 {len(snapshot.marks)} 个可交互元素")
             except Exception as e:
                 print(f"[Nav] 观察失败: {e}")
                 break
-            
+
             # 2. 决策：调用 LLM
             try:
                 # 构建简化的 AgentState
@@ -104,10 +111,10 @@ class NavigationHandler:
                     page_url=self.page.url,
                     page_title=await self.page.title(),
                 )
-                
+
                 # 解析滚动信息
                 scroll_info = snapshot.scroll_info if snapshot.scroll_info else None
-                
+
                 # 调用 LLM 决策
                 action = await self.decider.decide(
                     agent_state,
@@ -116,7 +123,7 @@ class NavigationHandler:
                     target_found_in_page=False,
                     scroll_info=scroll_info,
                 )
-                
+
                 print(f"[Nav] LLM 决策: {action.action.value}")
                 print(f"[Nav] 思考: {action.thinking[:150] if action.thinking else 'N/A'}...")
                 if action.mark_id:
@@ -124,28 +131,28 @@ class NavigationHandler:
             except Exception as e:
                 print(f"[Nav] 决策失败: {e}")
                 break
-            
+
             # 3. 执行动作
             if action.action == ActionType.DONE:
-                print(f"[Nav] 筛选操作完成")
+                print("[Nav] 筛选操作完成")
                 filter_done = True
                 break
-            
+
             if action.action == ActionType.RETRY:
-                print(f"[Nav] 重试")
+                print("[Nav] 重试")
                 continue
-            
+
             try:
                 # 隐藏覆盖层
                 await set_overlay_visibility(self.page, False)
-                
+
                 # 执行动作
                 result, script_step = await self.executor.execute(
                     action,
                     mark_id_to_xpath,
                     nav_step,
                 )
-                
+
                 print(f"[Nav] 执行结果: {'成功' if result.success else '失败'}")
                 if result.error:
                     print(f"[Nav] 错误: {result.error}")
@@ -158,12 +165,14 @@ class NavigationHandler:
                     self.executor._new_page = None
                     self.list_url = self.page.url
                     print(f"[Nav] ✓ 切换到新标签页: {self.page.url}")
-                
+
                 # 获取被点击元素的详细信息
                 clicked_element = None
                 if action.mark_id:
-                    clicked_element = next((m for m in snapshot.marks if m.mark_id == action.mark_id), None)
-                
+                    clicked_element = next(
+                        (m for m in snapshot.marks if m.mark_id == action.mark_id), None
+                    )
+
                 # 记录导航步骤（包含元素的详细信息）
                 nav_step_record = {
                     "step": nav_step,
@@ -178,29 +187,31 @@ class NavigationHandler:
                     "scroll_delta": action.scroll_delta,
                     "timeout_ms": action.timeout_ms,
                 }
-                
+
                 # 如果有点击元素，添加详细信息
                 if clicked_element:
-                    nav_step_record.update({
-                        "clicked_element_tag": clicked_element.tag,
-                        "clicked_element_text": clicked_element.text,
-                        "clicked_element_href": clicked_element.href,
-                        "clicked_element_role": clicked_element.role,
-                        "clicked_element_xpath_candidates": [
-                            {"xpath": c.xpath, "priority": c.priority, "strategy": c.strategy}
-                            for c in clicked_element.xpath_candidates
-                        ],
-                    })
-                
+                    nav_step_record.update(
+                        {
+                            "clicked_element_tag": clicked_element.tag,
+                            "clicked_element_text": clicked_element.text,
+                            "clicked_element_href": clicked_element.href,
+                            "clicked_element_role": clicked_element.role,
+                            "clicked_element_xpath_candidates": [
+                                {"xpath": c.xpath, "priority": c.priority, "strategy": c.strategy}
+                                for c in clicked_element.xpath_candidates
+                            ],
+                        }
+                    )
+
                 self.nav_steps.append(nav_step_record)
-                
+
                 # 等待页面响应
                 await asyncio.sleep(1)
-                
+
             except Exception as e:
                 print(f"[Nav] 执行失败: {e}")
                 continue
-        
+
         if filter_done:
             print(f"[Nav] ✓ 导航阶段完成，共执行 {nav_step} 步")
             await asyncio.sleep(1)
@@ -208,23 +219,23 @@ class NavigationHandler:
         else:
             print(f"[Nav] ⚠ 导航阶段达到最大步数 {self.max_nav_steps}，继续探索")
             return False
-    
+
     async def replay_nav_steps(self, nav_steps: list[dict] = None) -> bool:
         """重放导航步骤（使用记录的 xpath）"""
         steps = nav_steps if nav_steps is not None else self.nav_steps
         if not steps:
             return False
-        
+
         all_success = True
         executed_steps = 0
-        
+
         for step in steps:
             if not step.get("success"):
                 continue
-            
+
             action_type = (step.get("action") or "").lower()
             step_success = True
-            
+
             if action_type in ["click", "type"]:
                 xpath_candidates = step.get("clicked_element_xpath_candidates", [])
                 if not xpath_candidates:
@@ -234,9 +245,7 @@ class NavigationHandler:
                         xpath_candidates, key=lambda x: x.get("priority", 99)
                     )
                     xpath = (
-                        xpath_candidates_sorted[0].get("xpath")
-                        if xpath_candidates_sorted
-                        else None
+                        xpath_candidates_sorted[0].get("xpath") if xpath_candidates_sorted else None
                     )
                     if not xpath:
                         step_success = False
@@ -271,9 +280,7 @@ class NavigationHandler:
                                     await asyncio.sleep(1)
                                 elif action_type == "type":
                                     text = step.get("text") or ""
-                                    print(
-                                        f"[Replay] 输入: {text[:30]}... (xpath: {xpath[:50]}...)"
-                                    )
+                                    print(f"[Replay] 输入: {text[:30]}... (xpath: {xpath[:50]}...)")
                                     await locator.first.click(timeout=5000)
                                     await locator.first.fill(text, timeout=5000)
                                     await asyncio.sleep(0.5)
@@ -288,17 +295,13 @@ class NavigationHandler:
                         xpath_candidates, key=lambda x: x.get("priority", 99)
                     )
                     xpath = (
-                        xpath_candidates_sorted[0].get("xpath")
-                        if xpath_candidates_sorted
-                        else None
+                        xpath_candidates_sorted[0].get("xpath") if xpath_candidates_sorted else None
                     )
                     if xpath:
                         try:
                             locator = self.page.locator(f"xpath={xpath}")
                             if await locator.count() > 0:
-                                print(
-                                    f"[Replay] 按键: {key} (xpath: {xpath[:50]}...)"
-                                )
+                                print(f"[Replay] 按键: {key} (xpath: {xpath[:50]}...)")
                                 await locator.first.press(key)
                                 await asyncio.sleep(0.5)
                             else:
@@ -341,14 +344,12 @@ class NavigationHandler:
                 timeout_ms = step.get("timeout_ms") or 2000
                 try:
                     print(f"[Replay] 等待: {timeout_ms}ms")
-                    await self.page.wait_for_load_state(
-                        "networkidle", timeout=timeout_ms
-                    )
+                    await self.page.wait_for_load_state("networkidle", timeout=timeout_ms)
                 except Exception:
                     pass
             elif action_type == "go_back":
                 try:
-                    print(f"[Replay] 返回上一页")
+                    print("[Replay] 返回上一页")
                     await self.page.go_back(wait_until="domcontentloaded", timeout=10000)
                     await asyncio.sleep(0.5)
                 except Exception as e:
@@ -356,9 +357,11 @@ class NavigationHandler:
                     step_success = False
             elif action_type == "go_back_tab":
                 try:
-                    print(f"[Replay] 返回上一个标签页")
+                    print("[Replay] 返回上一个标签页")
                     current_page = self.page
-                    raw_current = current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
+                    raw_current = (
+                        current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
+                    )
                     pages = list(raw_current.context.pages)
                     target_page = None
                     for candidate in reversed(pages):
@@ -381,7 +384,7 @@ class NavigationHandler:
                     step_success = False
             else:
                 continue
-            
+
             executed_steps += 1
             if not step_success:
                 all_success = False

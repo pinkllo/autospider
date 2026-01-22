@@ -9,6 +9,7 @@
 - 优雅降级：若未安装 jinja2，自动回退到简单的 {{key}} 占位符替换
 - 路径透明：所有路径由调用方传入，无任何默认路径假设
 """
+
 import yaml
 from typing import Any
 from functools import lru_cache
@@ -18,6 +19,7 @@ from functools import lru_cache
 _JINJA2_ENV = None
 try:
     import jinja2
+
     # autoescape=False 防止对 Prompt 内容进行 HTML 转义
     _JINJA2_ENV = jinja2.Environment(loader=jinja2.BaseLoader(), autoescape=False)
 except ImportError:
@@ -50,7 +52,7 @@ def load_template_file(file_path: str) -> dict[str, Any]:
 def clear_template_cache() -> None:
     """
     清除模板文件的 LRU 缓存。
-    
+
     适用于开发调试场景，当模板文件内容更新后调用此函数生效。
     """
     load_template_file.cache_clear()
@@ -69,7 +71,7 @@ def render_text(text: str, variables: dict[str, Any] | None = None) -> str:
     """
     if not variables:
         return text
-    
+
     if _JINJA2_ENV is not None:
         # Jinja2 模式：支持完整模板语法（循环、条件、过滤器等）
         template = _JINJA2_ENV.from_string(text)
@@ -84,9 +86,7 @@ def render_text(text: str, variables: dict[str, Any] | None = None) -> str:
 
 
 def render_template(
-    file_path: str,
-    section: str | None = None,
-    variables: dict[str, Any] | None = None
+    file_path: str, section: str | None = None, variables: dict[str, Any] | None = None
 ) -> str:
     """
     加载 YAML 模板文件并渲染指定部分。
@@ -101,7 +101,7 @@ def render_template(
 
     Returns:
         渲染后的 Prompt 文本
-    
+
     Examples:
         >>> # 渲染模板文件中的 system_prompt 部分
         >>> prompt = render_template(
@@ -109,12 +109,12 @@ def render_template(
         ...     section="system_prompt",
         ...     variables={"html_content": "<div>...</div>"}
         ... )
-        
+
         >>> # 渲染整个模板（不指定 section）
         >>> full = render_template("prompts/simple.yaml", variables={"name": "test"})
     """
     data = load_template_file(file_path)
-    
+
     if section is not None:
         # 提取指定 Section 的内容
         content = data.get(section, "")
@@ -124,7 +124,7 @@ def render_template(
     else:
         # 无 section 时，将整个 dict 序列化为字符串
         content = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-    
+
     return render_text(content, variables)
 
 

@@ -68,7 +68,7 @@ async def click_and_capture_new_page(
 
 def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
     """确保页面被 GuardedPage 包装。
-    
+
     GuardedPage 提供了一种受保护的页面访问方式，通常用于自动重试、
     错误恢复或确保页面在操作期间不会被意外关闭。
     """
@@ -94,6 +94,6 @@ def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
         # 设置标识，标记该页面已被 Guard 处理
         setattr(page, "_guard_attached", True)
         setattr(page, "_page_guard", guard)
-    
+
     # 使用 guard 包装页面并返回
     return GuardedPage(page, guard)

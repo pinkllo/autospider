@@ -38,4 +38,3 @@ __all__ = [
     "batch_extract_fields_from_urls",
     "validate_xpath_pattern",
 ]
-

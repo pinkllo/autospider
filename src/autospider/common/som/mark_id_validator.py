@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 class MarkIdValidationResult:
     """mark_id 解析结果（文本优先）"""
-    
+
     def __init__(
         self,
         mark_id: int | None,
@@ -46,7 +46,7 @@ class MarkIdValidationResult:
         self.is_valid = is_valid  # 是否已唯一解析成功
         self.element = element  # LLM mark_id 对应的元素（如果找到）
         self.status = status  # 解析状态：id_match/text_unique/text_ambiguous/text_not_found/invalid_mark_id 等
-    
+
     def __repr__(self) -> str:
         ok = "✓" if self.is_valid else "✗"
         resolved = f" -> {self.resolved_mark_id}" if self.resolved_mark_id is not None else ""
@@ -55,14 +55,12 @@ class MarkIdValidationResult:
 
 class MarkIdValidator:
     """文本优先的 mark_id 解析器"""
-    
-    def __init__(
-        self, debug: bool | None = None
-    ):
+
+    def __init__(self, debug: bool | None = None):
         self.debug = debug if debug is not None else config.url_collector.debug_mark_id_validation
         # 需求确认：短文本（<=2）要求严格匹配，避免“包含匹配”误命中大量元素
         self.short_text_strict_len = 2
-    
+
     async def validate_mark_id_text_map(
         self,
         mark_id_text_map: dict[str, str],
@@ -70,18 +68,18 @@ class MarkIdValidator:
         page: "Page | None" = None,
     ) -> tuple[list[int], list[MarkIdValidationResult]]:
         """解析 LLM 返回的 mark_id 与文本映射（文本优先）
-        
+
         Args:
             mark_id_text_map: LLM 返回的 {mark_id: text} 映射（mark_id 为字符串）
             snapshot: SoM 快照
             page: Playwright Page（可选）。提供时会从 DOM 读取完整 innerText，避免 SoM 截断文本影响匹配。
-            
+
         Returns:
             (resolved_mark_ids, results): 已唯一解析成功的 mark_id 列表（去重）与所有解析结果
         """
         resolved_mark_ids: list[int] = []
         results = []
-        
+
         # 构建 mark_id -> element 的映射
         mark_id_to_element = {m.mark_id: m for m in snapshot.marks}
 
@@ -90,7 +88,7 @@ class MarkIdValidator:
             snapshot=snapshot,
             page=page,
         )
-        
+
         for mark_id_str, llm_text in mark_id_text_map.items():
             llm_text = llm_text or ""
 
@@ -155,7 +153,9 @@ class MarkIdValidator:
                 results.append(result)
                 resolved_mark_ids.append(resolved_id)
                 if self.debug:
-                    print(f"[Validator] ✓ text_unique: '{llm_text[:50]}...' -> mark_id={resolved_id}")
+                    print(
+                        f"[Validator] ✓ text_unique: '{llm_text[:50]}...' -> mark_id={resolved_id}"
+                    )
                 continue
 
             if len(candidate_mark_ids) > 1:
@@ -171,7 +171,9 @@ class MarkIdValidator:
                 )
                 results.append(result)
                 if self.debug:
-                    print(f"[Validator] ? text_ambiguous: '{llm_text[:50]}...' -> {candidate_mark_ids}")
+                    print(
+                        f"[Validator] ? text_ambiguous: '{llm_text[:50]}...' -> {candidate_mark_ids}"
+                    )
                 continue
 
             # 0 命中
@@ -353,22 +355,22 @@ class MarkIdValidator:
 #     snapshot: "SoMSnapshot",
 # ) -> dict[str, str]:
 #     """将旧版本的 mark_ids 列表转换为 mark_id_text_map 格式
-    
+
 #     用于向后兼容。自动从 snapshot 中获取每个 mark_id 对应的文本。
-    
+
 #     Args:
 #         mark_ids: mark_id 列表
 #         snapshot: SoM 快照
-        
+
 #     Returns:
 #         {mark_id: text} 映射
 #     """
 #     mark_id_to_element = {m.mark_id: m for m in snapshot.marks}
 #     result = {}
-    
+
 #     for mark_id in mark_ids:
 #         element = mark_id_to_element.get(mark_id)
 #         if element:
 #             result[str(mark_id)] = element.text or ""
-    
+
 #     return result

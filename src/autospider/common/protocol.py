@@ -26,13 +26,15 @@ class ProtocolMessage(BaseModel):
 # 文本清理工具
 # ---------------------------------------------------------------------------
 
-_QUOTE_TRANS = str.maketrans({
-    0x201C: '"',  # 左双引号 "
-    0x201D: '"',  # 右双引号 "
-    0x2018: "'",  # 左单引号 '
-    0x2019: "'",  # 右单引号 '
-    0x00A0: " ",  # 不间断空格
-})
+_QUOTE_TRANS = str.maketrans(
+    {
+        0x201C: '"',  # 左双引号 "
+        0x201D: '"',  # 右双引号 "
+        0x2018: "'",  # 左单引号 '
+        0x2019: "'",  # 右单引号 '
+        0x00A0: " ",  # 不间断空格
+    }
+)
 
 
 def _normalize_quotes(text: str) -> str:
@@ -57,7 +59,8 @@ def _normalize_field_name(value: str | None) -> str:
     if not value:
         return ""
     return "".join(
-        ch for ch in _normalize_quotes(str(value))
+        ch
+        for ch in _normalize_quotes(str(value))
         if not ch.isspace() and unicodedata.category(ch) != "Cf"
     ).strip()
 
@@ -88,6 +91,7 @@ def _coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
 # JSON 提取与解析
 # ---------------------------------------------------------------------------
 
+
 def _extract_balanced_object(text: str, start: int) -> str | None:
     """从指定位置提取括号匹配的 JSON 对象"""
     if start < 0 or start >= len(text) or text[start] != "{":
@@ -107,7 +111,7 @@ def _extract_balanced_object(text: str, start: int) -> str | None:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
     return None
 
 
@@ -115,7 +119,8 @@ def _iter_json_candidates(text: str) -> list[str]:
     """提取所有可能的 JSON 对象候选"""
     seen: set[str] = set()
     return [
-        obj for m in re.finditer(r"\{", text)
+        obj
+        for m in re.finditer(r"\{", text)
         if (obj := _extract_balanced_object(text, m.start())) and obj not in seen and not seen.add(obj)  # type: ignore
     ]
 
@@ -123,6 +128,7 @@ def _iter_json_candidates(text: str) -> list[str]:
 @dataclass
 class _FieldExtractor:
     """从文本中提取 JSON 字段值的辅助类"""
+
     text: str
 
     def _match(self, pattern: str) -> re.Match[str] | None:
@@ -174,7 +180,17 @@ def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
 
     # args 为空时提取常见字段
     if not args:
-        for k in ["kind", "target_text", "text", "key", "url", "reasoning", "field_name", "field_value", "location_description"]:
+        for k in [
+            "kind",
+            "target_text",
+            "text",
+            "key",
+            "url",
+            "reasoning",
+            "field_name",
+            "field_value",
+            "location_description",
+        ]:
             if (v := ext.string(k)) is not None:
                 args[k] = v
         if (v := ext.integer("mark_id")) is not None:
@@ -228,6 +244,7 @@ def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
 # 协议解析核心
 # ---------------------------------------------------------------------------
 
+
 def _merge_args_with_top_level(data: dict[str, Any]) -> dict[str, Any]:
     """合并 args 与顶层字段，规范化常见字段类型"""
     raw_args = data.get("args") if isinstance(data.get("args"), dict) else {}
@@ -270,7 +287,12 @@ def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, An
 
 def is_protocol_v1(data: dict[str, Any] | None) -> bool:
     """检查是否为 v1 协议格式"""
-    return bool(data and "action" in data and "args" in data and data.get("protocol", PROTOCOL_V1) == PROTOCOL_V1)
+    return bool(
+        data
+        and "action" in data
+        and "args" in data
+        and data.get("protocol", PROTOCOL_V1) == PROTOCOL_V1
+    )
 
 
 def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
@@ -278,7 +300,9 @@ def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
     if not is_protocol_v1(data):
         return None
     try:
-        return ProtocolMessage.model_validate({**data, "protocol": PROTOCOL_V1, "args": data.get("args", {})})
+        return ProtocolMessage.model_validate(
+            {**data, "protocol": PROTOCOL_V1, "args": data.get("args", {})}
+        )
     except Exception:
         return None
 
@@ -287,9 +311,11 @@ def as_protocol_v1(data: dict[str, Any]) -> ProtocolMessage | None:
 # 兼容映射辅助
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _ProtocolParts:
     """协议解析后的核心部分"""
+
     action: str
     args: dict[str, Any]
     thinking: str
@@ -301,7 +327,7 @@ class _ProtocolParts:
         return cls(
             _normalize_action(data.get("action")),
             data.get("args") if isinstance(data.get("args"), dict) else {},
-            data.get("thinking") or data.get("reasoning") or ""
+            data.get("thinking") or data.get("reasoning") or "",
         )
 
     def get_reasoning(self) -> str:
@@ -326,6 +352,7 @@ def _extract_item_from_args(args: dict[str, Any]) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # 兼容映射函数
 # ---------------------------------------------------------------------------
+
 
 def protocol_to_legacy_agent_action(data: dict[str, Any]) -> dict[str, Any]:
     """映射到通用 Agent 旧扁平字段结构"""
@@ -357,17 +384,32 @@ def protocol_to_legacy_url_decision(data: dict[str, Any]) -> dict[str, Any]:
         mark_id_text_map = {
             str(it["mark_id"]): str(it.get("text") or it.get("target_text") or "")
             for it in parts.args.get("items") or []
-            if isinstance(it, dict) and it.get("mark_id") is not None and (it.get("text") or it.get("target_text"))
+            if isinstance(it, dict)
+            and it.get("mark_id") is not None
+            and (it.get("text") or it.get("target_text"))
         }
-        return {"action": "select_detail_links", "mark_id_text_map": mark_id_text_map, "reasoning": reasoning}
+        return {
+            "action": "select_detail_links",
+            "mark_id_text_map": mark_id_text_map,
+            "reasoning": reasoning,
+        }
 
     if parts.action == "click":
-        return {"action": "click_to_enter", "mark_id": parts.args.get("mark_id"), "target_text": parts.args.get("target_text") or "", "reasoning": reasoning}
+        return {
+            "action": "click_to_enter",
+            "mark_id": parts.args.get("mark_id"),
+            "target_text": parts.args.get("target_text") or "",
+            "reasoning": reasoning,
+        }
 
     if parts.action == "scroll":
         return {"action": "scroll_down", "reasoning": reasoning}
 
-    if parts.action == "report" and (parts.args.get("kind") or "").lower() == "page_kind" and (parts.args.get("page_kind") or "").lower() == "detail":
+    if (
+        parts.action == "report"
+        and (parts.args.get("kind") or "").lower() == "page_kind"
+        and (parts.args.get("page_kind") or "").lower() == "detail"
+    ):
         return {"action": "current_is_detail", "reasoning": reasoning}
 
     return data
@@ -379,7 +421,10 @@ def protocol_to_legacy_pagination_result(data: dict[str, Any]) -> dict[str, Any]
         return data
 
     parts = _ProtocolParts.from_data(data)
-    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {"pagination_next", "next_page"}:
+    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {
+        "pagination_next",
+        "next_page",
+    }:
         return data
 
     item = _extract_item_from_args(parts.args)
@@ -387,7 +432,7 @@ def protocol_to_legacy_pagination_result(data: dict[str, Any]) -> dict[str, Any]
         "found": bool(parts.args.get("found", True)),
         "mark_id": item.get("mark_id") if item else None,
         "target_text": (item.get("text") if item else None) or parts.args.get("target_text") or "",
-        "reasoning": parts.get_reasoning()
+        "reasoning": parts.get_reasoning(),
     }
 
 
@@ -397,7 +442,10 @@ def protocol_to_legacy_jump_widget_result(data: dict[str, Any]) -> dict[str, Any
         return data
 
     parts = _ProtocolParts.from_data(data)
-    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {"jump_widget", "page_jump"}:
+    if parts.action != "select" or (parts.args.get("purpose") or "").lower() not in {
+        "jump_widget",
+        "page_jump",
+    }:
         return data
 
     input_obj = parts.args.get("input") if isinstance(parts.args.get("input"), dict) else {}
@@ -408,7 +456,7 @@ def protocol_to_legacy_jump_widget_result(data: dict[str, Any]) -> dict[str, Any
         "button_mark_id": button_obj.get("mark_id"),
         "input_text": input_obj.get("text") or "",
         "button_text": button_obj.get("text") or "",
-        "reasoning": parts.get_reasoning()
+        "reasoning": parts.get_reasoning(),
     }
 
 
@@ -432,7 +480,7 @@ def _build_found_field_result(merged: dict[str, Any], reasoning: str) -> dict[st
         "target_text": merged.get("target_text") or "",
         "confidence": merged.get("confidence", 0.0),
         "reasoning": reasoning,
-        "location_description": merged.get("location_description") or ""
+        "location_description": merged.get("location_description") or "",
     }
 
 
@@ -441,7 +489,9 @@ def _process_flat_field_extract(data: dict[str, Any], field_name: str) -> dict[s
     args = data.get("args") if isinstance(data.get("args"), dict) else {}
     merged = {**data, **args}
 
-    if not _is_field_extract_like(merged) or not _field_names_match(merged.get("field_name"), field_name):
+    if not _is_field_extract_like(merged) or not _field_names_match(
+        merged.get("field_name"), field_name
+    ):
         return None
 
     found = _coerce_bool(merged.get("found"))
@@ -449,7 +499,11 @@ def _process_flat_field_extract(data: dict[str, Any], field_name: str) -> dict[s
         found = bool(merged.get("field_value") or merged.get("field_text"))
 
     reasoning = merged.get("reasoning") or merged.get("thinking") or ""
-    return _build_found_field_result(merged, reasoning) if found else {"action": "field_not_exist", "reasoning": reasoning}
+    return (
+        _build_found_field_result(merged, reasoning)
+        if found
+        else {"action": "field_not_exist", "reasoning": reasoning}
+    )
 
 
 def protocol_to_legacy_field_nav_decision(data: dict[str, Any], field_name: str) -> dict[str, Any]:
@@ -476,20 +530,30 @@ def protocol_to_legacy_field_nav_decision(data: dict[str, Any], field_name: str)
     # 处理字段提取
     if parts.action == "extract":
         merged = {**data, **parts.args}
-        if _is_field_extract_like(merged) and _field_names_match(parts.args.get("field_name"), field_name):
+        if _is_field_extract_like(merged) and _field_names_match(
+            parts.args.get("field_name"), field_name
+        ):
             found = _coerce_bool(parts.args.get("found"))
             if found is None:
                 found = bool(parts.args.get("field_value") or parts.args.get("field_text"))
             reasoning = parts.get_reasoning()
-            return _build_found_field_result(merged, reasoning) if found else {"action": "field_not_exist", "reasoning": reasoning}
+            return (
+                _build_found_field_result(merged, reasoning)
+                if found
+                else {"action": "field_not_exist", "reasoning": reasoning}
+            )
 
     return data
 
 
-def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: str) -> dict[str, Any]:
+def protocol_to_legacy_field_extract_result(
+    data: dict[str, Any], field_name: str
+) -> dict[str, Any]:
     """映射字段提取"识别文本阶段"旧结构"""
-    
-    def _build_extract_result(merged: dict[str, Any], found: bool, reasoning: str) -> dict[str, Any]:
+
+    def _build_extract_result(
+        merged: dict[str, Any], found: bool, reasoning: str
+    ) -> dict[str, Any]:
         return {
             "found": found,
             "field_value": merged.get("field_value") or "",
@@ -497,7 +561,7 @@ def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: st
             "location_description": merged.get("location_description") or "",
             "reasoning": reasoning,
             "mark_id": merged.get("mark_id"),
-            "target_text": merged.get("target_text") or ""
+            "target_text": merged.get("target_text") or "",
         }
 
     if not is_protocol_v1(data):
@@ -508,20 +572,26 @@ def protocol_to_legacy_field_extract_result(data: dict[str, Any], field_name: st
         args = data.get("args") if isinstance(data.get("args"), dict) else {}
         merged = {**data, **args}
 
-        if not _is_field_extract_like(merged) or not _field_names_match(merged.get("field_name"), field_name):
+        if not _is_field_extract_like(merged) or not _field_names_match(
+            merged.get("field_name"), field_name
+        ):
             return data
 
         found = _coerce_bool(merged.get("found"))
         if found is None:
             found = bool(merged.get("field_value") or merged.get("field_text"))
-        return _build_extract_result(merged, found, merged.get("reasoning") or merged.get("thinking") or "")
+        return _build_extract_result(
+            merged, found, merged.get("reasoning") or merged.get("thinking") or ""
+        )
 
     parts = _ProtocolParts.from_data(data)
     if parts.action != "extract":
         return data
 
     merged = {**data, **parts.args}
-    if not _is_field_extract_like(merged) or not _field_names_match(parts.args.get("field_name"), field_name):
+    if not _is_field_extract_like(merged) or not _field_names_match(
+        parts.args.get("field_name"), field_name
+    ):
         return data
 
     found = _coerce_bool(parts.args.get("found"))

@@ -23,7 +23,7 @@ class URLExtractor:
     1. 静态提取：直接获取元素的 href 属性（最快）。
     2. 动态提取：模拟点击元素，并捕获产生的新页面 URL 或当前页面跳转后的 URL（最准确，用于处理 JS 跳转）。
     """
-    
+
     def __init__(self, page: "Page", list_url: str):
         """
         初始化 URL 提取器。
@@ -34,9 +34,9 @@ class URLExtractor:
         """
         self.page = page
         self.list_url = list_url
-    
+
     async def extract_from_element(
-        self, 
+        self,
         element: "ElementMark",
         snapshot: "SoMSnapshot",
         nav_steps: list[dict] | None = None,
@@ -61,11 +61,11 @@ class URLExtractor:
             url = urljoin(self.list_url, element.href)
             print(f"[Extract] ✓ 从 href 提取: {url[:60]}...")
             return url
-        
+
         # 策略 2: 元素无 href，尝试点击获取（动态提取）
-        print(f"[Extract] 元素无 href，点击获取 URL...")
+        print("[Extract] 元素无 href，点击获取 URL...")
         return await self.click_and_get_url(element, snapshot, nav_steps=nav_steps)
-    
+
     async def click_and_get_url(
         self,
         element: "ElementMark",
@@ -104,7 +104,7 @@ class URLExtractor:
                 mark_id_to_xpath,
                 step_index=0,
             )
-            
+
             if not result.success:
                 print(f"[Click] ✗ 点击失败: {result.error}")
                 return None
@@ -126,7 +126,7 @@ class URLExtractor:
             # 等待一小段时间让跳转发生
             await asyncio.sleep(2)
             new_url = self.page.url
-            
+
             # 解析 URL 以比较是否发生实质性变化（包括 hash 变化）
             old_parsed = urlparse(list_url)
             new_parsed = urlparse(new_url)
@@ -135,23 +135,24 @@ class URLExtractor:
             print(f"[Click] 新 URL: {new_url}")
 
             if new_url != list_url or old_parsed.fragment != new_parsed.fragment:
-                print(f"[Click] ✓ URL 已变化")
-                print(f"[Click] 返回列表页...")
-                
+                print("[Click] ✓ URL 已变化")
+                print("[Click] 返回列表页...")
+
                 # 如果发生了跳转，需要导航回列表页以继续后续提取
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(1)
-                
+
                 # 如果有导航步骤（如点击了某些筛选条件），需要重放以恢复到之前的状态
                 if nav_steps:
                     from .navigation_handler import NavigationHandler
+
                     nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
                     await nav_handler.replay_nav_steps(nav_steps)
-                
+
                 return new_url
 
             # 如果 URL 没有任何变化，说明该点击可能未触发导航
-            print(f"[Click] ✗ URL 未变化")
+            print("[Click] ✗ URL 未变化")
             try:
                 # 尝试回退
                 await self.page.go_back(wait_until="domcontentloaded", timeout=5000)
@@ -159,10 +160,13 @@ class URLExtractor:
             except Exception:
                 # 回退失败则尝试重新进入列表页
                 try:
-                    await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
+                    await self.page.goto(
+                        self.list_url, wait_until="domcontentloaded", timeout=30000
+                    )
                     await asyncio.sleep(1)
                     if nav_steps:
                         from .navigation_handler import NavigationHandler
+
                         nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
                         await nav_handler.replay_nav_steps(nav_steps)
                 except Exception:
@@ -177,16 +181,19 @@ class URLExtractor:
                 await asyncio.sleep(1)
                 if nav_steps:
                     from .navigation_handler import NavigationHandler
+
                     nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
                     await nav_handler.replay_nav_steps(nav_steps)
             except Exception:
                 pass
             return None
-    
-    async def click_element_and_get_url(self, element_locator, nav_steps: list[dict] = None) -> str | None:
+
+    async def click_element_and_get_url(
+        self, element_locator, nav_steps: list[dict] = None
+    ) -> str | None:
         """
         通过 Playwright Locator 点击元素并获取 URL。
-        
+
         该方法主要用于收集阶段，当已经定位到具体的 Playwright 元素时使用。
         逻辑与 click_and_get_url 类似，但使用 click_and_capture_new_page 工具函数。
 
@@ -198,9 +205,9 @@ class URLExtractor:
             获取到的 URL 或 None。
         """
         from .navigation_handler import NavigationHandler
-        
+
         list_url = self.page.url
-        
+
         try:
             # 使用工具函数点击并捕获新页面
             new_page = await click_and_capture_new_page(
@@ -211,7 +218,7 @@ class URLExtractor:
                 load_state="domcontentloaded",
                 load_timeout_ms=10000,
             )
-            
+
             if new_page is not None:
                 new_url = new_page.url
                 await new_page.close()
@@ -254,7 +261,7 @@ class URLExtractor:
                     pass
 
             return None
-                
+
         except Exception as e:
             print(f"[Collect-XPath] 点击失败: {e}")
             # 异常恢复

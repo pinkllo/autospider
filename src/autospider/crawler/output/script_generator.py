@@ -32,7 +32,7 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("script_generator.yaml")
 
 class ScriptGenerator:
     """爬虫脚本生成器"""
-    
+
     def __init__(self, output_dir: str = "output"):
         """初始化 LLM"""
         self.llm = ChatOpenAI(
@@ -44,7 +44,7 @@ class ScriptGenerator:
         )
         # 持久化管理器，用于读取配置
         self.config_persistence = ConfigPersistence(output_dir)
-    
+
     async def generate_scrapy_playwright_script(
         self,
         list_url: str,
@@ -56,7 +56,7 @@ class ScriptGenerator:
     ) -> str:
         """
         生成 Scrapy + scrapy-playwright 爬虫脚本
-        
+
         Args:
             list_url: 列表页 URL
             task_description: 任务描述
@@ -64,12 +64,12 @@ class ScriptGenerator:
             nav_steps: 导航步骤记录
             collected_urls: 收集到的 URL 列表
             common_detail_xpath: 从探索阶段提取的公共 xpath（可直接复用）
-            
+
         Returns:
             生成的爬虫脚本代码
         """
         print(f"[ScriptGenerator] 开始分析探索记录...")
-        
+
         # 尝试从配置文件读取（如果参数为空）
         if (not nav_steps or not common_detail_xpath) and self.config_persistence.exists():
             print(f"[ScriptGenerator] 尝试从配置文件读取缺失的参数...")
@@ -81,21 +81,21 @@ class ScriptGenerator:
                 if not common_detail_xpath:
                     common_detail_xpath = saved_config.common_detail_xpath
                     print(f"[ScriptGenerator] ✓ 从配置读取到公共 xpath: {common_detail_xpath}")
-        
+
         if not detail_visits:
             print(f"[ScriptGenerator] 没有探索记录，无法生成脚本")
             return ""
-        
+
         # 提取导航步骤的 xpath（可直接复用到脚本）
         nav_xpaths = self._extract_nav_xpaths(nav_steps)
         print(f"[ScriptGenerator] 提取到 {len(nav_xpaths)} 个导航步骤的 xpath")
-        
+
         # 使用传入的公共 xpath 或从 detail_visits 提取
         detail_xpath = common_detail_xpath
         if not detail_xpath:
             detail_xpath = self._extract_detail_xpath(detail_visits)
         print(f"[ScriptGenerator] 详情链接 xpath: {detail_xpath or 'N/A'}")
-        
+
         # 如果有足够的 xpath 信息，直接生成脚本（无需 LLM）
         if nav_xpaths or detail_xpath:
             print(f"[ScriptGenerator] 使用提取的 xpath 直接生成脚本...")
@@ -110,16 +110,16 @@ class ScriptGenerator:
                 print(f"[ScriptGenerator] ✓ 脚本生成完成（{len(script)} 字符）")
                 self._validate_script(script)
                 return script
-        
+
         # 不使用 LLM 回退，直接返回空字符串
         # 因为简化模板已经足够使用，不需要复杂的 LLM 生成
         print(f"[ScriptGenerator] ⚠ 无法生成脚本（缺少 xpath 信息）")
         return ""
-    
+
     def _extract_nav_xpaths(self, nav_steps: list[dict[str, Any]]) -> list[dict]:
         """
         从导航步骤中提取 xpath 列表（可直接复用到脚本）
-        
+
         Returns:
             [{"xpath": "...", "text": "...", "action": "click"}, ...]
         """
@@ -127,35 +127,37 @@ class ScriptGenerator:
         for step in nav_steps:
             if not step.get("success"):
                 continue
-            
+
             action_type = step.get("action", "").lower()
             if action_type not in ["click"]:
                 continue
-            
+
             xpath_candidates = step.get("clicked_element_xpath_candidates", [])
             if not xpath_candidates:
                 continue
-            
+
             # 按 priority 排序，取最优的
             sorted_candidates = sorted(xpath_candidates, key=lambda x: x.get("priority", 99))
             best_xpath = sorted_candidates[0].get("xpath") if sorted_candidates else None
-            
+
             if best_xpath:
-                nav_xpaths.append({
-                    "xpath": best_xpath,
-                    "text": step.get("clicked_element_text") or step.get("target_text", ""),
-                    "action": action_type,
-                })
-        
+                nav_xpaths.append(
+                    {
+                        "xpath": best_xpath,
+                        "text": step.get("clicked_element_text") or step.get("target_text", ""),
+                        "action": action_type,
+                    }
+                )
+
         return nav_xpaths
-    
+
     def _extract_detail_xpath(self, detail_visits: list[dict[str, Any]]) -> str | None:
         """
         从探索记录中提取详情链接的公共 xpath
         """
         if len(detail_visits) < 2:
             return None
-        
+
         # 收集所有 xpath 候选
         all_xpaths: list[str] = []
         for visit in detail_visits:
@@ -164,23 +166,23 @@ class ScriptGenerator:
             sorted_candidates = sorted(xpath_candidates, key=lambda x: x.get("priority", 99))
             if sorted_candidates:
                 all_xpaths.append(sorted_candidates[0].get("xpath", ""))
-        
+
         if not all_xpaths:
             return None
-        
+
         # 移除索引，找公共模式
         normalized_xpaths = []
         for xpath in all_xpaths:
             # 移除位置谓词 [1], [2], etc.
-            normalized = re.sub(r'\[\d+\]', '', xpath)
+            normalized = re.sub(r"\[\d+\]", "", xpath)
             normalized_xpaths.append(normalized)
-        
+
         unique_patterns = set(normalized_xpaths)
         if len(unique_patterns) == 1:
             return list(unique_patterns)[0]
-        
+
         return None
-    
+
     def _generate_script_from_xpaths(
         self,
         list_url: str,
@@ -191,7 +193,7 @@ class ScriptGenerator:
     ) -> str:
         """
         生成纯 Playwright 详情页爬虫脚本
-        
+
         核心优化：URL 收集已在 url_collector 阶段完成，
         此脚本只负责读取 urls.txt 并爬取详情页内容！
         """
@@ -367,45 +369,53 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 '''
-        
+
         return script
-    
+
     def _prepare_visits_summary(self, detail_visits: list[dict[str, Any]]) -> list[dict]:
         """准备探索记录摘要"""
         visits_summary = []
         for i, visit in enumerate(detail_visits, 1):
-            visits_summary.append({
-                "序号": i,
-                "详情页URL": visit.get("detail_page_url", ""),
-                "点击元素标签": visit.get("clicked_element_tag", ""),
-                "点击元素文本": visit.get("clicked_element_text", "")[:50],
-                "点击元素href": visit.get("clicked_element_href"),
-                "点击元素role": visit.get("clicked_element_role"),
-                "XPath候选": [
-                    {"xpath": c.get("xpath"), "priority": c.get("priority"), "strategy": c.get("strategy")}
-                    for c in visit.get("clicked_element_xpath_candidates", [])[:3]
-                ]
-            })
+            visits_summary.append(
+                {
+                    "序号": i,
+                    "详情页URL": visit.get("detail_page_url", ""),
+                    "点击元素标签": visit.get("clicked_element_tag", ""),
+                    "点击元素文本": visit.get("clicked_element_text", "")[:50],
+                    "点击元素href": visit.get("clicked_element_href"),
+                    "点击元素role": visit.get("clicked_element_role"),
+                    "XPath候选": [
+                        {
+                            "xpath": c.get("xpath"),
+                            "priority": c.get("priority"),
+                            "strategy": c.get("strategy"),
+                        }
+                        for c in visit.get("clicked_element_xpath_candidates", [])[:3]
+                    ],
+                }
+            )
         return visits_summary
-    
+
     def _prepare_nav_summary(self, nav_steps: list[dict[str, Any]]) -> list[dict]:
         """准备导航步骤摘要"""
         nav_summary = []
         for step in nav_steps:
             if step.get("success"):
-                nav_summary.append({
-                    "步骤": step.get("step"),
-                    "动作": step.get("action"),
-                    "目标文本": step.get("target_text", ""),
-                    "思考": step.get("thinking", "")[:100]
-                })
+                nav_summary.append(
+                    {
+                        "步骤": step.get("step"),
+                        "动作": step.get("action"),
+                        "目标文本": step.get("target_text", ""),
+                        "思考": step.get("thinking", "")[:100],
+                    }
+                )
         return nav_summary
-    
+
     def _analyze_url_patterns(self, urls: list[str]) -> dict:
         """分析 URL 列表，找出共同模式"""
         if not urls:
             return {"error": "没有 URL 可分析"}
-        
+
         analysis = {
             "total_urls": len(urls),
             "base_urls": [],
@@ -414,14 +424,14 @@ if __name__ == "__main__":
             "common_parts": {},
             "variable_parts": [],
         }
-        
+
         parsed_urls = [urlparse(url) for url in urls]
-        
+
         # 分析域名
         schemes = set(p.scheme for p in parsed_urls)
         netlocs = set(p.netloc for p in parsed_urls)
         analysis["base_urls"] = [f"{s}://{n}" for s in schemes for n in netlocs]
-        
+
         # 分析路径
         paths = [p.path for p in parsed_urls]
         if paths:
@@ -431,9 +441,9 @@ if __name__ == "__main__":
                 while not path.startswith(common_prefix) and common_prefix:
                     common_prefix = common_prefix[:-1]
             analysis["common_parts"]["path_prefix"] = common_prefix
-            
+
             # 分析路径结构
-            path_segments = [p.split('/') for p in paths]
+            path_segments = [p.split("/") for p in paths]
             if path_segments:
                 max_len = max(len(s) for s in path_segments)
                 for i in range(max_len):
@@ -444,12 +454,14 @@ if __name__ == "__main__":
                         pass
                     elif len(unique_segments) > 1:
                         # 变量部分
-                        analysis["variable_parts"].append({
-                            "position": i,
-                            "samples": list(unique_segments)[:5],
-                            "is_numeric": all(s.isdigit() for s in unique_segments if s),
-                        })
-        
+                        analysis["variable_parts"].append(
+                            {
+                                "position": i,
+                                "samples": list(unique_segments)[:5],
+                                "is_numeric": all(s.isdigit() for s in unique_segments if s),
+                            }
+                        )
+
         # 分析查询参数
         for parsed in parsed_urls:
             params = parse_qs(parsed.query)
@@ -457,14 +469,14 @@ if __name__ == "__main__":
                 if key not in analysis["query_params"]:
                     analysis["query_params"][key] = {"samples": [], "is_constant": True}
                 analysis["query_params"][key]["samples"].extend(values)
-        
+
         # 检查哪些参数是常量，哪些是变量
         for key, info in analysis["query_params"].items():
             unique_values = set(info["samples"])
             info["unique_count"] = len(unique_values)
             info["is_constant"] = len(unique_values) == 1
             info["samples"] = list(unique_values)[:5]
-        
+
         # 分析 hash/fragment
         fragments = [p.fragment for p in parsed_urls if p.fragment]
         if fragments:
@@ -472,18 +484,16 @@ if __name__ == "__main__":
                 "count": len(fragments),
                 "samples": list(set(fragments))[:5],
             }
-        
+
         return analysis
-    
-    
+
     def _build_system_prompt(self) -> str:
         """构建系统提示词（从模板文件加载）"""
         return render_template(
             PROMPT_TEMPLATE_PATH,
             section="system_prompt",
         )
-    
-    
+
     def _build_user_message(
         self,
         list_url: str,
@@ -505,10 +515,12 @@ if __name__ == "__main__":
                 "visits_summary": json.dumps(visits_summary, ensure_ascii=False, indent=2),
                 "urls_count": len(url_samples),
                 "url_samples": json.dumps(url_samples, ensure_ascii=False, indent=2),
-                "url_pattern_analysis": json.dumps(url_pattern_analysis, ensure_ascii=False, indent=2),
-            }
+                "url_pattern_analysis": json.dumps(
+                    url_pattern_analysis, ensure_ascii=False, indent=2
+                ),
+            },
         )
-    
+
     def _validate_script(self, script: str) -> None:
         """验证生成的脚本结构"""
         if "scrapy_playwright" in script and "scrapy.Spider" in script:

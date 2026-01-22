@@ -10,9 +10,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +21,6 @@ from .models import (
     FieldDefinition,
     BatchExtractionResult,
     PageExtractionRecord,
-    CommonFieldXPath,
 )
 from .field_extractor import FieldExtractor
 from .xpath_pattern import FieldXPathExtractor, validate_xpath_pattern
@@ -34,11 +31,11 @@ if TYPE_CHECKING:
 
 class BatchFieldExtractor:
     """批量字段提取器
-    
+
     从 Redis 读取 URL，进行探索、分析、校验，
     最终生成可用于批量爬取的提取配置。
     """
-    
+
     def __init__(
         self,
         page: "Page",
@@ -50,7 +47,7 @@ class BatchFieldExtractor:
     ):
         """
         初始化批量字段提取器
-        
+
         Args:
             page: Playwright 页面对象
             fields: 要提取的字段定义列表
@@ -65,10 +62,10 @@ class BatchFieldExtractor:
         self.explore_count = explore_count
         self.validate_count = validate_count
         self.output_dir = Path(output_dir)
-        
+
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 初始化组件
         self.field_extractor = FieldExtractor(
             page=page,
@@ -76,121 +73,121 @@ class BatchFieldExtractor:
             output_dir=output_dir,
         )
         self.xpath_extractor = FieldXPathExtractor()
-        
+
         # 任务映射：URL -> (stream_id, data_id)
         self.task_mapping: dict[str, tuple[str, str]] = {}
-    
+
     async def run(self, urls: list[str] | None = None) -> BatchExtractionResult:
         """
         运行批量提取流程
-        
+
         Args:
             urls: URL 列表（如果提供，则不从 Redis 读取）
-            
+
         Returns:
             批量提取结果
         """
         print(f"\n{'='*60}")
-        print(f"[BatchFieldExtractor] 开始批量字段提取")
+        print("[BatchFieldExtractor] 开始批量字段提取")
         print(f"[BatchFieldExtractor] 目标字段: {[f.name for f in self.fields]}")
         print(f"[BatchFieldExtractor] 探索数量: {self.explore_count}")
         print(f"[BatchFieldExtractor] 校验数量: {self.validate_count}")
         print(f"{'='*60}\n")
-        
+
         result = BatchExtractionResult(fields=self.fields)
-        
+
         # 获取 URL 列表
         if urls is None:
             urls = await self._get_urls_from_redis()
-        
+
         if not urls:
-            print(f"[BatchFieldExtractor] ✗ 未获取到 URL")
+            print("[BatchFieldExtractor] ✗ 未获取到 URL")
             return result
-        
+
         total_needed = self.explore_count + self.validate_count
         if len(urls) < total_needed:
             print(f"[BatchFieldExtractor] ⚠ URL 数量不足: {len(urls)} < {total_needed}")
             # 仍然继续，使用所有可用的 URL
-        
+
         # 分配 URL
-        explore_urls = urls[:self.explore_count]
-        validate_urls = urls[self.explore_count:self.explore_count + self.validate_count]
-        
+        explore_urls = urls[: self.explore_count]
+        validate_urls = urls[self.explore_count : self.explore_count + self.validate_count]
+
         # 阶段 1：探索
         print(f"\n{'='*60}")
         print(f"[BatchFieldExtractor] 阶段 1：探索 ({len(explore_urls)} 个 URL)")
         print(f"{'='*60}\n")
-        
+
         for i, url in enumerate(explore_urls):
             print(f"\n[BatchFieldExtractor] 探索 {i + 1}/{len(explore_urls)}: {url[:80]}...")
             record = await self.field_extractor.extract_from_url(url)
             result.exploration_records.append(record)
             result.total_urls_explored += 1
-            
+
             # 打印提取结果摘要
             self._print_record_summary(record)
-        
+
         # 阶段 2：分析公共 XPath 模式
         print(f"\n{'='*60}")
-        print(f"[BatchFieldExtractor] 阶段 2：分析公共 XPath 模式")
+        print("[BatchFieldExtractor] 阶段 2：分析公共 XPath 模式")
         print(f"{'='*60}\n")
-        
+
         field_names = [f.name for f in self.fields]
         result.common_xpaths = self.xpath_extractor.extract_all_common_patterns(
             records=result.exploration_records,
             field_names=field_names,
         )
-        
+
         # 打印公共 XPath
         for xpath_info in result.common_xpaths:
-            print(f"[BatchFieldExtractor] ✓ 字段 '{xpath_info.field_name}': {xpath_info.xpath_pattern}")
+            print(
+                f"[BatchFieldExtractor] ✓ 字段 '{xpath_info.field_name}': {xpath_info.xpath_pattern}"
+            )
             print(f"    置信度: {xpath_info.confidence:.2%}")
-        
+
         if not result.common_xpaths:
-            print(f"[BatchFieldExtractor] ⚠ 未提取到公共 XPath 模式")
+            print("[BatchFieldExtractor] ⚠ 未提取到公共 XPath 模式")
             return result
-        
+
         # 阶段 3：校验
         print(f"\n{'='*60}")
         print(f"[BatchFieldExtractor] 阶段 3：校验公共 XPath ({len(validate_urls)} 个 URL)")
         print(f"{'='*60}\n")
-        
+
         if validate_urls:
             await self._validate_common_xpaths(result, validate_urls)
         else:
-            print(f"[BatchFieldExtractor] ⚠ 无可用的校验 URL，跳过校验阶段")
-        
+            print("[BatchFieldExtractor] ⚠ 无可用的校验 URL，跳过校验阶段")
+
         # 保存结果
         await self._save_results(result)
-        
+
         return result
-    
+
     async def _get_urls_from_redis(self) -> list[str]:
         """从 Redis 队列获取待处理的 URL"""
         if not self.redis_manager:
-            print(f"[BatchFieldExtractor] ⚠ 未配置 Redis 管理器")
+            print("[BatchFieldExtractor] ⚠ 未配置 Redis 管理器")
             return []
-        
+
         try:
             import socket
             import os
-            
+
             await self.redis_manager.connect()
-            
+
             # 使用队列模式获取任务
             consumer_name = f"extractor-{socket.gethostname()}-{os.getpid()}"
             total_needed = self.explore_count + self.validate_count
-            
+
             tasks = await self.redis_manager.fetch_task(
-                consumer_name=consumer_name,
-                block_ms=0,  # 非阻塞
-                count=total_needed
+                consumer_name=consumer_name, block_ms=0, count=total_needed  # 非阻塞
             )
-            
+
             if not tasks:
-                print(f"[BatchFieldExtractor] ⚠ 队列中无待处理任务")
+                print("[BatchFieldExtractor] ⚠ 队列中无待处理任务")
                 return []
-            
+
             urls = []
             for stream_id, data_id, data in tasks:
                 url = data.get("url")
@@ -198,14 +195,14 @@ class BatchFieldExtractor:
                     urls.append(url)
                     # 记录任务映射，用于后续 ACK
                     self.task_mapping[url] = (stream_id, data_id)
-            
+
             print(f"[BatchFieldExtractor] 从 Redis 队列获取了 {len(urls)} 个任务")
             return urls
-            
+
         except Exception as e:
             print(f"[BatchFieldExtractor] Redis 读取失败: {e}")
             return []
-    
+
     async def _validate_common_xpaths(
         self,
         result: BatchExtractionResult,
@@ -213,13 +210,13 @@ class BatchFieldExtractor:
     ) -> None:
         """校验公共 XPath 模式"""
         validation_success_count = 0
-        
+
         for i, url in enumerate(validate_urls):
             print(f"\n[BatchFieldExtractor] 校验 {i + 1}/{len(validate_urls)}: {url[:80]}...")
-            
+
             record = PageExtractionRecord(url=url)
             all_fields_ok = True
-            
+
             # 对每个公共 XPath 进行验证
             for xpath_info in result.common_xpaths:
                 success, value = await validate_xpath_pattern(
@@ -227,41 +224,43 @@ class BatchFieldExtractor:
                     url=url,
                     xpath_pattern=xpath_info.xpath_pattern,
                 )
-                
+
                 if success:
-                    print(f"    ✓ 字段 '{xpath_info.field_name}': {value[:50] if value else 'N/A'}...")
+                    print(
+                        f"    ✓ 字段 '{xpath_info.field_name}': {value[:50] if value else 'N/A'}..."
+                    )
                 else:
                     print(f"    ✗ 字段 '{xpath_info.field_name}': 验证失败")
                     all_fields_ok = False
-            
+
             record.success = all_fields_ok
             result.validation_records.append(record)
             result.total_urls_validated += 1
-            
+
             if all_fields_ok:
                 validation_success_count += 1
-        
+
         # 判断校验是否整体成功
         if validate_urls:
             success_rate = validation_success_count / len(validate_urls)
             result.validation_success = success_rate >= 0.8
             print(f"\n[BatchFieldExtractor] 校验成功率: {success_rate:.0%}")
-            
+
             # 标记已验证的 XPath
             for xpath_info in result.common_xpaths:
                 xpath_info.validated = result.validation_success
-    
+
     async def _save_results(self, result: BatchExtractionResult) -> None:
         """保存提取结果"""
         # 保存提取配置
         config_path = self.output_dir / "extraction_config.json"
         extraction_config = result.to_extraction_config()
-        
+
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(extraction_config, f, ensure_ascii=False, indent=2)
-        
+
         print(f"\n[BatchFieldExtractor] 提取配置已保存: {config_path}")
-        
+
         # 保存详细结果
         detail_path = self.output_dir / "extraction_result.json"
         detail_data = {
@@ -305,23 +304,23 @@ class BatchFieldExtractor:
             "total_urls_validated": result.total_urls_validated,
             "created_at": result.created_at,
         }
-        
+
         with open(detail_path, "w", encoding="utf-8") as f:
             json.dump(detail_data, f, ensure_ascii=False, indent=2)
-        
+
         print(f"[BatchFieldExtractor] 详细结果已保存: {detail_path}")
-        
+
         # ACK 处理成功的任务
         if self.redis_manager and self.task_mapping:
-            print(f"\n[BatchFieldExtractor] 处理任务 ACK...")
+            print("\n[BatchFieldExtractor] 处理任务 ACK...")
             acked_count = 0
             failed_count = 0
-            
+
             # 处理探索阶段的记录
             for record in result.exploration_records:
                 if record.url in self.task_mapping:
                     stream_id, data_id = self.task_mapping[record.url]
-                    
+
                     if record.success:
                         # 成功：发送 ACK
                         await self.redis_manager.ack_task(stream_id)
@@ -329,18 +328,15 @@ class BatchFieldExtractor:
                     else:
                         # 失败：标记失败（带重试机制）
                         await self.redis_manager.fail_task(
-                            stream_id,
-                            data_id,
-                            "字段提取失败",
-                            max_retries=config.redis.max_retries
+                            stream_id, data_id, "字段提取失败", max_retries=config.redis.max_retries
                         )
                         failed_count += 1
-            
+
             # 处理校验阶段的记录
             for record in result.validation_records:
                 if record.url in self.task_mapping:
                     stream_id, data_id = self.task_mapping[record.url]
-                    
+
                     if record.success:
                         await self.redis_manager.ack_task(stream_id)
                         acked_count += 1
@@ -349,18 +345,18 @@ class BatchFieldExtractor:
                             stream_id,
                             data_id,
                             "XPath 校验失败",
-                            max_retries=config.redis.max_retries
+                            max_retries=config.redis.max_retries,
                         )
                         failed_count += 1
-            
+
             print(f"  ✓ ACK: {acked_count} 个任务")
             print(f"  ✗ FAIL: {failed_count} 个任务")
-    
+
     def _print_record_summary(self, record: PageExtractionRecord) -> None:
         """打印单页提取结果摘要"""
         status = "✓ 成功" if record.success else "✗ 部分失败"
         print(f"[BatchFieldExtractor] {status} - {record.url[:60]}...")
-        
+
         for field_result in record.fields:
             if field_result.value:
                 print(f"    • {field_result.field_name}: {field_result.value[:40]}...")
@@ -378,7 +374,7 @@ async def extract_fields_from_urls(
 ) -> BatchExtractionResult:
     """
     便捷函数：从 URL 列表提取字段
-    
+
     Args:
         page: Playwright 页面对象
         urls: URL 列表
@@ -386,7 +382,7 @@ async def extract_fields_from_urls(
         explore_count: 探索数量
         validate_count: 校验数量
         output_dir: 输出目录
-        
+
     Returns:
         批量提取结果
     """
@@ -397,5 +393,5 @@ async def extract_fields_from_urls(
         validate_count=validate_count,
         output_dir=output_dir,
     )
-    
+
     return await extractor.run(urls=urls)

@@ -12,7 +12,6 @@ from .click_utils import click_and_capture_new_page
 
 if TYPE_CHECKING:
     from browser_manager.guarded_page import GuardedPage
-    from ..types import SoMSnapshot
 
 
 class ActionExecutor:
@@ -22,10 +21,10 @@ class ActionExecutor:
     同时负责将执行过程沉淀为 ScriptStep，用于后续生成自动化脚本。
     """
 
-    def __init__(self, page: 'GuardedPage'):
+    def __init__(self, page: "GuardedPage"):
         """
         初始化动作执行器。
-        
+
         Args:
             page: GuardedPage 对象，已包装的页面代理。
         """
@@ -39,14 +38,14 @@ class ActionExecutor:
     ) -> tuple[ActionResult, ScriptStep | None]:
         """
         根据动作类型分发并执行具体的浏览器操作。
-        
+
         Args:
             action: 要执行的动作定义。
             mark_id_to_xpath: 元素 mark_id 到 XPath 候选列表的映射表。
             step_index: 当前动作在任务流中的序号。
-            
+
         Returns:
-            tuple[ActionResult, ScriptStep | None]: 
+            tuple[ActionResult, ScriptStep | None]:
                 - ActionResult: 包含执行是否成功、错误信息、新页面 URL、提取的文本等。
                 - ScriptStep: 沉淀后的脚本步骤，如果动作为 DONE/RETRY/GO_BACK 等则可能为 None。
         """
@@ -83,10 +82,10 @@ class ActionExecutor:
     async def _find_element_by_xpath_list(self, xpaths: list[str]):
         """
         实现 Priority Fallback 策略：按优先级尝试多个 XPath，返回第一个匹配且可见的元素。
-        
+
         Args:
             xpaths: XPath 字符串列表，按优先级排序。
-            
+
         Returns:
             tuple[Locator | None, str | None]: 匹配到的 Playwright Locator 和对应的 XPath。
         """
@@ -102,8 +101,7 @@ class ActionExecutor:
                 continue
         return None, None
 
-
-    def _is_page_closed(self, page: 'GuardedPage') -> bool:
+    def _is_page_closed(self, page: "GuardedPage") -> bool:
         """
         判断 GuardedPage 是否已关闭。
         """
@@ -127,17 +125,23 @@ class ActionExecutor:
 
         xpaths = mark_id_to_xpath.get(action.mark_id, [])
         if not xpaths:
-            return ActionResult(success=False, error=f"未找到 mark_id {action.mark_id} 对应的 XPath"), None
+            return (
+                ActionResult(success=False, error=f"未找到 mark_id {action.mark_id} 对应的 XPath"),
+                None,
+            )
 
         # 1. 尝试使用提供的 XPath 候选列表定位元素
         locator, used_xpath = await self._find_element_by_xpath_list(xpaths)
-        
+
         if not locator:
             # 2. 如果候选列表失效，回退使用 data-som-id 属性定位
             locator = self.page.locator(f'[data-som-id="{action.mark_id}"]')
             used_xpath = f'//*[@data-som-id="{action.mark_id}"]'
             if await locator.count() == 0:
-                return ActionResult(success=False, error=f"无法定位元素 (mark_id: {action.mark_id})"), None
+                return (
+                    ActionResult(success=False, error=f"无法定位元素 (mark_id: {action.mark_id})"),
+                    None,
+                )
 
         # 3. 执行点击并尝试捕获可能产生的新标签页
         new_page = await click_and_capture_new_page(
@@ -148,7 +152,7 @@ class ActionExecutor:
             load_state="domcontentloaded",
             load_timeout_ms=10000,
         )
-        
+
         if new_page is not None:
             print(f"[Click] 检测到新标签页: {new_page.url}")
             # 立即切换当前执行器的页面引用，确保后续动作在正确的页面上执行
@@ -212,7 +216,7 @@ class ActionExecutor:
                     await self.page.keyboard.press(pressed_key)
                 except Exception:
                     pass
-        
+
         # 3. 生成脚本步骤
         value = action.text
         script_step = ScriptStep(
@@ -313,7 +317,7 @@ class ActionExecutor:
         显式等待动作。
         """
         timeout_ms = action.timeout_ms or 2000
-        
+
         try:
             # 默认等待网络空闲
             await self.page.wait_for_load_state("networkidle", timeout=timeout_ms)
@@ -349,7 +353,7 @@ class ActionExecutor:
             locator, used_xpath = await self._find_element_by_xpath_list(xpaths)
             if locator:
                 element_text = await locator.inner_text()
-                
+
                 # 1. 智能提取逻辑：
                 # 如果 LLM 指定提取的是表头（th），用户通常其实想要的是该表头对应的值（td）
                 tag_name = await locator.evaluate("el => el.tagName.toLowerCase()")
@@ -386,7 +390,7 @@ class ActionExecutor:
             step=step_index,
             action=ScriptStepType.EXTRACT,
             target_xpath=used_xpath,
-            description=action.thinking or f"提取文本内容",
+            description=action.thinking or "提取文本内容",
         )
 
         return ActionResult(success=True, extracted_text=extracted_text), script_step
@@ -402,7 +406,7 @@ class ActionExecutor:
         try:
             await self.page.go_back(wait_until="domcontentloaded", timeout=action.timeout_ms)
             await asyncio.sleep(0.5)
-            
+
             # 通常返回操作不需要沉淀为固定的脚本步骤
             return ActionResult(success=True, new_url=self.page.url), None
         except Exception as e:
@@ -453,7 +457,7 @@ class ActionExecutor:
             # 2. 关闭当前页
             try:
                 # 对于 GuardedPage，比较时需要解包
-                target_raw = target_page.unwrap() if hasattr(target_page, 'unwrap') else target_page
+                target_raw = target_page.unwrap() if hasattr(target_page, "unwrap") else target_page
                 if raw_current is not target_raw and not self._is_page_closed(current_page):
                     await current_page.close()
             except Exception:
@@ -465,4 +469,3 @@ class ActionExecutor:
             return ActionResult(success=True, new_url=self.page.url), None
         except Exception as e:
             return ActionResult(success=False, error=f"切回标签页失败: {str(e)}"), None
-
