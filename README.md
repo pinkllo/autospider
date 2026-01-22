@@ -1,5 +1,7 @@
 # AutoSpider - 纯视觉 SoM 浏览器 Agent
 
+[简体中文](./README.md) | [English](./README_en.md)
+
 基于 LangGraph + Playwright + 多模态 LLM 的纯视觉浏览器自动化 Agent。通过模拟人类视觉识别和操作习惯，AutoSpider 能够像真人一样理解网页、进行筛选引导，并最终自动生成稳健的爬虫脚本。
 
 ## 🚀 核心特性
@@ -9,16 +11,22 @@
 - **多维度可见性校验**：结合视口检测、Z-index 遮挡分析及多点采样验证，确保只标注真人可见的元素
 - **稳健 XPath 候选**：内置启发式算法，按优先级生成最稳定的定位器（ID > TestID > Aria-Label > Text > Relative Path）
 
-### 全自动详情页 URL 批量收集
+### 智能字段提取与模式沉淀
+- **多维度字段提取**：支持基于 LLM 视觉识别、XPath 匹配及模糊搜索等多种策略提取页面字段
+- **公共 XPath 沉淀**：通过对多个详情页的探索与分析，自动提取最稳健的公共 XPath 模式
+- **自动验证机制**：内置验证流程，确保生成的 XPath 模式在不同页面上的通用性和准确性
+
+### 全自动 URL 批量收集
+- **两阶段工作流**：支持“探索生成配置 -> 批量执行收集”的解耦流程，更适合大规模、长周期的采集任务
 - **智能导航引导**：LLM 根据自然语言指令，自动在列表页进行复杂的点击筛选（如选择行业、结果状态等）
-- **多策略分页识别**：支持 LLM 视觉识别 + 增强规则兜底双策略，智能处理各类分页控件（数字页码、跳转组件、下一页按钮等）
+- **多策略分页识别**：支持 LLM 视觉识别 + 增强规则兜底双策略，智能处理各类分页控件
 - **断点续传机制**：内置 Redis 持久化存储，支持中断后从断点继续采集，告别前功尽弃
 - **自适应速率控制**：根据响应状态动态调整采集频率，平衡效率与稳定性
 
 ### 智能爬虫脚本生成
-- **一键生成 Spider**：基于收集阶段沉淀的 XPaths 和 URL 列表，自动生成可独立运行的 Playwright 爬虫脚本
-- **零模版依赖**：生成的脚本直接对接 `urls.txt`，极大提高大规模爬取的可靠性和成功率
-- **模式沉淀与复用**：从探索阶段自动学习并固化页面交互模式，支持批量采集时高效复用
+- **一键生成 Scrapy Spider**：基于收集阶段沉淀的 XPaths 和导航模式，自动生成基于 `Scrapy` + `scrapy-playwright` 的专业级爬虫脚本
+- **高并发采集架构**：生成的脚本利用 Scrapy 的异步引擎，极大提高大规模爬取的并发能力和效率
+- **模式复用与自愈**：脚本内置了从探索阶段自动学习的页面交互模式，具备基础的容错和自愈能力
 
 ### 反反爬与容错机制
 - **随机动作延迟**：模拟人类操作间隔，支持基础延迟 + 随机抖动配置
@@ -59,9 +67,9 @@ cp .env.example .env
 ```
 
 **关键配置项：**
-- `AIPING_API_KEY`: 多模态 LLM 的 API Key
-- `AIPING_API_BASE`: API 基础路径（默认为 SiliconFlow）
-- `AIPING_MODEL`: 使用的多模态模型（推荐 `zai-org/GLM-4.6V` 或其他支持视觉的模型）
+- `API_KEY`: 多模态 LLM 的 API Key
+- `API_BASE`: API 基础路径（默认为 SiliconFlow）
+- `MODEL`: 使用的多模态模型（推荐 `Qwen3-VL-235B-A22B-Instruct`）
 
 ### 2. 爬取行为配置
 
@@ -87,20 +95,34 @@ REDIS_DB=0
 
 ## 📖 使用指南
 
-### 1. 交互式任务运行 (`run`)
+### 1. 详情页 URL 批量收集 (分阶段推荐) ⭐
 
-执行特定的一步或多步任务。
+这是本项目的核心功能，推荐使用“先探索生成配置，再批量收集”的两阶段流程。
+
+#### 第一阶段：探索并生成配置 (`generate-config`)
+
+系统会打开浏览器，根据任务描述自动点击、探索详情页，并分析提取公共模式（XPath、分页、导航等），保存为配置文件。
 
 ```bash
-autospider run \
-  --start-url "https://example.com" \
-  --task "点击登录按钮，输入 xxx，并检查登录状态" \
-  --target-text "欢迎登录"
+autospider generate-config \
+  --list-url "https://example.com/list" \
+  --task "收集所有关于交通建设的招标公告详情页" \
+  --explore-count 3
 ```
 
-### 2. 详情页 URL 批量收集 (`collect-urls`) ⭐
+#### 第二阶段：基于配置批量执行 (`batch-collect`)
 
-这是本项目的旗舰功能，分为四个阶段：**筛选导航 → 详情探索 → 模式提取 → 批量翻页收集**。
+使用上一步生成的配置文件执行高效采集，支持断点续传。
+
+```bash
+autospider batch-collect \
+  --config-path output/collection_config.json \
+  --headless
+```
+
+### 2. 一键式 URL 收集 (`collect-urls`)
+
+如果你希望快速开始，也可以使用一键式命令（内部自动完成探索与收集全过程）：
 
 ```bash
 autospider collect-urls \
@@ -109,7 +131,7 @@ autospider collect-urls \
   --explore-count 3
 ```
 
-#### 工作流说明：
+#### 功能特性说明：
 
 1. **引导阶段**：LLM 观察页面，自动点击筛选条件（如"进行中"、"交通运输"）
 2. **探索阶段**：LLM 尝试点击并进入 N 个详情页，记录点击路径和页面模式
@@ -119,7 +141,7 @@ autospider collect-urls \
    - 自动处理弹窗、遮罩等干扰元素
    - 支持中断后从断点继续（依赖 Redis）
    - 将所有 URL 保存到 `output/urls.txt`
-5. **生成阶段**：自动生成 `output/spider.py`，用于后续内容的深度采集
+5. **脚本生成**：自动生成 `output/spider.py`（Scrapy + Playwright 架构），用于后续内容的深度采集
 
 #### 断点续传示例：
 
@@ -150,22 +172,19 @@ autospider/
 │   │   ├── browser/           # 浏览器操作（动作执行、会话管理）
 │   │   ├── som/               # Set-of-Mark 标注系统
 │   │   ├── storage/           # 持久化存储（Redis 管理器）
-│   │   ├── config.py          # 配置管理（Pydantic 模型）
-│   │   └── types.py           # 类型定义
-│   ├── crawler/               # 爬虫核心模块
-│   │   ├── checkpoint/        # 断点恢复与速率控制
-│   │   ├── batch_collector.py # 批量收集器
-│   │   └── url_collector.py   # URL 收集器
-│   ├── extractor/             # 提取与决策模块
-│   │   ├── collector/         # 采集逻辑（分页、导航、URL 提取）
-│   │   ├── graph/             # LangGraph 工作流
 │   │   ├── llm/               # LLM 接口与 Prompt 模板
-│   │   └── validator/         # 标注验证器
+│   │   └── config.py          # 配置管理
+│   ├── crawler/               # 采集核心模块
+│   │   ├── explore/           # 探索与配置生成（config_generator）
+│   │   ├── batch/             # 批量执行引擎（batch_collector）
+│   │   ├── collector/         # 采集工具类（分页、导航、XPath 提取）
+│   │   └── checkpoint/        # 断点恢复与速率控制
+│   ├── field/                 # 字段提取模块（详情页字段自动识别）
 │   ├── cli.py                 # 命令行入口
 │   └── __main__.py            # 模块入口
-├── prompts/                   # Prompt 模板配置
+├── prompts/                   # 独立 Prompt 模板文件
 ├── tests/                     # 测试用例
-└── docs/                      # 详细文档
+└── output/                    # 默认输出目录
 ```
 
 ## 🧩 核心模块说明
@@ -192,6 +211,7 @@ autospider/
 
 - Python 3.10+
 - Redis Server（用于断点续传，可选）
+- Scrapy & scrapy-playwright（用于运行生成的爬虫脚本）
 - 支持视觉的多模态 LLM API（如 SiliconFlow GLM-4.6V）
 
 ## � 许可证

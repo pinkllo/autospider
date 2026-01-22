@@ -41,7 +41,8 @@ htmlcov/
 # Logs and outputs
 logs/
 *.log
-output/
+/output/
+/src/output/
 screenshots/
 scripts/
 
