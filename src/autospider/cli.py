@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from .common.browser import create_browser_session
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
+from .field import FieldDefinition
+from .pipeline import run_pipeline
 
 # 日志器
 logger = get_logger(__name__)
@@ -81,6 +84,53 @@ def run_async_safely(coro):
     if result_holder["error"] is not None:
         raise result_holder["error"]  # type: ignore[misc]
     return result_holder["result"]
+
+
+def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
+    payload = ""
+
+    if fields_file:
+        path = Path(fields_file)
+        if not path.exists():
+            raise ValueError(f"字段定义文件不存在: {fields_file}")
+        payload = path.read_text(encoding="utf-8")
+    elif fields_json:
+        payload = fields_json
+    else:
+        raise ValueError("请提供 --fields-json 或 --fields-file")
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"字段定义 JSON 解析失败: {exc}") from exc
+
+    if not isinstance(data, list):
+        raise ValueError("字段定义必须是 JSON 数组")
+
+    fields: list[FieldDefinition] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError("字段定义必须是对象数组")
+
+        name = item.get("name")
+        description = item.get("description")
+        if not name or not description:
+            raise ValueError("字段定义必须包含 name 与 description")
+
+        fields.append(
+            FieldDefinition(
+                name=name,
+                description=description,
+                required=bool(item.get("required", True)),
+                data_type=item.get("data_type", "text"),
+                example=item.get("example"),
+            )
+        )
+
+    if not fields:
+        raise ValueError("字段定义不能为空")
+
+    return fields
 
 
 @app.command("generate-config")
@@ -261,6 +311,125 @@ def batch_collect_command(
             if len(result.collected_urls) > 10:
                 console.print(f"  ... 还有 {len(result.collected_urls) - 10} 个")
 
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断[/yellow]")
+        raise typer.Exit(130)
+    except Exception as e:
+        console.print(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="执行错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+
+@app.command("pipeline-run")
+def pipeline_run_command(
+    list_url: str = typer.Option(
+        ...,
+        "--list-url",
+        "-u",
+        help="列表页 URL",
+    ),
+    task: str = typer.Option(
+        ...,
+        "--task",
+        "-t",
+        help="任务描述（自然语言）",
+    ),
+    fields_json: str = typer.Option(
+        "",
+        "--fields-json",
+        help="字段定义 JSON（数组格式）",
+    ),
+    fields_file: str = typer.Option(
+        "",
+        "--fields-file",
+        help="字段定义 JSON 文件路径",
+    ),
+    field_explore_count: int | None = typer.Option(
+        None,
+        "--field-explore-count",
+        help="字段探索数量（默认取配置）",
+    ),
+    field_validate_count: int | None = typer.Option(
+        None,
+        "--field-validate-count",
+        help="字段校验数量（默认取配置）",
+    ),
+    pipeline_mode: str = typer.Option(
+        "",
+        "--mode",
+        help="通道模式: memory/file/redis",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--no-headless",
+        help="是否使用无头模式",
+    ),
+    output_dir: str = typer.Option(
+        "output",
+        "--output",
+        "-o",
+        help="输出目录",
+    ),
+):
+    """列表采集与详情抽取并行流水线。"""
+    try:
+        list_url = validate_url(list_url)
+        task = validate_task_description(task)
+        fields = _load_fields(fields_json, fields_file)
+    except (URLValidationError, ValidationError, ValueError) as e:
+        console.print(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="输入验证错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
+    console.print(
+        Panel(
+            f"[bold]列表页 URL:[/bold] {list_url}\n"
+            f"[bold]任务描述:[/bold] {task}\n"
+            f"[bold]字段数量:[/bold] {len(fields)}\n"
+            f"[bold]模式:[/bold] {mode_text}\n"
+            f"[bold]无头模式:[/bold] {headless}\n"
+            f"[bold]输出目录:[/bold] {output_dir}",
+            title="流水线配置",
+            style="cyan",
+        )
+    )
+
+    try:
+        result = run_async_safely(
+            run_pipeline(
+                list_url=list_url,
+                task_description=task,
+                fields=fields,
+                output_dir=output_dir,
+                headless=headless,
+                explore_count=field_explore_count,
+                validate_count=field_validate_count,
+                pipeline_mode=pipeline_mode.strip() or None,
+            )
+        )
+
+        console.print(
+            Panel(
+                f"[green]流水线完成[/green]\n\n"
+                f"总处理 URL: {result.get('total_urls', 0)}\n"
+                f"成功数量: {result.get('success_count', 0)}\n"
+                f"明细输出: {result.get('items_file', '')}\n"
+                f"汇总输出: {output_dir}/pipeline_summary.json",
+                title="执行完成",
+                style="green",
+            )
+        )
     except KeyboardInterrupt:
         console.print("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)

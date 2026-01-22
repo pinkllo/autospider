@@ -3,9 +3,11 @@
 __version__ = "0.1.0"
 
 from .crawler.explore.url_collector import URLCollector, collect_detail_urls
+from .pipeline.runner import run_pipeline
 
 __all__ = [
     "__version__",
     "URLCollector",
     "collect_detail_urls",
+    "run_pipeline",
 ]

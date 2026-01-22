@@ -36,6 +36,7 @@ from ...common.som.text_first import resolve_mark_ids_from_map
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ...common.storage.redis_manager import RedisQueueManager
+    from ...common.channel.base import URLChannel
 
 # 日志器
 logger = get_logger(__name__)
@@ -58,6 +59,8 @@ class BaseCollector(ABC):
         list_url: str,
         task_description: str,
         output_dir: str = "output",
+        url_channel: "URLChannel | None" = None,
+        redis_manager: "RedisQueueManager | None" = None,
     ):
         """初始化 BaseCollector 基类
 
@@ -98,15 +101,22 @@ class BaseCollector(ABC):
         self.navigation_handler: NavigationHandler | None = None  # 页面导航/重放逻辑
         self.pagination_handler: PaginationHandler | None = None  # 分页处理逻辑
 
+        # URL 通道（用于内存/文件/Redis pipeline）
+        self.url_channel = url_channel
+
         # 分布式支持：Redis 任务队列管理器
-        self.redis_manager: "RedisQueueManager | None" = None
+        self.redis_manager: "RedisQueueManager | None" = redis_manager
         self._init_redis_manager()
 
     def _init_redis_manager(self) -> None:
         """根据配置文件初始化 Redis 任务队列管理器
-
+        
         如果 config.redis.enabled 为 True，则尝试连接 Redis 并初始化管理器。
         """
+        if self.redis_manager is not None:
+            return
+        if self.url_channel is not None:
+            return
         if not config.redis.enabled:
             return
 
@@ -226,6 +236,20 @@ class BaseCollector(ABC):
         if new_urls:
             self.collected_urls.extend(new_urls)
             logger.info(f"合并后历史 URL 总数: {len(self.collected_urls)}")
+
+    async def _publish_url(self, url: str) -> None:
+        """发布新 URL 到通道或 Redis（如果配置）。"""
+        if self.url_channel:
+            try:
+                await self.url_channel.publish(url)
+            except Exception as e:
+                logger.warning(f"URL 通道发布失败: {e}")
+            return
+        if self.redis_manager:
+            try:
+                await self.redis_manager.push_task(url)
+            except Exception as e:
+                logger.warning(f"Redis 推送失败: {e}")
 
     async def _resume_to_target_page(
         self,
@@ -347,9 +371,7 @@ class BaseCollector(ABC):
                         url = urljoin(self.list_url, href)
                         if url not in self.collected_urls:
                             self.collected_urls.append(url)
-                            # 如果开启了分布式，推送到 Redis
-                            if self.redis_manager:
-                                await self.redis_manager.push_task(url)
+                            await self._publish_url(url)
                             logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
                         continue
                 except Exception as e:
@@ -362,8 +384,7 @@ class BaseCollector(ABC):
                     )
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
-                        if self.redis_manager:
-                            await self.redis_manager.push_task(url)
+                        await self._publish_url(url)
                         logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
 
             return len(self.collected_urls) > urls_before
@@ -504,8 +525,7 @@ class BaseCollector(ABC):
                             )
                             if url and url not in self.collected_urls:
                                 self.collected_urls.append(url)
-                                if self.redis_manager:
-                                    await self.redis_manager.push_task(url)
+                                await self._publish_url(url)
 
                 # 4. 统计更新情况
                 current_count = len(self.collected_urls)

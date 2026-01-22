@@ -26,6 +26,7 @@ from ...common.som.text_first import resolve_mark_ids_from_map, resolve_single_m
 from ..collector import (
     DetailPageVisit,
     URLCollectorResult,
+    CommonPattern,
     XPathExtractor,
     LLMDecisionMaker,
     NavigationHandler,
@@ -36,6 +37,8 @@ from ..base.base_collector import BaseCollector
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ...common.types import SoMSnapshot
+    from ...common.storage.redis_manager import RedisQueueManager
+    from ...common.channel.base import URLChannel
 
 
 class URLCollector(BaseCollector):
@@ -58,6 +61,8 @@ class URLCollector(BaseCollector):
         explore_count: int = 3,
         max_nav_steps: int = 10,
         output_dir: str = "output",
+        url_channel: "URLChannel | None" = None,
+        redis_manager: "RedisQueueManager | None" = None,
     ):
         """初始化 URLCollector
 
@@ -75,6 +80,8 @@ class URLCollector(BaseCollector):
             list_url=list_url,
             task_description=task_description,
             output_dir=output_dir,
+            url_channel=url_channel,
+            redis_manager=redis_manager,
         )
 
         self.explore_count = explore_count
@@ -211,8 +218,6 @@ class URLCollector(BaseCollector):
             if self.common_detail_xpath:
                 print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
                 # 填充 common_pattern 以便 CLI 显示
-                from .collector.models import CommonPattern
-
                 self.common_pattern = CommonPattern(
                     xpath_pattern=self.common_detail_xpath,
                     confidence=0.8,  # 默认置信度，XPathExtractor 内部有更详细的判断

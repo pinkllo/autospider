@@ -184,6 +184,30 @@ class FieldExtractorConfig(BaseModel):
     )
 
 
+class PipelineConfig(BaseModel):
+    """Pipeline config (memory/file/redis)."""
+
+    mode: str = Field(default_factory=lambda: os.getenv("PIPELINE_MODE", "redis"))
+    memory_queue_size: int = Field(
+        default_factory=lambda: int(os.getenv("PIPELINE_MEMORY_QUEUE_SIZE", "1000"))
+    )
+    file_poll_interval: float = Field(
+        default_factory=lambda: float(os.getenv("PIPELINE_FILE_POLL_INTERVAL", "1.0"))
+    )
+    file_cursor_name: str = Field(
+        default_factory=lambda: os.getenv("PIPELINE_FILE_CURSOR_NAME", "urls.cursor.json")
+    )
+    fetch_timeout_s: float = Field(
+        default_factory=lambda: float(os.getenv("PIPELINE_FETCH_TIMEOUT", "5"))
+    )
+    batch_fetch_size: int = Field(
+        default_factory=lambda: int(os.getenv("PIPELINE_BATCH_FETCH_SIZE", "20"))
+    )
+    batch_flush_size: int = Field(
+        default_factory=lambda: int(os.getenv("PIPELINE_BATCH_FLUSH_SIZE", "20"))
+    )
+
+
 class Config(BaseModel):
     """全局配置"""
 
@@ -193,6 +217,7 @@ class Config(BaseModel):
     url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
 
     @classmethod
     def load(cls) -> "Config":

@@ -24,6 +24,8 @@ from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+    from ...common.storage.redis_manager import RedisQueueManager
+    from ...common.channel.base import URLChannel
 
 # 日志器
 logger = get_logger(__name__)
@@ -40,6 +42,8 @@ class BatchCollector(BaseCollector):
         page: "Page",
         config_path: str | Path,
         output_dir: str = "output",
+        url_channel: "URLChannel | None" = None,
+        redis_manager: "RedisQueueManager | None" = None,
     ):
         """初始化批量爬取器
 
@@ -60,6 +64,8 @@ class BatchCollector(BaseCollector):
             list_url=getattr(self, "list_url", ""),
             task_description=getattr(self, "task_description", ""),
             output_dir=output_dir,
+            url_channel=url_channel,
+            redis_manager=redis_manager,
         )
 
         # 配置持久化管理器
