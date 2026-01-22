@@ -72,7 +72,7 @@ REDIS_DB=0
 ```
 
 > [!TIP]
-> All default values are managed in `src/autospider/config.py` using Pydantic.
+> All default values are managed in `src/autospider/common/config.py` using Pydantic.
 
 ## 📖 Usage Guide
 
@@ -112,14 +112,54 @@ autospider collect-urls \
   --explore-count 3
 ```
 
+### 3. Parallel Pipeline (list + detail) (`pipeline-run`) ⭐
+
+The pipeline runs list collection and detail extraction concurrently. It supports three modes:
+- `memory`: in-process queue (fastest, no persistence)
+- `file`: reads `output/urls.txt` (local & resumable)
+- `redis`: Redis Stream queue (production parallelism)
+
+**Fields definition example (fields.json)**
+
+```json
+[
+  {"name": "title", "description": "announcement title"},
+  {"name": "winner", "description": "winning bidder"},
+  {"name": "project_no", "description": "project number"}
+]
+```
+
+**Run example**
+
+```bash
+autospider pipeline-run \
+  --list-url "https://example.com/list" \
+  --task "Collect award results and extract title/winner/project number" \
+  --fields-file output/fields.json \
+  --mode redis \
+  --headless
+```
+
+**Outputs**
+- `output/pipeline_extracted_items.jsonl`: JSONL output appended per URL
+- `output/pipeline_summary.json`: summary stats and errors
+
+
 ## 📂 Project Structure
 
 ```
 autospider/
 ├── src/autospider/
-│   ├── common/                 # Common modules (browser, som, storage, llm, config)
+│   ├── common/                 # Common modules
+│   │   ├── browser/           # Browser automation
+│   │   ├── channel/           # URL channels (memory/file/redis)
+│   │   ├── som/               # Set-of-Mark system
+│   │   ├── storage/           # Persistence (Redis)
+│   │   ├── llm/               # LLM adapters & prompts
+│   │   └── config.py          # Config management
 │   ├── crawler/               # Crawling core (explore, batch, collector, checkpoint)
 │   ├── field/                 # Field extraction (detail page auto-recognition)
+│   ├── pipeline/              # Concurrent pipeline orchestration
 │   ├── cli.py                 # CLI entry point
 │   └── __main__.py            # Module entry
 ├── prompts/                   # Independent prompt templates
