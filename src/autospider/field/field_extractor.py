@@ -25,7 +25,7 @@ from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
-from ..extractor.llm import LLMDecider
+from ..common.llm import LLMDecider
 
 from .models import (
     FieldDefinition,

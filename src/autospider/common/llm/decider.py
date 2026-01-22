@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
-from ...common.config import config
-from ...common.types import Action, ActionType, ScrollInfo
-from ...common.protocol import parse_json_dict_from_llm, protocol_to_legacy_agent_action
+from ..config import config
+from ..types import Action, ActionType, ScrollInfo
+from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_agent_action
+from ..utils.paths import get_prompt_path
 from .prompt_template import render_template
 
 if TYPE_CHECKING:
-    from ...common.types import AgentState, SoMSnapshot
+    from ..types import AgentState, SoMSnapshot
 
 
 # ============================================================================
 # Prompt 模板文件路径
 # ============================================================================
 
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "decider.yaml")
+PROMPT_TEMPLATE_PATH = get_prompt_path("decider.yaml")
 
 
 # ============================================================================

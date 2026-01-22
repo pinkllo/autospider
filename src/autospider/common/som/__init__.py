@@ -10,6 +10,7 @@ from .api import (
     inject_and_scan,
     set_overlay_visibility,
 )
+from .mark_id_validator import MarkIdValidator, MarkIdValidationResult
 
 __all__ = [
     "inject_and_scan",
@@ -20,4 +21,6 @@ __all__ = [
     "get_element_by_mark_id",
     "build_mark_id_to_xpath_map",
     "format_marks_for_llm",
+    "MarkIdValidator",
+    "MarkIdValidationResult",
 ]

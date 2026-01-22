@@ -1,4 +1,4 @@
-"""LLM 模块"""
+"""LLM module shared across crawler and field."""
 
 from .decider import LLMDecider
 from .planner import TaskPlanner, TaskPlan

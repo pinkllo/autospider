@@ -431,7 +431,7 @@ class PaginationHandler:
                     print(f"[Pagination] 策略1: 使用提取的 xpath...")
                     
                     # 获取随机延迟
-                    from ...crawler.checkpoint.rate_controller import get_random_delay
+                    from ...common.utils.delay import get_random_delay
                     delay = get_random_delay(
                         config.url_collector.action_delay_base,
                         config.url_collector.action_delay_random
@@ -526,7 +526,7 @@ class PaginationHandler:
                     if is_visible:
                         print(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
                         
-                        from ..checkpoint.rate_controller import get_random_delay
+                        from ...common.utils.delay import get_random_delay
                         delay = get_random_delay(
                             config.url_collector.action_delay_base,
                             config.url_collector.action_delay_random
@@ -597,7 +597,7 @@ class PaginationHandler:
                 executor = ActionExecutor(self.page)
 
                 print(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
-                from ..checkpoint.rate_controller import get_random_delay
+                from ...common.utils.delay import get_random_delay
 
                 delay = get_random_delay(
                     config.url_collector.action_delay_base,

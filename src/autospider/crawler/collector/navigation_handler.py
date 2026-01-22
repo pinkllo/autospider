@@ -13,7 +13,7 @@ from ...common.types import AgentState, RunInput, ActionType
 if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
-    from ..llm import LLMDecider
+    from ...common.llm import LLMDecider
 
 
 class NavigationHandler:

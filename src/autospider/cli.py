@@ -429,7 +429,7 @@ async def _run_config_generator(
     output_dir: str,
 ):
     """异步运行配置生成器"""
-    from .extractor.config_generator import generate_collection_config
+    from .crawler.explore.config_generator import generate_collection_config
     
     session = None
     try:
@@ -457,7 +457,7 @@ async def _run_batch_collector(
     output_dir: str,
 ):
     """异步运行批量收集器"""
-    from .crawler.batch_collector import batch_collect_urls
+    from .crawler.batch.batch_collector import batch_collect_urls
     
     async with create_browser_session(headless=headless, close_engine=True) as session:
         return await batch_collect_urls(
@@ -475,7 +475,7 @@ async def _run_collector(
     output_dir: str,
 ):
     """异步运行 URL 收集器（完整流程）"""
-    from .crawler.url_collector import collect_detail_urls
+    from .crawler.explore.url_collector import collect_detail_urls
     
     async with create_browser_session(headless=headless, close_engine=True) as session:
         return await collect_detail_urls(

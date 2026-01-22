@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from .crawler.url_collector import URLCollector, collect_detail_urls
+from .crawler.explore.url_collector import URLCollector, collect_detail_urls
 
 __all__ = [
     "__version__",

@@ -6,10 +6,12 @@
 `d:\autospider\src\autospider\extractor\collector\url_extractor.py`
 
 ### 核心功能
-URL 提取器，负责从页面元素中提取详情页 URL，支持从 href 属性提取和通过点击元素获取 URL 两种方式。
+URL 提取器，负责从页面元素中提取详情页 URL。采用双重提取策略：
+1. **静态提取**：直接获取元素的 `href` 属性（最快，最稳定）。
+2. **动态提取**：模拟点击元素并捕获产生的新页面 URL 或当前页面跳转后的 URL（支持处理复杂 JS 跳转）。
 
 ### 设计理念
-通过多种策略从页面元素中提取 URL，确保在各种情况下都能准确获取详情页链接。
+通过多种策略确保在各种复杂的网页结构（如异步加载、单页应用跳转、新标签页弹出等）中都能准确获取详情页链接，并具备自动恢复列表页状态的能力。
 
 ## 📁 函数目录
 
@@ -61,25 +63,24 @@ URL 提取器，负责从页面元素中提取详情页 URL，支持从 href 属
 
 #### click_and_get_url()
 
-**功能**：点击元素并获取新页面的 URL。
+**功能**：点击元素并捕获新生成的 URL。支持处理新标签页弹出和当前标签页跳转。
 
 **参数**：
 | 参数名 | 类型 | 描述 |
 |--------|------|------|
 | element | `ElementMark` | 页面元素标记 |
-| nav_steps | `list[dict] | None` | 导航步骤列表 |
+| snapshot | `SoMSnapshot` | 用于查找元素 XPath 的快照 |
+| nav_steps | `list[dict] | None` | 导航步骤列表（用于回退恢复） |
 
-**返回值**：`str | None` - 获取的 URL 或 None（获取失败时）
+**返回值**：`str | None` - 获取到的 URL 或 None（获取失败时）
 
 **执行流程**：
-1. 隐藏覆盖层
-2. 优先使用 data-som-id 定位元素
-3. 如果 data-som-id 失效，使用 XPath 后备定位
-4. 监听新标签页打开
-5. 如果打开了新标签页，获取 URL 并关闭新标签页
-6. 如果没有新标签页，检查当前页面 URL 是否变化
-7. 如果 URL 变化，返回新 URL 并返回列表页
-8. 如果 URL 未变化，尝试返回上一页或重新加载列表页
+1. **预处理**：隐藏 SoM 遮罩，构建 `mark_id` 到 XPath 的映射。
+2. **执行点击**：使用 `ActionExecutor` 执行点击动作。
+3. **检测新页面**：检查是否产生了新标签页。如果产生，记录 URL 后关闭新页面并返回。
+4. **检测当前跳转**：若无新页面，等待 2 秒并检查当前 URL 或 Hash 是否变化。
+5. **恢复状态**：如果发生跳转，获取新 URL 后导航回原始列表页，并根据 `nav_steps` 重放导航步骤恢复状态。
+6. **异常处理**：若未发生跳转或点击失败，尝试回退或重新进入列表页。
 
 #### click_element_and_get_url()
 
@@ -162,8 +163,8 @@ async def main():
     # 假设已有 page 和 list_url
     extractor = URLExtractor(page, list_url)
     
-    # 假设已有 element
-    url = await extractor.click_and_get_url(element, nav_steps)
+    # 假设已有 element, snapshot, nav_steps
+    url = await extractor.click_and_get_url(element, snapshot, nav_steps)
     
     if url:
         print(f"通过点击获取到 URL: {url}")
@@ -275,8 +276,8 @@ async def main():
 
 | 方法名 | 参数 | 返回值 | 描述 |
 |--------|------|--------|------|
-| `extract_from_element` | element, snapshot, nav_steps=None | `str | None` | 从元素中提取 URL（优先从 href，否则点击获取） |
-| `click_and_get_url` | element, nav_steps=None | `str | None` | 点击元素并获取新页面的 URL |
+| extract_from_element | element, snapshot, nav_steps=None | `str | None` | 从元素中提取 URL（优先从 href，否则点击获取） |
+| `click_and_get_url` | element, snapshot, nav_steps=None | `str | None` | 点击元素并获取新页面的 URL |
 | `click_element_and_get_url` | element_locator, nav_steps=None | `str | None` | 点击 playwright 元素并获取新页面的 URL（用于收集阶段） |
 
 ## 🔄 依赖关系
@@ -318,6 +319,7 @@ async def main():
 | 1.2 | 优化点击获取 URL 逻辑 | 2026-01-15 |
 | 1.3 | 增加导航步骤重放功能 | 2026-01-18 |
 | 1.4 | 优化新标签页处理 | 2026-01-19 |
+| 1.5 | 增加详细代码注释并更新文档 | 2026-01-22 |
 
 ## 🔮 未来规划
 
@@ -333,4 +335,4 @@ MIT License
 
 ---
 
-最后更新: 2026-01-19
+最后更新: 2026-01-22

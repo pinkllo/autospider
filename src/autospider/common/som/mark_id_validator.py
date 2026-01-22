@@ -17,10 +17,10 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING
 
-from ...common.config import config
+from ..config import config
 
 if TYPE_CHECKING:
-    from ...common.types import SoMSnapshot, ElementMark
+    from ..types import SoMSnapshot, ElementMark
     from playwright.async_api import Page
 
 

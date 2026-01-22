@@ -13,16 +13,16 @@ from typing import TYPE_CHECKING
 
 from langchain_openai import ChatOpenAI
 
-from ..common.config import config
-from .llm import LLMDecider
-from ..common.storage.persistence import CollectionConfig, ConfigPersistence
-from ..common.som import (
+from ...common.config import config
+from ...common.llm import LLMDecider
+from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from ..common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
-from .collector import (
+from ...common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
+from ..collector import (
     DetailPageVisit,
     XPathExtractor,
     LLMDecisionMaker,
@@ -34,7 +34,7 @@ from .collector import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..common.types import SoMSnapshot
+    from ...common.types import SoMSnapshot
 
 
 class ConfigGenerator:

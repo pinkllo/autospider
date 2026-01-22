@@ -337,16 +337,17 @@ if script_step:
 
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
-| `execute(action, mark_id_to_xpath, step_index)` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行单个动作 |
-| `_find_element_by_xpath_list(xpaths)` | xpaths: list[str] | tuple[Locator \| None, str \| None] | 按优先级查找元素 |
-| `_execute_click(action, mark_id_to_xpath, step_index)` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行点击动作 |
-| `_execute_type(action, mark_id_to_xpath, step_index)` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行输入动作 |
-| `_execute_press(action, mark_id_to_xpath, step_index)` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行按键动作 |
-| `_execute_scroll(action, step_index)` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行滚动动作 |
-| `_execute_navigate(action, step_index)` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行导航动作 |
-| `_execute_wait(action, step_index)` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行等待动作 |
-| `_execute_extract(action, mark_id_to_xpath, step_index)` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行提取动作 |
-| `_execute_go_back(action, step_index)` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行返回上一页动作 |
+| `execute` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 根据动作类型分发并执行具体的浏览器操作。返回执行结果和沉淀后的脚本步骤。 |
+| `_find_element_by_xpath_list` | xpaths: list[str] | tuple[Locator \| None, str \| None] | Priority Fallback 策略实现：按优先级尝试多个 XPath，返回第一个匹配且可见的元素。 |
+| `_execute_click` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行点击动作。支持元素定位、新标签页捕获和自动页面切换。 |
+| `_execute_type` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行输入动作。支持清空输入框、输入文本、模拟回车等按键操作。 |
+| `_execute_press` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行纯按键动作（如 Enter, Escape）。优先在特定元素上按键，否则在页面上全局按键。 |
+| `_execute_scroll` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行页面滚动动作。默认向下滚动 300 像素。 |
+| `_execute_navigate` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行页面跳转动作。 |
+| `_execute_wait` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 显式等待动作。默认等待网络空闲状态（networkidle）。 |
+| `_execute_extract` | action: Action, mark_id_to_xpath: dict, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行文本提取动作。支持指定元素提取、表格智能提取（th -> td）、根据目标文本模糊定位提取。 |
+| `_execute_go_back` | action: Action, step_index: int | tuple[ActionResult, ScriptStep \| None] | 执行浏览器返回上一页动作。 |
+| `_execute_go_back_tab` | step_index: int | tuple[ActionResult, ScriptStep \| None] | 关闭当前标签页并返回到上一个（父）标签页。常用于处理点击后产生的新窗口。 |
 
 ---
 

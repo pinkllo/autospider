@@ -12,16 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..common.config import config
-from ..common.logger import get_logger
-from ..common.storage.persistence import CollectionConfig, ConfigPersistence
-from ..extractor.collector import (
+from ...common.config import config
+from ...common.logger import get_logger
+from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ..collector import (
     URLCollectorResult,
     LLMDecisionMaker,
     NavigationHandler,
 )
-from ..extractor.llm import LLMDecider
-from .base_collector import BaseCollector
+from ...common.llm import LLMDecider
+from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

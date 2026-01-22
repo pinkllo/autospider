@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..llm.prompt_template import render_template
+from ...common.llm.prompt_template import render_template
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
 from ...common.protocol import (
     parse_json_dict_from_llm,
@@ -16,15 +15,16 @@ from ...common.protocol import (
     protocol_to_legacy_pagination_result,
     protocol_to_legacy_url_decision,
 )
+from ...common.utils.paths import get_prompt_path
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..llm import LLMDecider
+    from ...common.llm import LLMDecider
     from ...common.types import SoMSnapshot, ElementMark
 
 
 # Prompt 模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "url_collector.yaml")
+PROMPT_TEMPLATE_PATH = get_prompt_path("url_collector.yaml")
 
 
 class LLMDecisionMaker:

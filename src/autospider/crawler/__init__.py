@@ -1,10 +1,14 @@
-"""Crawler模块 - 批量爬取执行
+"""Crawler模块 - 采集与规则提取"""
 
-该模块负责：
-- 基于已知规则执行批量爬取
-- URL收集和去重
-- 检查点管理和断点续传
-- 速率控制和反反爬
-"""
+from .batch.batch_collector import BatchCollector, batch_collect_urls
+from .explore.url_collector import URLCollector, collect_detail_urls
+from .explore.config_generator import ConfigGenerator, generate_collection_config
 
-__all__ = ["BatchCollector", "URLCollector"]
+__all__ = [
+    "BatchCollector",
+    "batch_collect_urls",
+    "URLCollector",
+    "collect_detail_urls",
+    "ConfigGenerator",
+    "generate_collection_config",
+]

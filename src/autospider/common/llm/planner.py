@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
-from ...common.config import config
+from ..config import config
+from ..utils.paths import get_prompt_path
 from .prompt_template import render_template
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class TaskPlan(BaseModel):
 
 
 # Prompt模板文件路径
-PROMPT_TEMPLATE_PATH = str(Path(__file__).parent.parent.parent / "prompts" / "planner.yaml")
+PROMPT_TEMPLATE_PATH = get_prompt_path("planner.yaml")
 
 
 class TaskPlanner:

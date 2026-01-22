@@ -13,17 +13,17 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from ..common.config import config
-from ..extractor.llm.decider import LLMDecider
-from ..common.storage.persistence import CollectionConfig, ConfigPersistence
-from ..extractor.output.script_generator import ScriptGenerator
-from ..common.som import (
+from ...common.config import config
+from ...common.llm import LLMDecider
+from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ..output.script_generator import ScriptGenerator
+from ...common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from ..common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
-from ..extractor.collector import (
+from ...common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
+from ..collector import (
     DetailPageVisit,
     URLCollectorResult,
     XPathExtractor,
@@ -32,17 +32,23 @@ from ..extractor.collector import (
     PaginationHandler,
     smart_scroll,
 )
-from .base_collector import BaseCollector
+from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..common.types import SoMSnapshot
+    from ...common.types import SoMSnapshot
 
 
 class URLCollector(BaseCollector):
     """详情页 URL 收集器（协调器）
     
-    继承 BaseCollector，增加探索阶段功能。
+    该类负责从列表页中识别并收集所有详情页的 URL。
+    它采用三阶段工作流：
+    1. 探索阶段：通过 LLM 引导进入若干个详情页，记录操作路径。
+    2. 分析阶段：提取这些详情页链接的公共 XPath 模式。
+    3. 收集阶段：利用提取的 XPath 高效遍历列表页并翻页收集。
+
+    继承 BaseCollector，扩展了探索、XPath 提取及脚本生成功能。
     """
     
     def __init__(
@@ -54,7 +60,17 @@ class URLCollector(BaseCollector):
         max_nav_steps: int = 10,
         output_dir: str = "output",
     ):
-        # 调用基类初始化
+        """初始化 URLCollector
+        
+        Args:
+            page: Playwright Page 对象
+            list_url: 初始列表页 URL
+            task_description: 任务描述，指导 LLM 识别详情页链接
+            explore_count: 探索阶段要进入的详情页数量（默认 3）
+            max_nav_steps: 导航阶段允许的最大操作步数
+            output_dir: 结果和中间配置的输出目录
+        """
+        # 调用基类初始化，设置基础属性（page, list_url, task_description 等）
         super().__init__(
             page=page,
             list_url=list_url,
@@ -66,18 +82,16 @@ class URLCollector(BaseCollector):
         self.max_nav_steps = max_nav_steps
         
         # 探索阶段特有状态
-        self.detail_visits: list[DetailPageVisit] = []
-        self.step_index = 0
-        self.visited_detail_urls: set[str] = set()
-        self.common_pattern: CommonPattern | None = None
-
-
+        self.detail_visits: list[DetailPageVisit] = []  # 记录每次详情页访问的详细信息
+        self.step_index = 0                             # 当前操作步数索引
+        self.visited_detail_urls: set[str] = set()      # 已访问过的详情页 URL，用于去重
+        self.common_pattern: CommonPattern | None = None # 提取出的公共模式（XPath 等）
         
         # 初始化额外组件
-        self.decider = LLMDecider()
-        self.script_generator = ScriptGenerator(output_dir)
-        self.config_persistence = ConfigPersistence(output_dir)
-        self.xpath_extractor = XPathExtractor()
+        self.decider = LLMDecider()                     # LLM 决策核心组件
+        self.script_generator = ScriptGenerator(output_dir) # 用于生成最终爬虫脚本
+        self.config_persistence = ConfigPersistence(output_dir) # 负责保存/加载采集配置（XPath等）
+        self.xpath_extractor = XPathExtractor()         # 负责从访问记录中分析公共 XPath
     
     async def run(self) -> URLCollectorResult:
         """运行 URL 收集流程"""
@@ -99,8 +113,7 @@ class URLCollector(BaseCollector):
             if previous_config.list_url and previous_config.list_url != self.list_url:
                 config_mismatch = True
             if (
-                previous_config.task_description
-                and previous_config.task_description != self.task_description
+                previous_config.task_description and previous_config.task_description != self.task_description
             ):
                 config_mismatch = True
             if config_mismatch:
@@ -192,7 +205,7 @@ class URLCollector(BaseCollector):
             if self.common_detail_xpath:
                 print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
                 # 填充 common_pattern 以便 CLI 显示
-                from ..extractor.collector.models import CommonPattern
+                from .collector.models import CommonPattern
                 self.common_pattern = CommonPattern(
                     xpath_pattern=self.common_detail_xpath,
                     confidence=0.8,  # 默认置信度，XPathExtractor 内部有更详细的判断
@@ -482,7 +495,15 @@ class URLCollector(BaseCollector):
         return explored
     
     async def _handle_click_to_enter(self, llm_decision: dict, snapshot: "SoMSnapshot") -> bool:
-        """处理点击进入详情页的情况"""
+        """处理点击进入详情页的情况
+        
+        Args:
+            llm_decision: LLM 的决策字典，应包含 mark_id 和 target_text
+            snapshot: 当前页面的 SoM 快照
+            
+        Returns:
+            bool: 是否成功获取到详情页 URL
+        """
         mark_id_raw = llm_decision.get("mark_id")
         target_text = llm_decision.get("target_text") or ""
         try:
@@ -491,7 +512,7 @@ class URLCollector(BaseCollector):
             mark_id = None
         print(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
 
-        # 修改原因：全项目统一“文本优先纠正 mark_id”，避免 LLM 读错编号导致误点
+        # 文本优先纠正 mark_id，提高点击准确度
         if config.url_collector.validate_mark_id and target_text:
             try:
                 mark_id = await resolve_single_mark_id(
@@ -505,12 +526,14 @@ class URLCollector(BaseCollector):
             except Exception as e:
                 raise ValueError(f"点击进入详情页：无法根据文本纠正 mark_id: {e}") from e
         
+        # 查找标注元素并执行模拟点击/导航
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
         if element:
             url = await self.url_extractor.click_and_get_url(
                 element, snapshot, nav_steps=self.nav_steps
             )
             if url and url not in self.visited_detail_urls:
+                # 记录访问详情
                 visit = DetailPageVisit(
                     list_page_url=self.list_url,
                     detail_page_url=url,
@@ -534,7 +557,7 @@ class URLCollector(BaseCollector):
         return False
     
     def _save_config(self):
-        """保存配置"""
+        """将当前采集配置持久化到 JSON 文件，以便断点恢复或脚本生成使用"""
         collection_config = CollectionConfig(
             nav_steps=self.nav_steps,
             common_detail_xpath=self.common_detail_xpath,
@@ -547,7 +570,11 @@ class URLCollector(BaseCollector):
         print(f"[Phase 4.5] ✓ 配置已持久化")
     
     async def _generate_crawler_script(self) -> str:
-        """生成爬虫脚本"""
+        """根据探索到的 XPath 和导航步数，自动生成独立的 Scrapy 爬虫脚本
+        
+        Returns:
+            str: 生成的 Python 脚本代码内容
+        """
         detail_visits_dict = [
             {
                 "detail_page_url": v.detail_page_url,
@@ -570,7 +597,7 @@ class URLCollector(BaseCollector):
         )
     
     def _create_result(self) -> URLCollectorResult:
-        """创建结果对象"""
+        """创建本次采集任务的最终结果封装对象"""
         return URLCollectorResult(
             detail_visits=self.detail_visits,
             common_pattern=self.common_pattern,
@@ -581,7 +608,13 @@ class URLCollector(BaseCollector):
         )
     
     async def _save_result(self, result: URLCollectorResult, crawler_script: str = "") -> None:
-        """保存结果到文件"""
+        """保存收集结果到本地文件系统
+        
+        生成的文件：
+        1. collected_urls.json: 结构化数据结果
+        2. urls.txt: 纯 URL 列表，方便后续处理
+        3. spider.py: 自动生成的独立爬虫脚本
+        """
         output_file = self.output_dir / "collected_urls.json"
         
         data = {
@@ -628,7 +661,18 @@ async def collect_detail_urls(
     explore_count: int = 3,
     output_dir: str = "output",
 ) -> URLCollectorResult:
-    """收集详情页 URL 的便捷函数"""
+    """收集详情页 URL 的便捷入口函数
+    
+    Args:
+        page: Playwright Page 实例
+        list_url: 列表页起始 URL
+        task_description: 采集任务描述
+        explore_count: 探索详情页的数量
+        output_dir: 结果输出目录
+        
+    Returns:
+        URLCollectorResult: 包含所有收集到的 URL 及其元数据
+    """
     collector = URLCollector(
         page=page,
         list_url=list_url,

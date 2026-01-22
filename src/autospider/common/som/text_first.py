@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
 from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_selected_mark
-from ...extractor.llm.prompt_template import render_template
-from ...extractor.validator.mark_id_validator import MarkIdValidator
+from ..llm.prompt_template import render_template
+from ..utils.paths import get_prompt_path
+from .mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks
 
 if TYPE_CHECKING:
@@ -28,9 +28,7 @@ if TYPE_CHECKING:
     from ..types import ElementMark, SoMSnapshot
 
 
-PROMPT_TEMPLATE_PATH = str(
-    Path(__file__).parent.parent.parent / "prompts" / "disambiguate_by_text.yaml"
-)
+PROMPT_TEMPLATE_PATH = get_prompt_path("disambiguate_by_text.yaml")
 
 
 async def resolve_mark_ids_from_map(
