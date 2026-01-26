@@ -5,7 +5,7 @@ handlers 子模块
 """
 
 # 导入所有内置处理器，触发其自动注册
-from . import login_handler  # noqa: F401
+from . import login_handler
 
 # 未来扩展：
 # from . import captcha_handler

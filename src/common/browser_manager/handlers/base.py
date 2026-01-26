@@ -1,16 +1,15 @@
 from abc import ABC, abstractmethod
 from playwright.async_api import Page
 
-
 class BaseAnomalyHandler(ABC):
     """
     异常处理抽象基类。
     所有特定的异常（如登录、验证码、风控）都必须继承此类。
     """
-
+    
     # 默认优先级：数字越小越优先执行（登录检测通常设为 10，验证码 20，风控 30 等）
     priority: int = 100
-
+    
     # 是否启用（可在子类中覆盖，但通常通过 registry 控制）
     enabled: bool = True
 
