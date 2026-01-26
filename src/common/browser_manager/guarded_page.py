@@ -165,43 +165,104 @@ class GuardedPage:
 
 class GuardedContext:
     """
-    BrowserContext 代理类，确保获取的 Page 都是 GuardedPage。
+    BrowserContext 代理类，确保所有途径获取的 Page 都是 GuardedPage。
     """
     
     def __init__(self, context: Any, guard: 'PageGuard'):
         object.__setattr__(self, '_context', context)
         object.__setattr__(self, '_guard', guard)
 
+    def _wrap_page(self, page: Any) -> Any:
+        # 如果不是 Page 对象（可能是 None 或其他），直接返回
+        if not isinstance(page, Page):
+            return page
+            
+        # 如果已经是 GuardedPage，直接返回
+        if isinstance(page, GuardedPage):
+            return page
+
+        # 检查是否已挂载 Guard
+        guard = object.__getattribute__(self, '_guard')
+        if not getattr(page, "_guard_attached", False):
+             # 兜底挂载：防止 engine 层遗漏
+             guard.attach_to_page(page)
+             # 立即在后台触发一次检查
+             asyncio.create_task(guard.run_inspection(page))
+        
+        return GuardedPage(page, guard)
+
     @property
     def pages(self) -> list['GuardedPage']:
         """获取所有页面，并包装为 GuardedPage"""
         context = object.__getattribute__(self, '_context')
-        guard = object.__getattribute__(self, '_guard')
-        return [GuardedPage(page, guard) for page in context.pages]
+        return [self._wrap_page(page) for page in context.pages]
 
     async def wait_for_event(self, event: str, predicate=None, timeout: float = 30000) -> Any:
         """等待事件。如果事件是 'page'，返回 GuardedPage。"""
         context = object.__getattribute__(self, '_context')
-        guard = object.__getattribute__(self, '_guard')
-        
         result = await context.wait_for_event(event, predicate=predicate, timeout=timeout)
-        if event == "page" and isinstance(result, Page):
+        
+        if event == "page":
             await asyncio.sleep(0.1)
-            return GuardedPage(result, guard)
+            return self._wrap_page(result)
         return result
 
     async def new_page(self, **kwargs) -> 'GuardedPage':
         """创建新页面并返回 GuardedPage"""
         context = object.__getattribute__(self, '_context')
-        guard = object.__getattribute__(self, '_guard')
-        
         page = await context.new_page(**kwargs)
         await asyncio.sleep(0.1)
-        return GuardedPage(page, guard)
+        return self._wrap_page(page)
+
+    def expect_page(self, predicate=None, timeout: float = 30000) -> 'GuardedEventContextManager':
+        """
+        拦截 expect_page，确保返回的 Future value 是 GuardedPage。
+        """
+        context = object.__getattribute__(self, '_context')
+        raw_manager = context.expect_page(predicate=predicate, timeout=timeout)
+        return GuardedEventContextManager(raw_manager, self._wrap_page)
 
     def __getattr__(self, name: str) -> Any:
         """透传其他属性和方法"""
         return getattr(object.__getattribute__(self, '_context'), name)
+
+
+class GuardedEventContextManager:
+    """
+    包装 Playwright 的 EventContextManager，拦截其 value 属性。
+    """
+    def __init__(self, raw_manager: Any, wrap_fn: Any):
+        self._raw_manager = raw_manager
+        self._wrap_fn = wrap_fn
+
+    async def __aenter__(self):
+        # 进入上下文管理器，获取原生 EventInfo
+        # 这里返回的是 self，以便我们拦截 value 属性
+        self._event_info = await self._raw_manager.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return await self._raw_manager.__aexit__(exc_type, exc_val, exc_tb)
+
+    @property
+    def value(self):
+        """
+        拦截 value 属性。
+        原生 implementation 返回的是一个 Awaitable[Page]。
+        我们需要包装这个 Awaitable，在它 resolve 后 wrap 结果。
+        """
+        raw_future = self._event_info.value
+        
+        async def wrapped_future():
+            try:
+                page = await raw_future
+                # 给一点时间让事件传播
+                await asyncio.sleep(0.1)
+                return self._wrap_fn(page)
+            except Exception as e:
+                raise e
+                
+        return wrapped_future()
 
 
 class GuardedKeyboard:

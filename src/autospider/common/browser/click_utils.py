@@ -60,7 +60,7 @@ async def click_and_capture_new_page(
             pass
 
     if new_page is not None:
-        # 确保返回的页面被 GuardedPage 包装，以便统一管理页面生命周期和异常
+        # 如果页面已具备 Guard 信息，则包装为 GuardedPage（无显式触发 Guard 逻辑）
         new_page = _ensure_guarded_page(new_page)
 
     return new_page
@@ -73,9 +73,7 @@ def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
     错误恢复或确保页面在操作期间不会被意外关闭。
     """
     try:
-        # 尝试导入必要的组件，这些组件可能在其他包中
-        import browser_manager.handlers as _handlers  # noqa: F401
-        from browser_manager.guard import PageGuard
+        # 尝试导入 GuardedPage 类型（不显式触发 Guard 逻辑）
         from browser_manager.guarded_page import GuardedPage
     except Exception:
         # 如果无法导入（例如环境未配置），则回退到返回原始页面对象
@@ -85,15 +83,10 @@ def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
     if isinstance(page, GuardedPage):
         return page
 
-    # 检查原始 Page 对象是否已经有关联的 PageGuard
+    # 仅在页面已关联 Guard 时进行包装
     guard = getattr(page, "_page_guard", None)
     if guard is None:
-        # 如果没有，则创建一个新的 PageGuard 并将其绑定到页面上
-        guard = PageGuard()
-        guard.attach_to_page(page)
-        # 设置标识，标记该页面已被 Guard 处理
-        setattr(page, "_guard_attached", True)
-        setattr(page, "_page_guard", guard)
+        return page
 
     # 使用 guard 包装页面并返回
     return GuardedPage(page, guard)
