@@ -1,151 +1,42 @@
 # AutoSpider 文档
 
-AutoSpider 是一个基于大语言模型的智能网页自动化工具，能够自动分析网页结构、提取数据并生成可执行的爬虫脚本。
+AutoSpider 是一个基于大语言模型 (LLM) 和 SoM (Set-of-Mark) 标注技术的纯视觉浏览器自动化 Agent，能够自动发现、分析并批量采集网页数据。
 
 ---
 
 ## 📚 文档目录
 
-### 🏗️ 架构与流程
-- [项目流程图](architecture_flowchart.md) - 系统架构和工作流程
-
 ### 🏗️ 核心模块
-- [Common 模块](common/README.md) - 基础设施和公共工具
-- [Crawler 模块](crawler/README.md) - 批量网页数据采集引擎
-- [Extractor 模块](extractor/README.md) - 智能规则发现引擎
-- [Field 模块](field/README.md) - 自动字段建模与提取
-- [Prompts 模块](prompts/README.md) - 提示词管理中枢
+- [**Common 模块**](common/README.md) - 基础设施、浏览器操作 (GuardedPage)、SoM 系统及可靠队列。
+- [**Crawler 模块**](crawler/README.md) - 爬取引擎，包含探索、分页导航和断点恢复。
+- [**Field 模块**](field/README.md) - 自动字段建模、XPath 沉淀与文本提取。
+- [**Pipeline 模块**](pipeline/runner.py.md) - 并行采集流水线（列表生产 + 详情消费）。
 
-### 🔧 工具模块
-- [Utils 工具集](utils/README.md) - 通用工具函数
-- [Browser Manager](browser_manager/README.md) - 浏览器管理
+### 🛠️ 技术特性
+- [**URL 通道**](common/channel/README.md) - 解耦的生产-消费模式。
+- [**LLM 交互与协议**](common/llm/README.md) - SoM 决策逻辑与 LLM 协议解析。
+- [**断点续传**](crawler/checkpoint/README.md) - 高可靠性的采集任务恢复机制。
 
-### 📋 配置与模板
-- [Prompts 模板](prompts/README.md) - Prompt 模板文件
-- [配置文件](config/README.md) - 系统配置说明
-
-### 🧪 测试模块
-- [测试框架](tests/README.md) - 单元测试和集成测试
+### 📋 辅助信息
+- [项目流程图](architecture_flowchart.md) - 系统架构和工作流程。
+- [疑难解答](troubleshooting/README.md) - 常见问题与解决方案。
 
 ---
 
 ## 🚀 快速开始
 
-### 安装依赖
-
+### 1. 安装
 ```bash
-pip install -r requirements.txt
+pip install -e .
+playwright install chromium
 ```
 
-### 基本使用
-
+### 2. 启动流水线
 ```python
-from autospider import ConfigGenerator
-
-generator = ConfigGenerator()
-result = await generator.generate(
-    list_url="https://example.com/products",
-    task_description="采集商品信息"
-)
-
-print(f"生成的配置：{result.config}")
-print(f"生成的脚本：{result.script}")
-```
-
-### 配置环境变量
-
-复制 `.env.example` 文件为 `.env` 并配置必要的环境变量：
-
-```bash
-cp .env.example .env
-# 编辑 .env 文件，设置 API Key 等配置
+from autospider.pipeline import run_pipeline
+# ... 详见 pipeline 文档
 ```
 
 ---
 
-## 📖 模块说明
-
-### Common 模块
-
-提供项目的基础设施，包括配置管理、类型定义、浏览器操作、SoM 标注系统和存储管理。
-
-### Crawler 模块
-
-核心爬取引擎，负责执行批量网页数据采集任务，支持断点续传和速率控制。
-
-### Extractor 模块
-
-智能规则发现引擎，通过 LLM 理解页面语义，自动分析和提取关键信息。
-
-### Field 模块
-
-自动字段建模与提取模块，通过少量样本页自动推导稳定的 XPath 提取规则，实现高效、准确的数据抓取。
-
-### Prompts 模块
-
-提示词管理中枢，包含所有与大语言模型交互的 Prompt 模板。
-
----
-
-## 🔍 开发指南
-
-### 项目结构
-
-```
-autospider/
-├── src/autospider/          # 源代码
-├── common/                  # 公共模块
-├── docs/                    # 文档
-├── prompts/                 # Prompt 模板
-├── tests/                   # 测试代码
-└── pyproject.toml          # 项目配置
-```
-
-### 代码规范
-
-- 使用类型注解
-- 遵循 PEP 8 代码风格
-- 编写详细的文档字符串
-- 添加必要的单元测试
-
-### 测试运行
-
-```bash
-# 运行所有测试
-pytest
-
-# 运行特定模块测试
-pytest tests/test_crawler.py
-```
-
----
-
-## 🤝 贡献指南
-
-欢迎贡献代码！请遵循以下步骤：
-
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
-
----
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
----
-
-## 📞 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- 提交 Issue
-- 发送邮件
-- 参与讨论
-
----
-
-*最后更新: 2026-01-08*
+*最后更新: 2026-01-27*

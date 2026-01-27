@@ -1,6 +1,6 @@
-# redis_manager.py - Redis 管理器
+# redis_manager.py - Redis 队列管理器
 
-redis_manager.py 模块提供 Redis 管理功能，负责连接和操作 Redis 数据库。
+`redis_manager.py` 模块提供基于 Redis Stream 的可靠队列管理功能，支持 ACK 机制、多消费者组和任务重试。
 
 ---
 
@@ -12,105 +12,87 @@ src/autospider/common/storage/redis_manager.py
 
 ---
 
-## 📑 函数目录
+## 📑 核心类
 
-### 🚀 核心类
-- `RedisManager` - Redis 管理器主类
+### `RedisQueueManager`
 
-### 🔧 主要方法
-- `connect()` - 连接 Redis
-- `save_item()` - 保存单个项目
-- `load_items()` - 加载所有项目
-- `clear()` - 清空数据
+Redis 可靠队列管理器。
+
+#### 构造函数参数
+- `host`: Redis 服务器地址 (默认: "localhost")
+- `port`: Redis 端口 (默认: 6379)
+- `key_prefix`: 存储键的前缀，用于区分不同的任务队列 (默认: "autospider:urls")
 
 ---
 
 ## 🚀 核心功能
 
-### RedisManager
-
-Redis 管理器，负责连接和操作 Redis 数据库。
-
+### 1. 生产者：推入任务
 ```python
-from autospider.common.storage.redis_manager import RedisManager
+from autospider.common.storage.redis_manager import RedisQueueManager
 
-# 创建 Redis 管理器
-manager = RedisManager(
-    host="localhost",
-    port=6379,
-    password=None,
-    db=0,
-    key_prefix="autospider:urls"
+manager = RedisQueueManager(key_prefix="my_task")
+await manager.connect()
+
+# 推入单个任务（内置去重机制）
+await manager.push_task("https://example.com/item/1", metadata={"priority": "high"})
+```
+
+### 2. 消费者：获取与确认任务
+```python
+# 获取任务 (阻塞模式)
+tasks = await manager.fetch_task(consumer_name="worker_1", block_ms=5000)
+
+for stream_id, data_id, data in tasks:
+    try:
+        # 处理业务逻辑
+        print(f"Processing {data['url']}")
+        
+        # 成功后 ACK
+        await manager.ack_task(stream_id)
+    except Exception as e:
+        # 失败处理：增加重试计数或移入死信队列
+        await manager.fail_task(stream_id, data_id, error_msg=str(e))
+```
+
+### 3. 故障转移：捞回超时任务
+```python
+# 捞回超过 5 分钟未确认的任务
+recovered_tasks = await manager.recover_stale_tasks(
+    consumer_name="worker_1", 
+    max_idle_ms=300000
 )
-
-# 连接 Redis
-client = await manager.connect()
-
-# 保存项目
-await manager.save_item("https://example.com/product/1")
-
-# 加载所有项目
-items = await manager.load_items()
-print(f"已加载 {len(items)} 个项目")
 ```
 
 ---
 
-## 💡 特性说明
+## 💡 技术架构
 
-### 连接管理
+### 存储结构
+1. **Data Hash**: `{key_prefix}:data` 存储全量数据及其元状态，Field 为 URL 的 Hash ID。
+2. **Task Stream**: `{key_prefix}:stream` 任务分发队列。
+3. **Consumer Group**: `{key_prefix}:workers` 实现多进程负载均衡。
 
-自动管理 Redis 连接。
-
-### 键前缀
-
-使用键前缀避免冲突。
-
----
-
-## 🔧 使用示例
-
-### 基本使用
-
-```python
-from autospider.common.storage.redis_manager import RedisManager
-
-# 创建 Redis 管理器
-manager = RedisManager(
-    host="localhost",
-    port=6379,
-    password=None,
-    db=0,
-    key_prefix="autospider:urls"
-)
-
-# 连接 Redis
-client = await manager.connect()
-
-# 保存项目
-await manager.save_item("https://example.com/product/1")
-await manager.save_item("https://example.com/product/2")
-
-# 加载所有项目
-items = await manager.load_items()
-print(f"已加载 {len(items)} 个项目")
-for item in items:
-    print(f"  {item}")
-```
+### 状态流转
+- **PUSH**: 存入 Hash 并发送到 Stream。
+- **FETCH**: 消费者通过组读取，消息进入 PEL (Pending Entries List)。
+- **ACK**: 消息从 PEL 移除，标记为完成。
+- **FAIL**: 更新重试次数。如超过 `max_retries`，则 ACK 并移入 `{key_prefix}:dead_letter`。
 
 ---
 
 ## 📚 方法参考
 
-### RedisManager 方法
-
-| 方法 | 参数 | 返回值 | 说明 |
-|------|------|--------|------|
-| `connect()` | 无 | RedisClient \| None | 连接 Redis |
-| `save_item()` | item | None | 保存单个项目 |
-| `load_items()` | 无 | list[str] | 加载所有项目 |
-| `clear()` | 无 | None | 清空数据 |
+| 方法 | 说明 |
+|------|------|
+| `connect()` | 连接到 Redis 并确保 Consumer Group 存在。 |
+| `push_task(item, metadata)` | 推入任务。如果 item (URL) 已存在则返回 False。 |
+| `fetch_task(consumer_name, block_ms, count)` | 从组中获取任务。 |
+| `ack_task(stream_id)` | 确认任务完成，从 PEL 移除。 |
+| `fail_task(stream_id, data_id, error_msg, max_retries)` | 标记失败。支持自动重试逻辑。 |
+| `recover_stale_tasks(consumer_name, max_idle_ms)` | 自动捞回其他消费者崩溃后遗留的超时任务。 |
+| `get_stats()` | 获取队列统计信息（总数、Stream 长度、PEL 堆积数）。 |
 
 ---
 
-*最后更新: 2026-01-08*
+*最后更新: 2026-01-27*

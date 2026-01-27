@@ -35,8 +35,7 @@ Field Extraction 模块负责从详情页中自动识别并提取目标字段。
 ## 🚀 快速开始
 
 ```python
-from autospider.field.models import FieldDefinition
-from autospider.field.batch_field_extractor import BatchFieldExtractor
+from autospider.field import FieldDefinition, BatchFieldExtractor
 
 # 1. 定义要提取的字段
 fields = [
@@ -44,8 +43,12 @@ fields = [
     FieldDefinition(name="price", description="商品价格", data_type="number"),
 ]
 
-# 2. 初始化批量提取器
-extractor = BatchFieldExtractor(page=page, fields=fields)
+# 2. 从通道或配置初始化（通常配合 Pipeline 使用）
+extractor = BatchFieldExtractor(
+    page=guarded_page, 
+    fields=fields,
+    redis_manager=redis_manager
+)
 
 # 3. 运行流程
 result = await extractor.run(urls=["http://example.com/p/1", "http://example.com/p/2"])

@@ -19,6 +19,7 @@ src/autospider/common/config.py
 - `BrowserConfig` - 浏览器配置
 - `AgentConfig` - Agent 配置
 - `RedisConfig` - Redis 配置
+- `PipelineConfig` - 流水线配置
 - `URLCollectorConfig` - URL 收集器配置
 - `Config` - 全局配置
 
@@ -316,6 +317,15 @@ print(f"HEADLESS: {os.getenv('HEADLESS')}")
 | backoff_factor | BACKOFF_FACTOR | 1.5 | 退避因子（遭遇反爬时延迟倍增因子） |
 | max_backoff_level | MAX_BACKOFF_LEVEL | 3 | 最大降速等级 |
 | credit_recovery_pages | CREDIT_RECOVERY_PAGES | 5 | 连续成功多少页后恢复一级 |
+
+### PipelineConfig 配置项
+
+| 配置项 | 环境变量 | 默认值 | 说明 |
+|--------|-----------|--------|------|
+| mode | PIPELINE_MODE | "memory" | 流水线传输模式 (memory/file/redis) |
+| batch_size | PIPELINE_BATCH_SIZE | 10 | 消费批量大小 |
+| poll_interval | PIPELINE_POLL_INTERVAL | 2.0 | 轮询/阻塞等待时间（秒） |
+| concurrency | PIPELINE_CONCURRENCY | 1 | 并发消费线程/协程数 |
 
 ---
 

@@ -28,6 +28,7 @@ src/autospider/common/browser/actions.py
 - `_execute_wait(action, step_index)` - 执行等待动作
 - `_execute_extract(action, mark_id_to_xpath, step_index)` - 执行提取动作
 - `_execute_go_back(action, step_index)` - 执行返回上一页动作
+- `_execute_go_back_tab(step_index)` - 关闭当前页并返回上一标签页
 
 ---
 
@@ -41,7 +42,7 @@ src/autospider/common/browser/actions.py
 from autospider.common.browser.actions import ActionExecutor
 
 # 创建动作执行器
-executor = ActionExecutor(page)
+executor = ActionExecutor(guarded_page)
 
 # 执行动作
 from autospider.common.types import Action, ActionType
@@ -99,6 +100,7 @@ ActionExecutor 支持多种动作类型：
 | `WAIT` | 等待 | `timeout_ms` |
 | `EXTRACT` | 提取文本 | `mark_id`, `target_text` |
 | `GO_BACK` | 返回上一页 | 无 |
+| `GO_BACK_TAB` | 返回上一标签页 | 无 |
 | `DONE` | 完成任务 | 无 |
 | `RETRY` | 重试当前步骤 | 无 |
 

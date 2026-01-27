@@ -107,7 +107,9 @@ mark = ElementMark(
         )
     ],
     is_visible=True,
-    z_index=0
+    z_index=0,
+    clickability_reason="Detected by visual heuristic",
+    clickability_confidence=0.95
 )
 
 print(f"元素标记: {mark.mark_id}")
@@ -248,6 +250,7 @@ for action_type in ActionType:
 # - WAIT: 等待
 # - EXTRACT: 提取文本
 # - GO_BACK: 返回上一页
+# - GO_BACK_TAB: 返回上一标签页
 # - DONE: 完成任务
 # - RETRY: 重试当前步骤
 ```
