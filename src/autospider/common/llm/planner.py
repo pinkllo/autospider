@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..config import config
 from ..utils.paths import get_prompt_path
-from .prompt_template import render_template
+from common.utils.prompt_template import render_template
 
 if TYPE_CHECKING:
     pass

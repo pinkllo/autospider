@@ -18,6 +18,7 @@ from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
 from .field import FieldDefinition
 from .pipeline import run_pipeline
+from .field import run_field_pipeline
 
 # 日志器
 logger = get_logger(__name__)
@@ -88,6 +89,18 @@ def run_async_safely(coro):
 
 def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
     payload = ""
+
+def _load_urls(urls_file: str) -> list[str]:
+    path = Path(urls_file)
+    if not path.exists():
+        raise ValueError(f"URL file not found: {urls_file}")
+
+    content = path.read_text(encoding="utf-8")
+    urls = [line.strip() for line in content.splitlines() if line.strip()]
+    if not urls:
+        raise ValueError("URL file is empty")
+    return urls
+
 
     if fields_file:
         path = Path(fields_file)
@@ -443,6 +456,117 @@ def pipeline_run_command(
         )
         raise typer.Exit(1)
 
+
+
+
+@app.command("field-extract")
+def field_extract_command(
+    urls_file: str = typer.Option(
+        ..., "--urls-file", help="URL list file (one URL per line)"
+    ),
+    fields_json: str = typer.Option(
+        "", "--fields-json", help="Fields JSON definition (array)"
+    ),
+    fields_file: str = typer.Option(
+        "", "--fields-file", help="Fields JSON file path"
+    ),
+    field_explore_count: int | None = typer.Option(
+        None, "--field-explore-count", help="Explore count for field extraction"
+    ),
+    field_validate_count: int | None = typer.Option(
+        None, "--field-validate-count", help="Validate count for field extraction"
+    ),
+    headless: bool = typer.Option(
+        False, "--headless/--no-headless", help="Run browser in headless mode"
+    ),
+    output_dir: str = typer.Option(
+        "output", "--output", "-o", help="Output directory"
+    ),
+):
+    """Field extraction pipeline (explore + XPath batch)."""
+    try:
+        urls = _load_urls(urls_file)
+        fields = _load_fields(fields_json, fields_file)
+    except (URLValidationError, ValidationError, ValueError) as e:
+        console.print(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="Input error",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        Panel(
+            f"[bold]URL count:[/bold] {len(urls)}\n"
+            f"[bold]Field count:[/bold] {len(fields)}\n"
+            f"[bold]Headless:[/bold] {headless}\n"
+            f"[bold]Output:[/bold] {output_dir}",
+            title="Field extraction",
+            style="cyan",
+        )
+    )
+
+    try:
+        run_async_safely(
+            _run_field_pipeline(
+                urls=urls,
+                fields=fields,
+                output_dir=output_dir,
+                headless=headless,
+                explore_count=field_explore_count,
+                validate_count=field_validate_count,
+            )
+        )
+
+        console.print(
+            Panel(
+                f"[green]Field extraction finished[/green]\n\n"
+                f"Config: {output_dir}/extraction_config.json\n"
+                f"Explore: {output_dir}/extraction_result.json\n"
+                f"Items: {output_dir}/extracted_items.json",
+                title="Done",
+                style="green",
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted[/yellow]")
+        raise typer.Exit(130)
+    except Exception as e:
+        console.print(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="Execution error",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+
+async def _run_field_pipeline(
+    urls: list[str],
+    fields: list[FieldDefinition],
+    output_dir: str,
+    headless: bool,
+    explore_count: int | None,
+    validate_count: int | None,
+):
+    from .common.config import config
+
+    use_explore = explore_count if explore_count is not None else config.field_extractor.explore_count
+    use_validate = validate_count if validate_count is not None else config.field_extractor.validate_count
+
+    async with create_browser_session(headless=headless, close_engine=True) as session:
+        return await run_field_pipeline(
+            page=session.page,
+            urls=urls,
+            fields=fields,
+            output_dir=output_dir,
+            explore_count=use_explore,
+            validate_count=use_validate,
+            run_xpath=True,
+        )
 
 @app.command("collect-urls")
 def collect_urls_command(

@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
 from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_selected_mark
-from ..llm.prompt_template import render_template
+from common.utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
 from .mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks

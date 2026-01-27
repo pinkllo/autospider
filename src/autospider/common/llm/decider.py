@@ -11,7 +11,7 @@ from ..config import config
 from ..types import Action, ActionType, ScrollInfo
 from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_agent_action
 from ..utils.paths import get_prompt_path
-from .prompt_template import render_template
+from common.utils.prompt_template import render_template
 
 if TYPE_CHECKING:
     from ..types import AgentState

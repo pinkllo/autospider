@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..common.llm.prompt_template import render_template
+from common.utils.prompt_template import render_template
 from ..common.utils.paths import get_prompt_path
 from ..common.protocol import (
     parse_protocol_message,
