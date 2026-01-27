@@ -60,6 +60,7 @@ class URLCollector(BaseCollector):
         task_description: str,
         explore_count: int = 3,
         max_nav_steps: int = 10,
+        target_url_count: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
@@ -72,6 +73,7 @@ class URLCollector(BaseCollector):
             task_description: 任务描述，指导 LLM 识别详情页链接
             explore_count: 探索阶段要进入的详情页数量（默认 3）
             max_nav_steps: 导航阶段允许的最大操作步数
+            target_url_count: 目标采集 URL 数量（可覆盖配置）
             output_dir: 结果和中间配置的输出目录
         """
         # 调用基类初始化，设置基础属性（page, list_url, task_description 等）
@@ -82,6 +84,7 @@ class URLCollector(BaseCollector):
             output_dir=output_dir,
             url_channel=url_channel,
             redis_manager=redis_manager,
+            target_url_count=target_url_count,
         )
 
         self.explore_count = explore_count
@@ -708,6 +711,7 @@ async def collect_detail_urls(
     list_url: str,
     task_description: str,
     explore_count: int = 3,
+    target_url_count: int | None = None,
     output_dir: str = "output",
 ) -> URLCollectorResult:
     """收集详情页 URL 的便捷入口函数
@@ -717,6 +721,7 @@ async def collect_detail_urls(
         list_url: 列表页起始 URL
         task_description: 采集任务描述
         explore_count: 探索详情页的数量
+        target_url_count: 目标采集 URL 数量（可覆盖配置）
         output_dir: 结果输出目录
 
     Returns:
@@ -727,6 +732,7 @@ async def collect_detail_urls(
         list_url=list_url,
         task_description=task_description,
         explore_count=explore_count,
+        target_url_count=target_url_count,
         output_dir=output_dir,
     )
     return await collector.run()

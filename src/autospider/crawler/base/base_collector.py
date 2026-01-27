@@ -61,6 +61,7 @@ class BaseCollector(ABC):
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
+        target_url_count: int | None = None,
     ):
         """初始化 BaseCollector 基类
 
@@ -69,6 +70,7 @@ class BaseCollector(ABC):
             list_url: 目标列表页的起始 URL
             task_description: 对当前采集任务的自然语言描述（用于 LLM 理解）
             output_dir: 结果文件和截图的存储根目录
+            target_url_count: 目标采集 URL 数量（可覆盖配置）
         """
         self.page = page
         self.list_url = list_url
@@ -87,6 +89,13 @@ class BaseCollector(ABC):
         self.nav_steps: list[dict] = []
         # 存储自动发现的详情页 XPath，若存在则优先使用 XPath 模式提高效率
         self.common_detail_xpath: str | None = None
+
+        # 目标采集数量（可由调用方覆盖配置）
+        self.target_url_count = (
+            int(target_url_count)
+            if target_url_count is not None
+            else config.url_collector.target_url_count
+        )
 
         # 自适应速率控制器：根据页面加载成功率动态调整抓取频率，降低封号风险
         self.rate_controller = AdaptiveRateController()
@@ -299,7 +308,7 @@ class BaseCollector(ABC):
             await asyncio.sleep(1)
 
         max_pages = config.url_collector.max_pages
-        target_url_count = config.url_collector.target_url_count
+        target_url_count = self.target_url_count
 
         logger.info(f"目标：收集 {target_url_count} 个 URL，最大翻页: {max_pages}")
 
@@ -350,7 +359,7 @@ class BaseCollector(ABC):
             bool: 本次提取是否发现了新的、未采集过的 URL
         """
         urls_before = len(self.collected_urls)
-        target_url_count = config.url_collector.target_url_count
+        target_url_count = self.target_url_count
 
         try:
             # 获取所有匹配 XPath 的元素
@@ -415,7 +424,7 @@ class BaseCollector(ABC):
 
         max_scrolls = config.url_collector.max_scrolls
         no_new_threshold = config.url_collector.no_new_url_threshold
-        target_url_count = config.url_collector.target_url_count
+        target_url_count = self.target_url_count
         max_pages = config.url_collector.max_pages
 
         logger.info(f"目标：收集 {target_url_count} 个 URL，最大翻页: {max_pages}")
@@ -469,7 +478,7 @@ class BaseCollector(ABC):
             logger.warning("LLM 决策器未初始化")
             return False
 
-        target_url_count = config.url_collector.target_url_count
+        target_url_count = self.target_url_count
         scroll_count = 0
         last_url_count = len(self.collected_urls)
         no_new_urls_count = 0
