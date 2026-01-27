@@ -33,6 +33,7 @@ from ..collector import (
     smart_scroll,
 )
 from ..base.base_collector import BaseCollector
+from ..batch.batch_collector import BatchCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -273,24 +274,28 @@ class URLCollector(BaseCollector):
             self.pagination_handler.current_page_num = actual_page
             print(f"[Phase 3.7] ✓ 已定位到第 {actual_page} 页，继续收集")
 
-        # 4. 收集阶段
-        if self.common_detail_xpath:
-            print("\n[Phase 4] 收集阶段：使用公共 xpath 遍历列表页...")
-            await self._collect_phase_with_xpath()
-        else:
-            print("\n[Phase 4] 收集阶段：LLM 遍历列表页...")
-            await self._collect_phase_with_llm()
-
-        # 4.5 持久化配置
-        print("\n[Phase 4.5] 持久化配置...")
+        # 4. 持久化配置
+        print("\n[Phase 4] 持久化配置...")
         self._save_config()
 
-        # 5. 生成爬虫脚本
-        print("\n[Phase 5] 生成爬虫脚本...")
+        # 5. 收集阶段（批量模式：直接复用 BatchCollector）
+        print("\n[Phase 5] 收集阶段：使用 BatchCollector 批量爬取...")
+        batch_collector = BatchCollector(
+            page=self.page,
+            config_path=self.output_dir / "collection_config.json",
+            output_dir=self.output_dir,
+            url_channel=self.url_channel,
+            redis_manager=self.redis_manager,
+        )
+        batch_result = await batch_collector.collect_from_config()
+        self.collected_urls = batch_result.collected_urls
+
+        # 6. 生成爬虫脚本
+        print("\n[Phase 6] 生成爬虫脚本...")
         crawler_script = await self._generate_crawler_script()
 
-        # 6. 保存结果
-        print("\n[Phase 6] 保存结果 (collected_urls.json / urls.txt / spider.py)...")
+        # 7. 保存结果
+        print("\n[Phase 7] 保存结果 (collected_urls.json / urls.txt / spider.py)...")
         result = self._create_result()
         await self._save_result(result, crawler_script)
 
@@ -619,7 +624,7 @@ class URLCollector(BaseCollector):
             task_description=self.task_description,
         )
         self.config_persistence.save(collection_config)
-        print("[Phase 4.5] ✓ 配置已持久化")
+        print("[Phase 4] ✓ 配置已持久化")
 
     async def _generate_crawler_script(self) -> str:
         """根据探索到的 XPath 和导航步数，自动生成独立的 Scrapy 爬虫脚本
