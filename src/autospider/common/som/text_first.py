@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
-from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_selected_mark
+from ..protocol import parse_protocol_message
 from common.utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
 from .mark_id_validator import MarkIdValidator
@@ -177,13 +177,20 @@ async def disambiguate_mark_id_by_text(
         response = await llm.ainvoke(messages)
         response_text = getattr(response, "content", "") or ""
 
-        data = parse_json_dict_from_llm(response_text)
-        if not data:
+        message = parse_protocol_message(response_text)
+        if not message:
+            continue
+        if message.get("action") != "select":
             continue
 
-        data = protocol_to_legacy_selected_mark(data)
-
-        selected = data.get("selected_mark_id") or data.get("mark_id")
+        args = message.get("args") if isinstance(message.get("args"), dict) else {}
+        selected = args.get("selected_mark_id")
+        if selected is None:
+            items = args.get("items") or []
+            if items and isinstance(items[0], dict):
+                selected = items[0].get("mark_id")
+        if selected is None:
+            selected = args.get("mark_id")
         try:
             selected_index = int(selected)
         except (TypeError, ValueError):

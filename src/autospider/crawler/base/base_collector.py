@@ -494,38 +494,49 @@ class BaseCollector(ABC):
                     snapshot, screenshot_base64
                 )
 
-                if llm_decision and llm_decision.get("action") == "select_detail_links":
-                    mark_id_text_map = llm_decision.get("mark_id_text_map", {})
-                    old_mark_ids = llm_decision.get("mark_ids", [])
-                    mark_ids: list[int] = []
+                if llm_decision and llm_decision.get("action") == "select":
+                    args = (
+                        llm_decision.get("args")
+                        if isinstance(llm_decision.get("args"), dict)
+                        else {}
+                    )
+                    purpose = (args.get("purpose") or "").lower()
+                    if purpose in {"detail_links", "detail_link", "detail"}:
+                        items = args.get("items") or []
+                        mark_id_text_map = {
+                            str(it.get("mark_id")): str(it.get("text") or it.get("target_text") or "")
+                            for it in items
+                            if isinstance(it, dict) and it.get("mark_id") is not None
+                        }
+                        if not mark_id_text_map:
+                            mark_id_text_map = args.get("mark_id_text_map", {}) or {}
 
-                    if mark_id_text_map:
-                        if config.url_collector.validate_mark_id:
-                            # 文本优先验证逻辑：防止 LLM 识别的 Mark ID 漂移或失效
-                            mark_ids = await resolve_mark_ids_from_map(
-                                page=self.page,
-                                llm=self.llm_decision_maker.decider.llm,
-                                snapshot=snapshot,
-                                mark_id_text_map=mark_id_text_map,
-                                max_retries=config.url_collector.max_validation_retries,
-                            )
-                        else:
-                            mark_ids = [int(k) for k in mark_id_text_map.keys()]
-                    elif old_mark_ids:
-                        mark_ids = old_mark_ids
+                        mark_ids: list[int] = []
+                        if mark_id_text_map:
+                            if config.url_collector.validate_mark_id:
+                                # 文本优先验证逻辑：防止 LLM 识别的 Mark ID 漂移或失效
+                                mark_ids = await resolve_mark_ids_from_map(
+                                    page=self.page,
+                                    llm=self.llm_decision_maker.decider.llm,
+                                    snapshot=snapshot,
+                                    mark_id_text_map=mark_id_text_map,
+                                    max_retries=config.url_collector.max_validation_retries,
+                                )
+                            else:
+                                mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
 
-                    logger.info(f"LLM 识别到 {len(mark_ids)} 个详情链接")
+                        logger.info(f"LLM 识别到 {len(mark_ids)} 个详情链接")
 
-                    # 3. 提取所选元素的 URL
-                    candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
-                    for candidate in candidates:
-                        if self.url_extractor:
-                            url = await self.url_extractor.extract_from_element(
-                                candidate, snapshot, nav_steps=self.nav_steps
-                            )
-                            if url and url not in self.collected_urls:
-                                self.collected_urls.append(url)
-                                await self._publish_url(url)
+                        # 3. 提取所选元素的 URL
+                        candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
+                        for candidate in candidates:
+                            if self.url_extractor:
+                                url = await self.url_extractor.extract_from_element(
+                                    candidate, snapshot, nav_steps=self.nav_steps
+                                )
+                                if url and url not in self.collected_urls:
+                                    self.collected_urls.append(url)
+                                    await self._publish_url(url)
 
                 # 4. 统计更新情况
                 current_count = len(self.collected_urls)

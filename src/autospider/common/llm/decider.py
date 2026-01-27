@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 
 from ..config import config
 from ..types import Action, ActionType, ScrollInfo
-from ..protocol import parse_json_dict_from_llm, protocol_to_legacy_agent_action
+from ..protocol import parse_protocol_message
 from ..utils.paths import get_prompt_path
 from common.utils.prompt_template import render_template
 
@@ -469,18 +469,15 @@ class LLMDecider:
 
     def _parse_response(self, response_text: str) -> Action:
         """解析 LLM 响应"""
-        data = parse_json_dict_from_llm(response_text)
-        if not data:
+        message = parse_protocol_message(response_text)
+        if not message:
             return Action(
                 action=ActionType.RETRY,
                 thinking=f"无法解析 LLM 响应: {response_text[:200]}",
             )
 
-        # 兼容：统一输出结构（action/args）→ 扁平结构
-        data = protocol_to_legacy_agent_action(data)
-
         # 解析 action 类型
-        action_str_raw = data.get("action") or ""
+        action_str_raw = message.get("action") or ""
         action_str = str(action_str_raw).strip().lower()
         action_aliases = {
             # 常见同义/历史动作名
@@ -488,6 +485,8 @@ class LLMDecider:
             "scroll_up": "scroll",
         }
         action_str = action_aliases.get(action_str, action_str)
+
+        args = message.get("args") if isinstance(message.get("args"), dict) else {}
 
         action_type: ActionType | None = None
         if action_str:
@@ -500,19 +499,19 @@ class LLMDecider:
         # 为避免被误判为 retry 并陷入循环，这里对缺失/非法 action 做自动推断。
         inferred = False
         if action_type is None:
-            if data.get("text") and data.get("mark_id") is not None:
+            if args.get("text") and args.get("mark_id") is not None:
                 action_type = ActionType.TYPE
                 inferred = True
-            elif data.get("key"):
+            elif args.get("key"):
                 action_type = ActionType.PRESS
                 inferred = True
-            elif data.get("scroll_delta") is not None:
+            elif args.get("scroll_delta") is not None:
                 action_type = ActionType.SCROLL
                 inferred = True
-            elif data.get("url"):
+            elif args.get("url"):
                 action_type = ActionType.NAVIGATE
                 inferred = True
-            elif data.get("mark_id") is not None:
+            elif args.get("mark_id") is not None:
                 action_type = ActionType.CLICK
                 inferred = True
             else:
@@ -520,30 +519,30 @@ class LLMDecider:
 
         # 解析 scroll_delta
         scroll_delta = None
-        if "scroll_delta" in data:
-            sd = data["scroll_delta"]
+        if "scroll_delta" in args:
+            sd = args["scroll_delta"]
             if isinstance(sd, list) and len(sd) == 2:
                 scroll_delta = (int(sd[0]), int(sd[1]))
 
-        thinking = data.get("thinking", "") or ""
+        thinking = message.get("thinking", "") or args.get("reasoning") or ""
         if inferred and not thinking:
             thinking = f"自动推断动作: {action_type.value}"
         if action_type == ActionType.RETRY and not thinking:
             thinking = "LLM 输出未包含可执行 action，已进入重试"
 
         # 修改原因：当 action=retry 时，清空 mark_id/target_text，避免上层误以为“重试仍指向同一元素”并造成循环提示噪音。
-        mark_id = None if action_type == ActionType.RETRY else data.get("mark_id")
-        target_text = None if action_type == ActionType.RETRY else data.get("target_text")
+        mark_id = None if action_type == ActionType.RETRY else args.get("mark_id")
+        target_text = None if action_type == ActionType.RETRY else args.get("target_text")
 
         return Action(
             action=action_type,
             mark_id=mark_id,
             target_text=target_text,
-            text=data.get("text"),
-            key=data.get("key"),
-            url=data.get("url"),
+            text=args.get("text"),
+            key=args.get("key"),
+            url=args.get("url"),
             scroll_delta=scroll_delta,
-            timeout_ms=data.get("timeout_ms") or 5000,
+            timeout_ms=args.get("timeout_ms") or 5000,
             thinking=thinking,
-            expectation=data.get("expectation"),
+            expectation=args.get("expectation"),
         )

@@ -90,18 +90,6 @@ def run_async_safely(coro):
 def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
     payload = ""
 
-def _load_urls(urls_file: str) -> list[str]:
-    path = Path(urls_file)
-    if not path.exists():
-        raise ValueError(f"URL file not found: {urls_file}")
-
-    content = path.read_text(encoding="utf-8")
-    urls = [line.strip() for line in content.splitlines() if line.strip()]
-    if not urls:
-        raise ValueError("URL file is empty")
-    return urls
-
-
     if fields_file:
         path = Path(fields_file)
         if not path.exists():
@@ -144,6 +132,17 @@ def _load_urls(urls_file: str) -> list[str]:
         raise ValueError("字段定义不能为空")
 
     return fields
+
+def _load_urls(urls_file: str) -> list[str]:
+    path = Path(urls_file)
+    if not path.exists():
+        raise ValueError(f"URL file not found: {urls_file}")
+
+    content = path.read_text(encoding="utf-8")
+    urls = [line.strip() for line in content.splitlines() if line.strip()]
+    if not urls:
+        raise ValueError("URL file is empty")
+    return urls
 
 
 @app.command("generate-config")

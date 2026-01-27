@@ -22,6 +22,7 @@ from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
+from ..common.protocol import coerce_bool
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
 
@@ -110,7 +111,8 @@ class FieldExtractor:
             action = step.get("action", "unknown")
             parts = [f"{step.get('step', '?')}. {action}"]
             decision = step.get("decision") or {}
-            mark_id = decision.get("mark_id")
+            args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
+            mark_id = args.get("mark_id")
             if mark_id:
                 parts.append(f"mark_id={mark_id}")
             summary_lines.append(" ".join(parts))
@@ -125,7 +127,8 @@ class FieldExtractor:
             if step.get("action") != "click":
                 continue
             decision = step.get("decision") or {}
-            mark_id = decision.get("mark_id")
+            args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
+            mark_id = args.get("mark_id")
             try:
                 clicked.add(int(mark_id))
             except (TypeError, ValueError):
@@ -214,11 +217,20 @@ class FieldExtractor:
                 screenshot_base64=screenshot_base64,
                 field=field,
             )
-            if extract_result and extract_result.get("found"):
-                field_text = extract_result.get("field_value")
-                result.confidence = extract_result.get("confidence", 0.8)
-                await self._finalize_extraction(result, field, field_text)
-                return result
+            if extract_result and extract_result.get("action") == "extract":
+                args = (
+                    extract_result.get("args")
+                    if isinstance(extract_result.get("args"), dict)
+                    else {}
+                )
+                found = coerce_bool(args.get("found"))
+                if found is None:
+                    found = bool(args.get("field_value") or args.get("field_text"))
+                if found:
+                    field_text = args.get("field_value") or args.get("field_text")
+                    result.confidence = args.get("confidence", 0.8)
+                    await self._finalize_extraction(result, field, field_text)
+                    return result
 
         # 阶段 1：导航到目标字段
         nav_result = await self._navigate_to_field(field, nav_steps)
@@ -227,12 +239,21 @@ class FieldExtractor:
             result.error = "导航阶段未找到字段"
             return result
 
-        if nav_result.get("action") == "field_not_exist":
-            result.error = f"字段不存在: {nav_result.get('reasoning', '')}"
-            return result
+        nav_action = nav_result.get("action")
+        nav_args = nav_result.get("args") if isinstance(nav_result.get("args"), dict) else {}
+
+        if nav_action == "extract":
+            found = coerce_bool(nav_args.get("found"))
+            if found is None:
+                found = bool(nav_args.get("field_value") or nav_args.get("field_text"))
+            if not found:
+                result.error = f"字段不存在: {nav_args.get('reasoning', '')}"
+                return result
 
         # 阶段 2：提取字段值
-        field_text = nav_result.get("field_text") or nav_result.get("field_value")
+        field_text = None
+        if nav_action == "extract":
+            field_text = nav_args.get("field_text") or nav_args.get("field_value")
 
         if not field_text:
             # 如果导航阶段没有直接返回文本，再次调用 LLM 提取
@@ -242,9 +263,18 @@ class FieldExtractor:
                 field=field,
             )
 
-            if extract_result and extract_result.get("found"):
-                field_text = extract_result.get("field_value")
-                result.confidence = extract_result.get("confidence", 0.8)
+            if extract_result and extract_result.get("action") == "extract":
+                args = (
+                    extract_result.get("args")
+                    if isinstance(extract_result.get("args"), dict)
+                    else {}
+                )
+                found = coerce_bool(args.get("found"))
+                if found is None:
+                    found = bool(args.get("field_value") or args.get("field_text"))
+                if found:
+                    field_text = args.get("field_value") or args.get("field_text")
+                    result.confidence = args.get("confidence", 0.8)
 
         if not field_text:
             result.error = "无法提取字段文本"
@@ -326,8 +356,9 @@ class FieldExtractor:
                 continue
 
             action = decision.get("action")
+            args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
 
-            if action == "scroll_down" and not might_contain:
+            if action == "scroll" and not might_contain:
                 clicked_ids = self._get_clicked_mark_ids(nav_steps, field.name)
                 candidates = self.field_decider.get_clickable_candidate_ids(
                     snapshot, exclude_ids=clicked_ids, max_candidates=5
@@ -335,7 +366,10 @@ class FieldExtractor:
                 if candidates:
                     action = "click"
                     decision["action"] = "click"
-                    decision["mark_id"] = candidates[0]
+                    if not isinstance(decision.get("args"), dict):
+                        decision["args"] = {}
+                    decision["args"]["mark_id"] = candidates[0]
+                    args = decision["args"]
 
             # 记录导航步骤
             nav_steps.append(
@@ -349,19 +383,22 @@ class FieldExtractor:
             )
 
             # 处理不同的决策
-            if action == "found_field":
-                print(f"[FieldExtractor] ✓ 找到字段: {decision.get('field_text', '')[:50]}...")
-                await clear_overlay(self.page)
-                return decision
-
-            elif action == "field_not_exist":
+            if action == "extract":
+                found = coerce_bool(args.get("found"))
+                if found is None:
+                    found = bool(args.get("field_value") or args.get("field_text"))
+                if found:
+                    field_text = args.get("field_value") or args.get("field_text") or ""
+                    print(f"[FieldExtractor] ✓ 找到字段: {field_text[:50]}...")
+                    await clear_overlay(self.page)
+                    return decision
                 print("[FieldExtractor] ✗ 字段不存在")
                 await clear_overlay(self.page)
                 return decision
 
             elif action == "click":
-                mark_id_raw = decision.get("mark_id")
-                target_text = decision.get("target_text") or ""
+                mark_id_raw = args.get("mark_id")
+                target_text = args.get("target_text") or ""
                 mark_id_value = None
                 if mark_id_raw is not None:
                     try:
@@ -385,9 +422,9 @@ class FieldExtractor:
                 await asyncio.sleep(1.0)
 
             elif action == "type":
-                mark_id = decision.get("mark_id")
-                target_text = decision.get("target_text") or ""
-                text = decision.get("text")
+                mark_id = args.get("mark_id")
+                target_text = args.get("target_text") or ""
+                text = args.get("text")
                 if mark_id and text:
                     try:
                         mark_id_value = int(mark_id)
@@ -408,9 +445,9 @@ class FieldExtractor:
                 await asyncio.sleep(0.5)
 
             elif action == "press":
-                key = decision.get("key") or "Enter"
-                mark_id = decision.get("mark_id")
-                target_text = decision.get("target_text") or ""
+                key = args.get("key") or "Enter"
+                mark_id = args.get("mark_id")
+                target_text = args.get("target_text") or ""
                 mark_id_value = None
                 if mark_id is not None:
                     try:
@@ -430,8 +467,13 @@ class FieldExtractor:
                 await self._execute_press(key, mark_id_value, snapshot)
                 await asyncio.sleep(0.5)
 
-            elif action == "scroll_down":
-                await self.page.evaluate("window.scrollBy(0, 500)")
+            elif action == "scroll":
+                delta = args.get("scroll_delta")
+                if isinstance(delta, (list, tuple)) and len(delta) == 2:
+                    dx, dy = int(delta[0]), int(delta[1])
+                else:
+                    dx, dy = 0, 500
+                await self.page.evaluate("([dx, dy]) => window.scrollBy(dx, dy)", [dx, dy])
                 await asyncio.sleep(0.5)
 
             else:
@@ -610,8 +652,15 @@ class FieldExtractor:
         # 清除高亮
         await self._clear_highlights()
 
-        if selection:
-            selected_mark_id = selection.get("selected_mark_id")
+        if selection and selection.get("action") == "select":
+            args = selection.get("args") if isinstance(selection.get("args"), dict) else {}
+            selected_mark_id = args.get("selected_mark_id")
+            if selected_mark_id is None:
+                items = args.get("items") or []
+                if items and isinstance(items[0], dict):
+                    selected_mark_id = items[0].get("mark_id")
+            if selected_mark_id is None:
+                selected_mark_id = args.get("mark_id")
             try:
                 index = int(selected_mark_id) - 1
                 if 0 <= index < len(matches):

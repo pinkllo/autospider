@@ -366,9 +366,16 @@ class URLCollector(BaseCollector):
                 continue
 
             decision_type = llm_decision.get("action")
+            decision_args = (
+                llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+            )
 
             # 处理决策结果
-            if decision_type == "current_is_detail":
+            if (
+                decision_type == "report"
+                and (decision_args.get("kind") or "").lower() == "page_kind"
+                and (decision_args.get("page_kind") or "").lower() == "detail"
+            ):
                 if await self._handle_current_is_detail(explored):
                     explored += 1
                     consecutive_bottom_hits = 0
@@ -381,7 +388,10 @@ class URLCollector(BaseCollector):
                         consecutive_bottom_hits = 0
                 continue
 
-            if decision_type == "select_detail_links":
+            if decision_type == "select" and (
+                (decision_args.get("purpose") or "").lower()
+                in {"detail_links", "detail_link", "detail"}
+            ):
                 new_explored = await self._handle_select_detail_links(
                     llm_decision, snapshot, screenshot_base64, explored
                 )
@@ -397,10 +407,19 @@ class URLCollector(BaseCollector):
                         consecutive_bottom_hits = 0
                 continue
 
-            if decision_type == "click_to_enter":
+            if decision_type == "click":
                 if await self._handle_click_to_enter(llm_decision, snapshot):
                     explored += 1
                     consecutive_bottom_hits = 0
+                continue
+
+            if decision_type == "scroll":
+                if await smart_scroll(self.page):
+                    consecutive_bottom_hits = 0
+                else:
+                    consecutive_bottom_hits += 1
+                    if consecutive_bottom_hits >= max_bottom_hits:
+                        break
                 continue
 
     async def _handle_current_is_detail(self, explored: int) -> bool:
@@ -439,9 +458,17 @@ class URLCollector(BaseCollector):
         self, llm_decision: dict, snapshot: "SoMSnapshot", screenshot_base64: str, explored: int
     ) -> int:
         """处理选择详情链接的情况"""
-        reasoning = llm_decision.get("reasoning", "")
-        mark_id_text_map = llm_decision.get("mark_id_text_map", {})
-        old_mark_ids = llm_decision.get("mark_ids", [])
+        args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+        reasoning = args.get("reasoning", "")
+        items = args.get("items") or []
+        mark_id_text_map = {
+            str(it.get("mark_id")): str(it.get("text") or it.get("target_text") or "")
+            for it in items
+            if isinstance(it, dict) and it.get("mark_id") is not None
+        }
+        if not mark_id_text_map:
+            mark_id_text_map = args.get("mark_id_text_map", {}) or {}
+        old_mark_ids = args.get("mark_ids", [])
 
         mark_ids = []
 
@@ -461,7 +488,7 @@ class URLCollector(BaseCollector):
             else:
                 mark_ids = [int(k) for k in mark_id_text_map.keys()]
         elif old_mark_ids:
-            print(f"[Explore] LLM 使用旧格式返回了 {len(old_mark_ids)} 个 mark_ids")
+            print(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
             mark_ids = old_mark_ids
 
         if not mark_ids:
@@ -521,8 +548,9 @@ class URLCollector(BaseCollector):
         Returns:
             bool: 是否成功获取到详情页 URL
         """
-        mark_id_raw = llm_decision.get("mark_id")
-        target_text = llm_decision.get("target_text") or ""
+        args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+        mark_id_raw = args.get("mark_id")
+        target_text = args.get("target_text") or ""
         try:
             mark_id = int(mark_id_raw) if mark_id_raw is not None else None
         except (TypeError, ValueError):

@@ -9,12 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.utils.prompt_template import render_template
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
-from ...common.protocol import (
-    parse_json_dict_from_llm,
-    protocol_to_legacy_jump_widget_result,
-    protocol_to_legacy_pagination_result,
-    protocol_to_legacy_url_decision,
-)
+from ...common.protocol import parse_protocol_message
 from ...common.utils.paths import get_prompt_path
 
 if TYPE_CHECKING:
@@ -116,13 +111,13 @@ class LLMDecisionMaker:
             response_text = response.content
             print(f"[LLM] 响应前100字符: {response_text[:100]}...")
 
-            data = parse_json_dict_from_llm(response_text)
-            if data:
-                # 兼容：统一输出结构（action/args）→ URLCollector 旧决策结构
-                legacy = protocol_to_legacy_url_decision(data)
-                print(f"[LLM] 决策: {legacy.get('action')}")
-                print(f"[LLM] 理由: {legacy.get('reasoning', 'N/A')[:100]}...")
-                return legacy
+            message = parse_protocol_message(response_text)
+            if message:
+                args = message.get("args") if isinstance(message.get("args"), dict) else {}
+                reasoning = args.get("reasoning") or message.get("thinking") or "N/A"
+                print(f"[LLM] 决策: {message.get('action')}")
+                print(f"[LLM] 理由: {str(reasoning)[:100]}...")
+                return message
 
             print(f"[LLM] 响应中未找到 JSON: {response_text[:200]}")
         except json.JSONDecodeError as e:
@@ -188,9 +183,9 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
 
-            data = parse_json_dict_from_llm(response_text)
-            if data:
-                return protocol_to_legacy_jump_widget_result(data)
+            message = parse_protocol_message(response_text)
+            if message:
+                return message
         except Exception as e:
             print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
 
@@ -230,9 +225,9 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
 
-            data = parse_json_dict_from_llm(response_text)
-            if data:
-                return protocol_to_legacy_pagination_result(data)
+            message = parse_protocol_message(response_text)
+            if message:
+                return message
         except Exception as e:
             print(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
 

@@ -15,12 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.utils.prompt_template import render_template
 from ..common.utils.paths import get_prompt_path
-from ..common.protocol import (
-    parse_protocol_message,
-    protocol_to_legacy_field_extract_result,
-    protocol_to_legacy_field_nav_decision,
-    protocol_to_legacy_selected_mark,
-)
+from ..common.protocol import parse_protocol_message, coerce_bool
 from .models import FieldDefinition
 
 if TYPE_CHECKING:
@@ -54,62 +49,8 @@ class FieldDecider:
         self.page = page
         self.decider = decider
 
-    def _strip_code_fences(self, text: str) -> str:
-        if "```" not in text:
-            return text
-        cleaned = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE)
-        return cleaned.replace("```", "").strip()
-
-    def _extract_json_block(self, text: str) -> str | None:
-        match = re.search(r"\{[\s\S]*\}", text)
-        return match.group(0) if match else None
-
-    def _salvage_response(self, text: str) -> dict | None:
-        data: dict = {}
-
-        action_match = re.search(r'"action"\s*:\s*"?(?P<action>[a-zA-Z_]+)', text)
-        if action_match:
-            data["action"] = action_match.group("action")
-
-        mark_id_match = re.search(r'"mark_id"\s*:\s*"?(?P<mark_id>\d+)', text)
-        if mark_id_match:
-            data["mark_id"] = mark_id_match.group("mark_id")
-
-        selected_match = re.search(r'"selected_mark_id"\s*:\s*"?(?P<selected>\d+)', text)
-        if selected_match:
-            data["selected_mark_id"] = selected_match.group("selected")
-
-        found_match = re.search(r'"found"\s*:\s*(true|false)', text, re.IGNORECASE)
-        if found_match:
-            data["found"] = found_match.group(1).lower() == "true"
-
-        confidence_match = re.search(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)', text)
-        if confidence_match:
-            try:
-                data["confidence"] = float(confidence_match.group(1))
-            except ValueError:
-                pass
-
-        for key in [
-            "field_value",
-            "field_text",
-            "reasoning",
-            "location_description",
-            "target_text",
-        ]:
-            value_match = re.search(rf'"{key}"\s*:\s*"([^"]*)', text)
-            if value_match:
-                data[key] = value_match.group(1)
-
-        for key in ["text", "key"]:
-            value_match = re.search(rf'"{key}"\s*:\s*"([^"]*)', text)
-            if value_match:
-                data[key] = value_match.group(1)
-
-        return data or None
-
     def _parse_response_json(self, response_text: str) -> dict | None:
-        # 修改原因：协议兼容统一收口到 common.protocol，避免各处重复补丁。
+        # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
         return parse_protocol_message(response_text)
 
     def _compact_text(self, text: str, max_len: int = 60) -> str:
@@ -117,6 +58,17 @@ class FieldDecider:
         if len(cleaned) > max_len:
             return cleaned[: max_len - 3] + "..."
         return cleaned
+
+    def _normalize_field_name(self, value: str | None) -> str:
+        if not value:
+            return ""
+        cleaned = re.sub(r"\s+", "", str(value)).strip().lower()
+        return cleaned
+
+    def _field_names_match(self, reported: str | None, expected: str) -> bool:
+        r = self._normalize_field_name(reported)
+        e = self._normalize_field_name(expected)
+        return not r or not e or r == e or r in e or e in r
 
     def _get_candidate_label(self, mark: "ElementMark") -> str:
         if mark.text:
@@ -296,10 +248,10 @@ class FieldDecider:
         决定导航操作
 
         根据当前页面状态和目标字段，决定下一步操作：
-        - found_field: 已找到目标字段
+        - extract: 已找到目标字段（found=true）
         - click: 点击元素展开更多
-        - scroll_down: 向下滚动
-        - field_not_exist: 字段不存在
+        - scroll: 向下滚动
+        - extract: 字段不存在（found=false）
 
         Args:
             snapshot: SoM 快照
@@ -380,12 +332,25 @@ class FieldDecider:
             response_text = response.content
             print(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            data = self._parse_response_json(response_text)
-            if data:
-                # 兼容：统一输出结构（action/args）→ 字段导航旧结构
-                data = protocol_to_legacy_field_nav_decision(data, field.name)
-                print(f"[FieldDecider] 决策: {data.get('action')}")
-                return data
+            message = self._parse_response_json(response_text)
+            if message:
+                action = message.get("action")
+                args = message.get("args") if isinstance(message.get("args"), dict) else {}
+
+                if action == "extract":
+                    kind = str(args.get("kind") or "").lower()
+                    if kind and kind != "field":
+                        print(f"[FieldDecider] kind 不匹配: {kind}")
+                        return None
+                    field_name = args.get("field_name")
+                    if field_name and not self._field_names_match(field_name, field.name):
+                        print(
+                            f"[FieldDecider] 字段名不匹配: '{field_name}' != '{field.name}'"
+                        )
+                        return None
+
+                print(f"[FieldDecider] 决策: {action}")
+                return message
             print("[FieldDecider] 响应中未找到 JSON")
         except Exception as e:
             print(f"[FieldDecider] 决策失败: {e}")
@@ -446,15 +411,34 @@ class FieldDecider:
             response_text = response.content
             print(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            data = self._parse_response_json(response_text)
-            if data:
-                # 兼容：统一输出结构（action/args）→ 字段提取旧结构
-                data = protocol_to_legacy_field_extract_result(data, field.name)
-                if data.get("found"):
-                    print(f"[FieldDecider] 提取到值: {data.get('field_value', '')[:50]}...")
+            message = self._parse_response_json(response_text)
+            if message:
+                action = message.get("action")
+                args = message.get("args") if isinstance(message.get("args"), dict) else {}
+
+                if action != "extract":
+                    print(f"[FieldDecider] 非 extract 动作，忽略: {action}")
+                    return None
+
+                kind = str(args.get("kind") or "").lower()
+                if kind and kind != "field":
+                    print(f"[FieldDecider] kind 不匹配: {kind}")
+                    return None
+
+                field_name = args.get("field_name")
+                if field_name and not self._field_names_match(field_name, field.name):
+                    print(f"[FieldDecider] 字段名不匹配: '{field_name}' != '{field.name}'")
+                    return None
+
+                found = coerce_bool(args.get("found"))
+                if found is None:
+                    found = bool(args.get("field_value") or args.get("field_text"))
+                if found:
+                    value = args.get("field_value") or args.get("field_text") or ""
+                    print(f"[FieldDecider] 提取到值: {str(value)[:50]}...")
                 else:
                     print("[FieldDecider] 未找到字段")
-                return data
+                return message
         except Exception as e:
             print(f"[FieldDecider] 提取失败: {e}")
 
@@ -515,12 +499,23 @@ class FieldDecider:
             response_text = response.content
             print(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            data = self._parse_response_json(response_text)
-            if data:
-                # 兼容：统一输出结构（action/args）→ selected_mark_id 旧结构
-                data = protocol_to_legacy_selected_mark(data)
-                print(f"[FieldDecider] 选择: mark_id={data.get('selected_mark_id')}")
-                return data
+            message = self._parse_response_json(response_text)
+            if message:
+                action = message.get("action")
+                if action != "select":
+                    print(f"[FieldDecider] 非 select 动作，忽略: {action}")
+                    return None
+
+                args = message.get("args") if isinstance(message.get("args"), dict) else {}
+                selected = args.get("selected_mark_id")
+                if selected is None:
+                    items = args.get("items") or []
+                    if items and isinstance(items[0], dict):
+                        selected = items[0].get("mark_id")
+                if selected is None:
+                    selected = args.get("mark_id")
+                print(f"[FieldDecider] 选择: mark_id={selected}")
+                return message
         except Exception as e:
             print(f"[FieldDecider] 消歧失败: {e}")
 

@@ -15,6 +15,7 @@ from ...common.som import (
 )
 from ...common.som.text_first import resolve_single_mark_id
 from ...common.types import Action, ActionType
+from ...common.protocol import coerce_bool
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -269,11 +270,17 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            if data and data.get("found"):
-                input_mark_id = data.get("input_mark_id")
-                button_mark_id = data.get("button_mark_id")
-                input_text = data.get("input_text") or ""
-                button_text = data.get("button_text") or ""
+            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            purpose = (args.get("purpose") or "").lower()
+            found = coerce_bool(args.get("found"), default=True)
+
+            if data and data.get("action") == "select" and purpose in {"jump_widget", "page_jump"} and found:
+                input_obj = args.get("input") if isinstance(args.get("input"), dict) else {}
+                button_obj = args.get("button") if isinstance(args.get("button"), dict) else {}
+                input_mark_id = input_obj.get("mark_id")
+                button_mark_id = button_obj.get("mark_id")
+                input_text = input_obj.get("text") or ""
+                button_text = button_obj.get("text") or ""
 
                 print(
                     f"[Extract-JumpWidget-LLM] 找到输入框 [{input_mark_id}], 按钮 [{button_mark_id}]"
@@ -349,8 +356,9 @@ class PaginationHandler:
                     print("[Extract-JumpWidget-LLM] 找到输入框但未找到按钮的 xpath")
                     return None
             else:
+                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
                 print(
-                    f"[Extract-JumpWidget-LLM] 未找到跳转控件: {data.get('reasoning', '') if data else ''}"
+                    f"[Extract-JumpWidget-LLM] 未找到跳转控件: {reasoning if data else ''}"
                 )
         except Exception as e:
             print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
@@ -380,11 +388,27 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            if data and data.get("found") and data.get("mark_id"):
-                mark_id_raw = data["mark_id"]
-                target_text = data.get("target_text") or ""
+            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            purpose = (args.get("purpose") or "").lower()
+            found = coerce_bool(args.get("found"), default=True)
+            item = None
+            items = args.get("items") or []
+            if items and isinstance(items[0], dict):
+                item = items[0]
+
+            mark_id_raw = None
+            target_text = ""
+            if item:
+                mark_id_raw = item.get("mark_id")
+                target_text = item.get("text") or ""
+            if mark_id_raw is None:
+                mark_id_raw = args.get("mark_id")
+                target_text = target_text or (args.get("target_text") or "")
+
+            if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
+                reasoning = args.get("reasoning") or ""
                 print(
-                    f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw}]: {data.get('reasoning', '')}"
+                    f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw}]: {reasoning}"
                 )
 
                 try:
@@ -415,8 +439,9 @@ class PaginationHandler:
                         print(f"[Extract-Pagination-LLM] ✓ 提取到 xpath: {best_xpath}")
                         return best_xpath
             else:
+                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
                 print(
-                    f"[Extract-Pagination-LLM] 未找到分页按钮: {data.get('reasoning', '') if data else ''}"
+                    f"[Extract-Pagination-LLM] 未找到分页按钮: {reasoning if data else ''}"
                 )
         except Exception as e:
             print(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
@@ -583,9 +608,24 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            if data and data.get("found") and data.get("mark_id"):
-                mark_id_raw = data["mark_id"]
-                target_text = data.get("target_text") or ""
+            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            purpose = (args.get("purpose") or "").lower()
+            found = coerce_bool(args.get("found"), default=True)
+            item = None
+            items = args.get("items") or []
+            if items and isinstance(items[0], dict):
+                item = items[0]
+
+            mark_id_raw = None
+            target_text = ""
+            if item:
+                mark_id_raw = item.get("mark_id")
+                target_text = item.get("text") or ""
+            if mark_id_raw is None:
+                mark_id_raw = args.get("mark_id")
+                target_text = target_text or (args.get("target_text") or "")
+
+            if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
                 print(f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw}]")
 
                 try:
@@ -650,7 +690,8 @@ class PaginationHandler:
                 print(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                 return True
             else:
-                print(f"[Pagination-LLM] 未找到下一页: {data.get('reasoning', '') if data else ''}")
+                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
+                print(f"[Pagination-LLM] 未找到下一页: {reasoning if data else ''}")
         except Exception as e:
             print(f"[Pagination-LLM] LLM 识别失败: {e}")
 
