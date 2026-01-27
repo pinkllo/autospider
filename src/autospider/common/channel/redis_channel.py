@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import os
 from typing import Callable
 
 from .base import URLChannel, URLTask
 from ..storage.redis_manager import RedisQueueManager
+from ..config import config
 
 
 class RedisURLChannel(URLChannel):
@@ -28,12 +30,43 @@ class RedisURLChannel(URLChannel):
         self.block_ms = block_ms
         self.max_retries = max_retries
         self._connected = False
+        self._recover_task: asyncio.Task | None = None
+
+    async def _recover_pending_once(self) -> None:
+        if not self._connected or not config.redis.auto_recover:
+            return
+        await self.manager.recover_stale_tasks(
+            consumer_name=self.consumer_name,
+            max_idle_ms=config.redis.task_timeout_ms,
+            count=config.redis.fetch_batch_size,
+        )
+
+    def _start_recover_loop(self) -> None:
+        if self._recover_task is not None or not config.redis.auto_recover:
+            return
+
+        interval_s = max(1, int(config.redis.task_timeout_ms / 1000))
+
+        async def _loop() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(interval_s)
+                    await self._recover_pending_once()
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    continue
+
+        self._recover_task = asyncio.create_task(_loop())
 
     async def _ensure_connected(self) -> None:
         if self._connected:
             return
         client = await self.manager.connect()
         self._connected = client is not None
+        if self._connected and config.redis.auto_recover:
+            await self._recover_pending_once()
+            self._start_recover_loop()
 
     async def publish(self, url: str) -> None:
         await self._ensure_connected()
@@ -81,3 +114,8 @@ class RedisURLChannel(URLChannel):
             wrapped.append(URLTask(url=url, ack=_ack, fail=_fail))
 
         return wrapped
+
+    async def close(self) -> None:
+        if self._recover_task is not None:
+            self._recover_task.cancel()
+            self._recover_task = None
