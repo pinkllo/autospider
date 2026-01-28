@@ -10,11 +10,13 @@ from langchain_openai import ChatOpenAI
 from ..config import config
 from ..types import Action, ActionType, ScrollInfo
 from ..protocol import parse_protocol_message
+from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from common.utils.prompt_template import render_template
 
 if TYPE_CHECKING:
-    from ..types import AgentState
+    from playwright.async_api import Page
+    from ..types import AgentState, SoMSnapshot
 
 
 # ============================================================================
@@ -86,6 +88,8 @@ class LLMDecider:
         marks_text: str,
         target_found_in_page: bool = False,
         scroll_info: ScrollInfo | None = None,
+        page: "Page" | None = None,
+        snapshot: "SoMSnapshot" | None = None,
     ) -> Action:
         """
         根据当前状态和截图决定下一步操作
@@ -127,6 +131,42 @@ class LLMDecider:
 
         # 解析响应
         action = self._parse_response(response_text)
+
+        snapshot_to_use = snapshot or state.current_snapshot
+        if (
+            snapshot_to_use
+            and page is not None
+            and action.mark_id is not None
+            and action.target_text
+            and action.action
+            in {
+                ActionType.CLICK,
+                ActionType.TYPE,
+                ActionType.PRESS,
+                ActionType.EXTRACT,
+            }
+        ):
+            try:
+                corrected_mark_id = await resolve_single_mark_id(
+                    page=page,
+                    llm=self.llm,
+                    snapshot=snapshot_to_use,
+                    mark_id=action.mark_id,
+                    target_text=action.target_text,
+                    max_retries=config.url_collector.max_validation_retries,
+                )
+                if corrected_mark_id is not None and corrected_mark_id != action.mark_id:
+                    action.mark_id = corrected_mark_id
+                    if action.thinking:
+                        action.thinking = f"{action.thinking} | mark_id 已按文本纠正"
+                    else:
+                        action.thinking = "mark_id 已按文本纠正"
+            except Exception as e:
+                note = f"mark_id 纠正失败: {str(e)[:80]}"
+                if action.thinking:
+                    action.thinking = f"{action.thinking} | {note}"
+                else:
+                    action.thinking = note
 
         # 更新页面滚动历史
         page_url = state.page_url
@@ -364,7 +404,7 @@ class LLMDecider:
         # 循环检测警告
         if self._detect_loop():
             parts.append(
-                "## 🚨 严重警告：检测到循环操作！\n你正在重复之前的操作序列！请立即改变策略：\n- 如果在找目标，尝试使用 go_back 返回上一页\n- 如果当前是新标签页需要返回旧页，使用 go_back_tab\n- 如果已经尝试多个项目都没找到，使用 done 结束任务\n- 不要再重复相同的点击或滚动！"
+                "## 🚨 严重警告：检测到循环操作！\n你正在重复之前的操作序列！请立即改变策略：\n- 如果在找目标，尝试使用 go_back 返回上一页\n- 如果当前是新标签页需要返回旧页，使用 go_back_tab\n- 如果已经尝试多个项目都没找到，使用 done 结束任务\n- 不要再无变化重复相同的点击或滚动！"
             )
 
         # 滚动次数警告
@@ -414,7 +454,7 @@ class LLMDecider:
 
         # 历史操作记录（改进格式，更清晰）
         if self.action_history:
-            history_lines = ["## 历史操作记录（⚠️ 不要重复这些操作！）"]
+            history_lines = ["## 历史操作记录（⚠️ 不要无变化重复这些操作！）"]
 
             # 按页面分组显示历史
             current_page_actions = []
@@ -433,7 +473,7 @@ class LLMDecider:
                     other_page_actions.append(action_desc)
 
             if current_page_actions:
-                history_lines.append("### 在当前页面的操作（不要重复！）：")
+                history_lines.append("### 在当前页面的操作（不要无变化重复！）：")
                 for a in current_page_actions:
                     history_lines.append(f"  - {a}")
 
@@ -462,7 +502,7 @@ class LLMDecider:
 
         # 提示
         parts.append(
-            "## 请分析截图并决定下一步操作\n以 JSON 格式输出你的决策。注意不要重复之前已执行的操作！"
+            "## 请分析截图并决定下一步操作\n以 JSON 格式输出你的决策。注意不要无变化重复之前已执行的操作！"
         )
 
         return "\n\n".join(parts)

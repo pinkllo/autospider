@@ -10,7 +10,7 @@
 - `memory_channel.py`: 基于 `asyncio.Queue` 的进程内内存通道（最快）。
 - `file_channel.py`: 基于本地文件的“尾随”读取模式（支持持久化，低耦合）。
 - `redis_channel.py`: 基于 Redis Stream 的可靠通道（生产级并发）。
-- `factory.py`: 通道创建工厂。
+- `factory.py`: [通道创建工厂](./factory.py.md)。
 
 ---
 

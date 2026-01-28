@@ -115,22 +115,27 @@ class _FieldExtractor:
         return re.search(pattern, self.text, flags=re.IGNORECASE)
 
     def string(self, key: str) -> str | None:
-        m = self._match(rf'"{re.escape(key)}"\s*:\s*"([^"]*)"')
+        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*["\']([^"\']*)["\']')
+        if m:
+            return m.group(1)
+        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*([A-Za-z_][\w\-]*)')
         return m.group(1) if m else None
 
     def integer(self, key: str) -> int | None:
-        m = self._match(rf'"{re.escape(key)}"\s*:\s*"?(\d+)"?')
+        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*"?(\d+)"?')
         try:
             return int(m.group(1)) if m else None
         except ValueError:
             return None
 
     def boolean(self, key: str) -> bool | None:
-        m = self._match(rf'"{re.escape(key)}"\s*:\s*(true|false|"true"|"false"|1|0)')
-        return _coerce_bool(m.group(1).strip('"')) if m else None
+        m = self._match(
+            rf'["\']{re.escape(key)}["\']\s*:\s*(true|false|"true"|"false"|\'true\'|\'false\'|1|0)'
+        )
+        return _coerce_bool(m.group(1).strip('"\'')) if m else None
 
     def floating(self, key: str) -> float | None:
-        m = self._match(rf'"{re.escape(key)}"\s*:\s*(-?\d+(?:\.\d+)?)')
+        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*(-?\d+(?:\.\d+)?)')
         try:
             return float(m.group(1)) if m else None
         except ValueError:

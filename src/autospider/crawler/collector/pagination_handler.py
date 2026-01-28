@@ -297,7 +297,7 @@ class PaginationHandler:
 
                     # 修改原因：全项目统一“文本优先纠正 mark_id”，输入框常见 innerText 为空，需要依赖 placeholder/aria-label
                     if config.url_collector.validate_mark_id and input_text:
-                        input_mark_id_value = await resolve_single_mark_id(
+                        corrected_mark_id = await resolve_single_mark_id(
                             page=self.page,
                             llm=self.llm_decision_maker.decider.llm,
                             snapshot=snapshot,
@@ -305,6 +305,8 @@ class PaginationHandler:
                             target_text=input_text,
                             max_retries=config.url_collector.max_validation_retries,
                         )
+                        if corrected_mark_id is not None:
+                            input_mark_id_value = corrected_mark_id
 
                     element = (
                         next(
@@ -327,7 +329,7 @@ class PaginationHandler:
                         button_mark_id_value = None
 
                     if config.url_collector.validate_mark_id and button_text:
-                        button_mark_id_value = await resolve_single_mark_id(
+                        corrected_mark_id = await resolve_single_mark_id(
                             page=self.page,
                             llm=self.llm_decision_maker.decider.llm,
                             snapshot=snapshot,
@@ -335,6 +337,8 @@ class PaginationHandler:
                             target_text=button_text,
                             max_retries=config.url_collector.max_validation_retries,
                         )
+                        if corrected_mark_id is not None:
+                            button_mark_id_value = corrected_mark_id
 
                     element = (
                         next(

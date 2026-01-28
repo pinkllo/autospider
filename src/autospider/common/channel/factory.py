@@ -1,4 +1,4 @@
-"""URL channel factory."""
+"""URL 通道（Channel）工厂模块，用于根据配置创建不同类型的任务分发通道。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,24 @@ def create_url_channel(
     output_dir: str = "output",
     redis_manager: RedisQueueManager | None = None,
 ) -> tuple[URLChannel, RedisQueueManager | None]:
-    """Create a URL channel based on config."""
+    """根据配置或指定模式创建 URL 通道。
+
+    支持以下模式：
+    - 'memory': 基于 asyncio.Queue 的内存队列，适用于单机小型任务。
+    - 'file': 基于本地文件的持久化队列。
+    - 'redis': 基于 Redis Stream 的分布式队列，支持 ACK 机制和多机协同。
+
+    Args:
+        mode: 通道模式 ('memory', 'file', 'redis')。如果为 None，则从全局配置中读取。
+        output_dir: 文件模式下保存 URL 和进度文件的目录。
+        redis_manager: 可选的 Redis 管理器实例。如果为 None 且模式为 'redis'，将自动创建。
+
+    Returns:
+        包含 (URLChannel 实例, RedisQueueManager 实例或 None) 的元组。
+
+    Raises:
+        ValueError: 当指定的模式不支持时抛出。
+    """
     selected = (mode or config.pipeline.mode).lower().strip()
 
     if selected == "memory":
@@ -51,4 +68,4 @@ def create_url_channel(
         )
         return channel, manager
 
-    raise ValueError(f"Unsupported pipeline mode: {selected}")
+    raise ValueError(f"不支持的流水线模式 (Unsupported pipeline mode): {selected}")

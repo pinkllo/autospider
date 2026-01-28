@@ -145,14 +145,18 @@ class RedisQueueManager:
         return None
 
     async def _ensure_consumer_group(self) -> None:
-        """确保 Consumer Group 存在"""
+        """确保 Redis Stream 的消费者组 (Consumer Group) 存在。
+        
+        如果 Stream 不存在，会使用 mkstream=True 自动创建。
+        如果 Group 已存在，会忽略 BUSYGROUP 错误。
+        """
         if not self.client:
             return
 
         try:
-            # 尝试创建 Consumer Group，从头开始读取
+            # 尝试创建 Consumer Group，从头 ("0") 开始读取
             await self.client.xgroup_create(
-                self.stream_key, self.group_name, id="0", mkstream=True  # 如果 Stream 不存在则创建
+                self.stream_key, self.group_name, id="0", mkstream=True
             )
             self.logger.info(f"已创建 Consumer Group: {self.group_name}")
         except aioredis.ResponseError as e:
@@ -160,6 +164,7 @@ class RedisQueueManager:
             if "BUSYGROUP" in str(e):
                 self.logger.debug(f"Consumer Group 已存在: {self.group_name}")
             else:
+                self.logger.error(f"创建 Consumer Group 失败: {e}")
                 raise
 
     # ==================== 队列操作 API ====================
@@ -213,14 +218,14 @@ class RedisQueueManager:
     async def push_tasks_batch(
         self, items: list[str], metadata_list: list[dict[str, Any]] | None = None
     ) -> int:
-        """批量推入任务
+        """批量推入任务，利用 Redis Pipeline 提高吞吐量。
 
         Args:
-            items: 数据项列表
-            metadata_list: 可选的元数据列表（需与 items 长度一致）
+            items: 数据项（如 URL）列表。
+            metadata_list: 与 items 对应的元数据列表。
 
         Returns:
-            成功推入的数量
+            成功推入的新任务数量（排除已存在的重复项）。
         """
         if not self.client or not items:
             return 0
@@ -228,7 +233,7 @@ class RedisQueueManager:
         success_count = 0
 
         try:
-            # 使用 pipeline 批量操作
+            # 使用 pipeline 减少网络往返开销
             async with self.client.pipeline() as pipe:
                 for i, item in enumerate(items):
                     hash_id = self._generate_hash_id(item)
@@ -242,44 +247,43 @@ class RedisQueueManager:
 
                     data_json = json.dumps(data, ensure_ascii=False)
 
-                    # 存入 Hash
+                    # 检查是否存在并存入 Hash
                     pipe.hsetnx(self.data_key, hash_id, data_json)
                     # 发布到 Stream
                     pipe.xadd(self.stream_key, {"data_id": hash_id})
 
                 results = await pipe.execute()
 
-            # 统计成功数量（每个 item 有 2 个操作，检查 HSETNX 的结果）
+            # results 中每两个元素对应一个项的操作结果 [HSETNX_result, XADD_result]
             for i in range(0, len(results), 2):
-                if results[i]:  # HSETNX 返回 1 表示是新数据
+                if results[i]:  # HSETNX 返回 1 表示是新插入的数据
                     success_count += 1
 
-            self.logger.info(f"批量推入 {success_count}/{len(items)} 个任务")
+            self.logger.info(f"批量推入完成: {success_count}/{len(items)} 个新任务")
             return success_count
 
         except Exception as e:
-            self.logger.error(f"批量推入失败: {e}")
+            self.logger.error(f"批量推入任务异常: {e}")
             return success_count
 
     async def fetch_task(
         self, consumer_name: str, block_ms: int = 5000, count: int = 1
     ) -> list[tuple[str, str, dict]]:
-        """消费者从队列中获取任务
+        """从消费者组中获取任务。获取到的消息会进入该消费者的 PEL。
 
         Args:
-            consumer_name: 消费者名称（通常是进程ID或机器名）
-            block_ms: 阻塞等待时间（毫秒），0 表示非阻塞
-            count: 一次最多获取的任务数
+            consumer_name: 当前消费者的唯一名称。
+            block_ms: 如果队列为空，阻塞等待的毫秒数。0 表示立即返回。
+            count: 单词获取的任务上限。
 
         Returns:
-            任务列表，每个任务为 (stream_id, data_id, data_dict)
+            任务列表 [(StreamID, HashID, DataDict), ...]。
         """
         if not self.client:
             return []
 
         try:
-            # 从 Consumer Group 中读取消息
-            # ">" 表示读取尚未分配给任何消费者的新消息
+            # ">" 表示获取从未分配给任何消费者的新消息
             response = await self.client.xreadgroup(
                 groupname=self.group_name,
                 consumername=consumer_name,
@@ -292,25 +296,24 @@ class RedisQueueManager:
                 return []
 
             tasks = []
-
-            # response 格式: [[stream_name, [(stream_id, {data_id: hash_id})]]]
-            for stream_name, messages in response:
+            for _, messages in response:  # response: [[stream_key, [msg, ...]]]
                 for stream_id, fields in messages:
                     data_id = fields.get("data_id")
                     if not data_id:
                         continue
 
-                    # 从 Hash 中读取实际数据
+                    # 根据索引 HashID 获取实际数据内容
                     data_json = await self.client.hget(self.data_key, data_id)
                     if data_json:
                         data = json.loads(data_json)
                         tasks.append((stream_id, data_id, data))
 
-            self.logger.debug(f"[{consumer_name}] 获取 {len(tasks)} 个任务")
+            if tasks:
+                self.logger.debug(f"消费者 [{consumer_name}] 成功获取 {len(tasks)} 个任务")
             return tasks
 
         except Exception as e:
-            self.logger.error(f"获取任务失败: {e}")
+            self.logger.error(f"消费任务异常: {e}")
             return []
 
     async def ack_task(self, stream_id: str) -> bool:
@@ -444,24 +447,25 @@ class RedisQueueManager:
             return False
 
     async def recover_stale_tasks(
-        self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10  # 默认 5 分钟
+        self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10
     ) -> list[tuple[str, str, dict]]:
-        """捞回超时未 ACK 的任务（故障转移）
+        """捞回超时未 ACK 的任务（故障转移机制）。
+        
+        该方法使用 XAUTOCLAIM 查找那些已经在其他消费者 PEL 中停滞过久的任务，并将它们转移给当前消费者。
 
         Args:
-            consumer_name: 当前消费者名称
-            max_idle_ms: 最大空闲时间（毫秒），超过此时间未 ACK 的任务会被捞回
-            count: 一次最多捞回的任务数
+            consumer_name: 接管任务的消费者名称。
+            max_idle_ms: 最大空闲毫秒数。超过此时间未 ACK 的任务将被判定为停滞。
+            count: 单词捞回的任务数上限。
 
         Returns:
-            捞回的任务列表，格式同 fetch_task
+            捞回的任务列表 [(StreamID, HashID, DataDict), ...]。
         """
         if not self.client:
             return []
 
         try:
-            # 使用 XAUTOCLAIM 自动捞回超时任务
-            # 返回格式: [next_id, [messages], [deleted_ids]]
+            # 自动认领超时消息
             result = await self.client.xautoclaim(
                 name=self.stream_key,
                 groupname=self.group_name,
@@ -471,23 +475,20 @@ class RedisQueueManager:
                 count=count,
             )
 
-            # result 格式: (next_start_id, claimed_messages, deleted_message_ids)
+            # result: (next_start_id, [msg, ...], [deleted_ids])
             if not result or len(result) < 2:
                 return []
 
             claimed_messages = result[1]
-
             if not claimed_messages:
                 return []
 
             tasks = []
-
             for stream_id, fields in claimed_messages:
                 data_id = fields.get("data_id")
                 if not data_id:
                     continue
 
-                # 从 Hash 中读取实际数据
                 data_json = await self.client.hget(self.data_key, data_id)
                 if data_json:
                     data = json.loads(data_json)
@@ -495,14 +496,13 @@ class RedisQueueManager:
 
             if tasks:
                 self.logger.warning(
-                    f"[{consumer_name}] 捞回 {len(tasks)} 个超时任务 "
-                    f"(空闲时间 > {max_idle_ms / 1000}s)"
+                    f"消费者 [{consumer_name}] 捞回 {len(tasks)} 个停滞任务 (空闲 > {max_idle_ms/1000}s)"
                 )
 
             return tasks
 
         except Exception as e:
-            self.logger.error(f"捞回超时任务失败: {e}")
+            self.logger.error(f"捞回停滞任务异常: {e}")
             return []
 
     # ==================== 查询 API ====================

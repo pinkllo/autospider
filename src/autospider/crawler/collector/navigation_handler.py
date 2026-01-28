@@ -122,6 +122,8 @@ class NavigationHandler:
                     marks_text,
                     target_found_in_page=False,
                     scroll_info=scroll_info,
+                    page=self.page,
+                    snapshot=snapshot,
                 )
 
                 print(f"[Nav] LLM 决策: {action.action.value}")
