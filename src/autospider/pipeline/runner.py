@@ -230,14 +230,27 @@ async def _collect_tasks(
     needed: int,
     producer_done: asyncio.Event,
 ) -> list[URLTask]:
-    """从通道中收集指定数量的任务。"""
+    """从通道中收集指定数量的任务。
+
+    该函数会持续从通道 fetch 任务，直到达到所需数量或生产者已完成且通道为空。
+
+    Args:
+        channel: 任务分发通道。
+        needed: 需要收集的任务数量。
+        producer_done: 生产者完成信号。
+
+    Returns:
+        收集到的任务列表。
+    """
     tasks: list[URLTask] = []
     while len(tasks) < needed:
+        # 批量获取任务以提高效率
         batch = await channel.fetch(
             max_items=needed - len(tasks),
             timeout_s=config.pipeline.fetch_timeout_s,
         )
         if not batch:
+            # 如果没有获取到任务，且生产者已停止，则退出
             if producer_done.is_set():
                 break
             continue
@@ -251,36 +264,59 @@ async def _process_tasks(
     items_path: Path,
     summary: dict,
 ) -> None:
-    """批量执行任务提取并保存结果。"""
+    """批量执行任务提取并保存结果。
+
+    对传入的任务列表逐一进行数据提取，并将结果持久化到 JSONL 文件，同时维护统计信息。
+
+    Args:
+        extractor: XPath 提取器实例。
+        tasks: 待处理的任务列表。
+        items_path: 结果保存的文件路径 (JSONL)。
+        summary: 流水线汇总统计信息字典。
+    """
     for task in tasks:
         url = task.url
         if not url:
             continue
 
+        # 执行提取动作
         record = await extractor._extract_from_url(url)
+        
+        # 将提取到的字段映射为简单的键值对字典
         item = {"url": record.url}
         for field_result in record.fields:
             item[field_result.field_name] = field_result.value
 
+        # 将结果追加到 JSONL 文件
         _append_jsonl(items_path, item)
         summary["total_urls"] += 1
 
         if record.success:
             summary["success_count"] += 1
+            # 标记任务成功（Redis 模式下会进行 ACK）
             await task.ack_task()
         else:
+            # 标记任务失败并记录原因
             reason = _build_error_reason(record)
             await task.fail_task(reason)
 
 
 async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:
-    """批量标记任务失败。"""
+    """批量标记任务失败。
+
+    Args:
+        tasks: 需要标记失败的任务列表。
+        reason: 失败原因描述。
+    """
     for task in tasks:
         await task.fail_task(reason)
 
 
 def _build_error_reason(record) -> str:
-    """从提取记录中构建错误原因字符串。"""
+    """从提取记录中构建错误原因字符串。
+
+    遍历所有字段的提取结果，收集其中的错误信息并组合成一个字符串。
+    """
     errors = []
     for field_result in record.fields:
         if field_result.error:
@@ -289,7 +325,12 @@ def _build_error_reason(record) -> str:
 
 
 def _append_jsonl(path: Path, item: dict) -> None:
-    """向 JSONL 文件追加一条结果记录。"""
+    """向 JSONL 文件追加一条结果记录。
+
+    Args:
+        path: 文件路径。
+        item: 要保存的字典对象。
+    """
     payload = json.dumps(item, ensure_ascii=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as handle:
@@ -297,7 +338,12 @@ def _append_jsonl(path: Path, item: dict) -> None:
 
 
 def _write_summary(path: Path, summary: dict) -> None:
-    """将执行摘要写入 JSON 文件。"""
+    """将执行摘要写入 JSON 文件。
+
+    Args:
+        path: 文件路径。
+        summary: 汇总信息字典。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)

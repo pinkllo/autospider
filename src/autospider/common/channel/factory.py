@@ -35,13 +35,16 @@ def create_url_channel(
     Raises:
         ValueError: 当指定的模式不支持时抛出。
     """
+    # 获取并标准化选择的模式名称
     selected = (mode or config.pipeline.mode).lower().strip()
 
     if selected == "memory":
+        # 内存模式：最基础的模式，适合简单的本地脚本运行
         channel = MemoryURLChannel(maxsize=config.pipeline.memory_queue_size)
         return channel, None
 
     if selected == "file":
+        # 文件模式：通过本地文件持久化任务，支持任务的中断恢复
         base_dir = Path(output_dir)
         urls_file = base_dir / "urls.txt"
         cursor_file = base_dir / config.pipeline.file_cursor_name
@@ -53,6 +56,8 @@ def create_url_channel(
         return channel, None
 
     if selected == "redis":
+        # Redis 模式：生产级分布式模式，核心特性是基于 Stream 的可靠消息处理
+        # 如果调用者没有提供 manager，则根据全局配置创建一个新的
         manager = redis_manager or RedisQueueManager(
             host=config.redis.host,
             port=config.redis.port,

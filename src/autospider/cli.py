@@ -249,6 +249,11 @@ def batch_collect_command(
         "-c",
         help="配置文件路径",
     ),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        help="最大翻页次数（覆盖配置）",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless/--no-headless",
@@ -286,6 +291,7 @@ def batch_collect_command(
     console.logger.info(
         Panel(
             f"[bold]配置文件:[/bold] {config_path}\n"
+            f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}",
             title="批量收集器",
@@ -298,6 +304,7 @@ def batch_collect_command(
         result = run_async_safely(
             _run_batch_collector(
                 config_path=config_path,
+                max_pages=max_pages,
                 headless=headless,
                 output_dir=output_dir,
             )
@@ -371,6 +378,11 @@ def pipeline_run_command(
         "--field-validate-count",
         help="字段校验数量（默认取配置）",
     ),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        help="列表页最大翻页次数（覆盖配置）",
+    ),
     pipeline_mode: str = typer.Option(
         "",
         "--mode",
@@ -409,6 +421,7 @@ def pipeline_run_command(
             f"[bold]列表页 URL:[/bold] {list_url}\n"
             f"[bold]任务描述:[/bold] {task}\n"
             f"[bold]字段数量:[/bold] {len(fields)}\n"
+            f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
             f"[bold]模式:[/bold] {mode_text}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}",
@@ -427,6 +440,7 @@ def pipeline_run_command(
                 headless=headless,
                 explore_count=field_explore_count,
                 validate_count=field_validate_count,
+                max_pages=max_pages,
                 pipeline_mode=pipeline_mode.strip() or None,
             )
         )
@@ -587,6 +601,11 @@ def collect_urls_command(
         "-n",
         help="探索几个详情页来提取公共模式",
     ),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        help="最大翻页次数（覆盖配置）",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless/--no-headless",
@@ -636,6 +655,7 @@ def collect_urls_command(
             f"[bold]列表页 URL:[/bold] {list_url}\n"
             f"[bold]任务描述:[/bold] {task}\n"
             f"[bold]探索数量:[/bold] {explore_count} 个详情页\n"
+            f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}"
             + (
@@ -673,6 +693,7 @@ def collect_urls_command(
                     list_url=list_url,
                     task=task,
                     explore_count=explore_count,
+                    max_pages=max_pages,
                     headless=headless,
                     output_dir=output_dir,
                 )
@@ -785,38 +806,60 @@ async def _run_config_generator(
 
 async def _run_batch_collector(
     config_path: str,
+    max_pages: int | None,
     headless: bool,
     output_dir: str,
 ):
     """异步运行批量收集器"""
     from .crawler.batch.batch_collector import batch_collect_urls
+    from .common.config import config
 
-    async with create_browser_session(headless=headless, close_engine=True) as session:
-        return await batch_collect_urls(
-            page=session.page,
-            config_path=config_path,
-            output_dir=output_dir,
-        )
+    previous_max_pages: int | None = None
+    if max_pages is not None:
+        previous_max_pages = config.url_collector.max_pages
+        config.url_collector.max_pages = int(max_pages)
+
+    try:
+        async with create_browser_session(headless=headless, close_engine=True) as session:
+            return await batch_collect_urls(
+                page=session.page,
+                config_path=config_path,
+                output_dir=output_dir,
+            )
+    finally:
+        if previous_max_pages is not None:
+            config.url_collector.max_pages = previous_max_pages
 
 
 async def _run_collector(
     list_url: str,
     task: str,
     explore_count: int,
+    max_pages: int | None,
     headless: bool,
     output_dir: str,
 ):
     """异步运行 URL 收集器（完整流程）"""
     from .crawler.explore.url_collector import collect_detail_urls
+    from .common.config import config
 
-    async with create_browser_session(headless=headless, close_engine=True) as session:
-        return await collect_detail_urls(
-            page=session.page,
-            list_url=list_url,
-            task_description=task,
-            explore_count=explore_count,
-            output_dir=output_dir,
-        )
+    previous_max_pages: int | None = None
+    if max_pages is not None:
+        previous_max_pages = config.url_collector.max_pages
+        config.url_collector.max_pages = int(max_pages)
+
+    try:
+        async with create_browser_session(headless=headless, close_engine=True) as session:
+            return await collect_detail_urls(
+                page=session.page,
+                list_url=list_url,
+                task_description=task,
+                explore_count=explore_count,
+                output_dir=output_dir,
+            )
+    finally:
+        if previous_max_pages is not None:
+            config.url_collector.max_pages = previous_max_pages
 
 
 def main():

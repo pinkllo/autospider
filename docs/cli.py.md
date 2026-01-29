@@ -42,6 +42,7 @@ autospider collect-urls \
 | `--list-url` | `-u` | string | (必填) | 列表页 URL |
 | `--task` | `-t` | string | (必填) | 任务描述（自然语言） |
 | `--explore-count` | `-n` | int | 3 | 探索详情页的数量，用于提取模式 |
+| `--max-pages` | | int | (配置值) | 最大翻页次数（覆盖配置） |
 | `--headless` | | bool | False | 是否开启无头模式 |
 | `--output` | `-o` | string | "output" | 输出目录 |
 | `--dry-run` | | bool | False | 预览模式，只验证参数不实际执行 |
@@ -86,6 +87,7 @@ autospider batch-collect \
 | 参数 | 短参数 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
 | `--config-path` | `-c` | string | (必填) | 配置文件路径 |
+| `--max-pages` | | int | (配置值) | 最大翻页次数（覆盖配置） |
 | `--headless` | | bool | False | 是否无头模式 |
 | `--output` | `-o` | string | "output" | 输出目录 |
 
