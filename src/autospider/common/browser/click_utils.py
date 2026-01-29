@@ -59,34 +59,6 @@ async def click_and_capture_new_page(
             # 加载状态等待超时通常不影响页面对象的使用，因此捕获并忽略
             pass
 
-    if new_page is not None:
-        # 如果页面已具备 Guard 信息，则包装为 GuardedPage（无显式触发 Guard 逻辑）
-        new_page = _ensure_guarded_page(new_page)
-
     return new_page
 
 
-def _ensure_guarded_page(page: "Page | GuardedPage") -> "Page | GuardedPage":
-    """确保页面被 GuardedPage 包装。
-
-    GuardedPage 提供了一种受保护的页面访问方式，通常用于自动重试、
-    错误恢复或确保页面在操作期间不会被意外关闭。
-    """
-    try:
-        # 尝试导入 GuardedPage 类型（不显式触发 Guard 逻辑）
-        from browser_manager.guarded_page import GuardedPage
-    except Exception:
-        # 如果无法导入（例如环境未配置），则回退到返回原始页面对象
-        return page
-
-    # 如果已经是 GuardedPage，直接返回
-    if isinstance(page, GuardedPage):
-        return page
-
-    # 仅在页面已关联 Guard 时进行包装
-    guard = getattr(page, "_page_guard", None)
-    if guard is None:
-        return page
-
-    # 使用 guard 包装页面并返回
-    return GuardedPage(page, guard)

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
-from .click_utils import click_and_capture_new_page, _ensure_guarded_page
+from .click_utils import click_and_capture_new_page
 
 if TYPE_CHECKING:
     from browser_manager.guarded_page import GuardedPage
@@ -233,7 +233,6 @@ class ActionExecutor:
                 await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
             except Exception:
                 pass
-            new_page = _ensure_guarded_page(new_page)
             logger.info(f"[Type] 检测到新标签页: {new_page.url}")
             self._previous_page = self.page
             self.page = new_page
