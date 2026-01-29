@@ -18,48 +18,20 @@ ask_llm_decision_system_prompt: |
   1. **select（purpose=detail_links）**: 选择页面上的详情链接
      - 只选择列表中**项目标题/公告标题**类的链接
      - 不要选择：筛选标签、分页按钮、导航菜单、"查看更多"等
-     - 返回格式：
-       ```json
-       {
-         "thinking": "…",
-         "action": "select",
-         "args": {
-           "purpose": "detail_links",
-           "items": [
-             {"mark_id": 40, "text": "某某项目招标公告"},
-             {"mark_id": 41, "text": "另一个项目中标公告"},
-             {"mark_id": 42, "text": "第三个项目采购公告"}
-           ],
-           "reasoning": "选择了3个项目标题链接..."
-         }
-       }
-       ```
+     - Args: {"purpose":"detail_links","items":[{"mark_id":int,"text":"元素文字"}],"reasoning":"选择理由"}
      - items 中的 text 必须是你在截图中看到的该元素文字
      - 系统会以你给出的“文本”为准进行定位；如果 mark_id 与文本不一致，会尝试在候选框内按文本纠正（文本优先）
 
   2. **report（kind=page_kind）**: 报告当前页面类型
      - 当你判断当前页面已经是一个详情页（而不是列表页）时使用
-     - 返回示例：
-       {"action":"report","args":{"kind":"page_kind","page_kind":"detail","reasoning":"..."}}
+     - Args: {"kind":"page_kind","page_kind":"detail","reasoning":"..."}
 
   3. **scroll**: 需要滚动查看更多
      - 当前视图没有新的详情链接时使用
-     - 返回示例：
-       {"action":"scroll","args":{"scroll_delta":[0,500],"reasoning":"..."}}
+     - Args: {"scroll_delta":[0,500],"reasoning":"..."}
 
   4. **click**: 点击一个最可能的详情链接进入详情页（用于探索）
-     - 返回格式：
-       ```json
-       {
-         "thinking": "…",
-         "action": "click",
-         "args": {
-           "mark_id": 40,
-           "target_text": "你在截图里看到的该链接文字",
-           "reasoning": "为什么这一个最像详情链接..."
-         }
-       }
-       ```
+     - Args: {"mark_id":int,"target_text":"元素文字","reasoning":"为什么这一个最像详情链接"}
      - 重要：只要你在 args 里返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字），系统会以 target_text 为准纠正 mark_id
 
   重要提示：
@@ -120,19 +92,8 @@ pagination_llm_system_prompt: |
   
   严格 JSON 格式，不要使用 markdown 代码块：
   
-  **找到按钮时**：
-  {"action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页/Next/>"}],"reasoning":"详细说明识别依据"}}
-  
-  **未找到按钮时**：
-  {"action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"说明为什么没找到，例如页面已到最后一页或按钮禁用"}}
-  
-  ## 示例
-  
-  **示例1 - 找到按钮**：
-  {"action":"select","args":{"purpose":"pagination_next","found":true,"items":[{"mark_id":42,"text":"下一页"}],"reasoning":"在页面底部的分页区域，找到了'下一页'按钮，编号为 42"}}
-  
-  **示例2 - 未找到按钮**：
-  {"action":"select","args":{"purpose":"pagination_next","found":false,"items":[],"reasoning":"页面底部有分页区域，但'下一页'按钮灰色禁用，说明已经是最后一页"}}
+  - 找到按钮时 Args: {"purpose":"pagination_next","found":true,"items":[{"mark_id":int,"text":"下一页/Next/>"}],"reasoning":"..."}
+  - 未找到按钮时 Args: {"purpose":"pagination_next","found":false,"items":[],"reasoning":"..."}
 
 pagination_llm_user_message: |
   请仔细观察截图，找到"下一页"分页按钮的 mark_id（红色边框右上角的白色数字编号）。
@@ -153,7 +114,6 @@ retry_after_validation_failure_user_message: |
 
   请你先分析上一次选择错误的原因，然后重新进行选择。你必须按以下格式返回（不含 protocol 字段）：
 
-  ```json
   {
     "error_analysis": "分析上一次为什么选择了错误的 mark_id，例如：我把页面内容中的序号'1.'误认为是 mark_id，实际上 mark_id 是红色边框右上角的白色数字",
     "correction_strategy": "说明这一次会如何避免同样的错误，例如：我会仔细观察每个红色边框右上角的白色数字编号，而不是页面内容中的序号",
@@ -166,7 +126,6 @@ retry_after_validation_failure_user_message: |
       "reasoning": "重新选择的理由"
     }
   }
-  ```
 
   **重要提醒**：
   - mark_id 是**红色边框右上角的白色数字编号**
@@ -217,18 +176,9 @@ jump_widget_llm_system_prompt: |
 
   严格 JSON 格式，不要使用 markdown 代码块：
 
-  **找到跳转控件时**：
-  {"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":{"mark_id":16,"text":"确定/跳转/GO"},"reasoning":"详细说明识别依据"}}
-
-  **只找到输入框时**：
-  {"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码/页码"},"button":null,"reasoning":"找到输入框但未找到确定按钮..."}}
-
-  **未找到跳转控件时**：
-  {"action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"说明为什么没找到，例如：页面没有分页功能，或跳转控件不可见"}}
-
-  **示例**：
-  - 找到时：{"action":"select","args":{"purpose":"jump_widget","found":true,"input":{"mark_id":15,"text":"请输入页码"},"button":{"mark_id":16,"text":"确定"},"reasoning":"在页面底部找到页码输入框（placeholder为'请输入页码'，mark_id=15），旁边有'确定'按钮（mark_id=16）"}}
-  - 未找到时：{"action":"select","args":{"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"页面底部只有简单的页码数字列表，没有输入框和跳转按钮"}}
+  - 找到跳转控件时 Args: {"purpose":"jump_widget","found":true,"input":{"mark_id":int,"text":"输入框提示"},"button":{"mark_id":int,"text":"按钮文本"},"reasoning":"..."}
+  - 只找到输入框时 Args: {"purpose":"jump_widget","found":true,"input":{"mark_id":int,"text":"输入框提示"},"button":null,"reasoning":"..."}
+  - 未找到跳转控件时 Args: {"purpose":"jump_widget","found":false,"input":null,"button":null,"reasoning":"..."}
 
 jump_widget_llm_user_message: |
   请仔细观察截图，找到页码跳转控件的 mark_id（红色边框右上角的白色数字编号）。

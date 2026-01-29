@@ -144,6 +144,11 @@ class NavigationHandler:
                 print("[Nav] 重试")
                 continue
 
+            if action.action == ActionType.EXTRACT:
+                print("[Nav] 收到 extract，导航模式不执行提取，按 done 处理")
+                filter_done = True
+                break
+
             try:
                 # 隐藏覆盖层
                 await set_overlay_visibility(self.page, False)
