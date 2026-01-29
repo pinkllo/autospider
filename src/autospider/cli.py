@@ -187,7 +187,7 @@ def generate_config_command(
         autospider generate-config --list-url "https://example.com/list" --task "收集招标公告详情页"
     """
     # 显示配置
-    console.logger.info(
+    logger.info(
         Panel(
             f"[bold]列表页 URL:[/bold] {list_url}\n"
             f"[bold]任务描述:[/bold] {task}\n"
@@ -212,7 +212,7 @@ def generate_config_command(
         )
 
         # 显示结果
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[green]配置文件已生成！[/green]\n\n"
                 f"文件路径: {output_dir}/collection_config.json\n\n"
@@ -228,10 +228,10 @@ def generate_config_command(
         )
 
     except KeyboardInterrupt:
-        console.logger.info("\n[yellow]用户中断[/yellow]")
+        logger.info("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="执行错误",
@@ -277,7 +277,7 @@ def batch_collect_command(
     # 检查配置文件是否存在
     config_file = Path(config_path)
     if not config_file.exists():
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]配置文件不存在: {config_path}[/red]\n\n"
                 f"请先使用 'autospider generate-config' 生成配置文件",
@@ -288,7 +288,7 @@ def batch_collect_command(
         raise typer.Exit(1)
 
     # 显示配置
-    console.logger.info(
+    logger.info(
         Panel(
             f"[bold]配置文件:[/bold] {config_path}\n"
             f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
@@ -311,7 +311,7 @@ def batch_collect_command(
         )
 
         # 显示结果
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[green]共收集到 {len(result.collected_urls)} 个详情页 URL[/green]\n\n"
                 f"结果已保存到:\n"
@@ -324,17 +324,17 @@ def batch_collect_command(
 
         # 显示前 10 个 URL
         if result.collected_urls:
-            console.logger.info("\n[bold]前 10 个 URL:[/bold]")
+            logger.info("\n[bold]前 10 个 URL:[/bold]")
             for i, url in enumerate(result.collected_urls[:10], 1):
-                console.logger.info(f"  {i}. {url}")
+                logger.info(f"  {i}. {url}")
             if len(result.collected_urls) > 10:
-                console.logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
+                logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
 
     except KeyboardInterrupt:
-        console.logger.info("\n[yellow]用户中断[/yellow]")
+        logger.info("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="执行错误",
@@ -406,7 +406,7 @@ def pipeline_run_command(
         task = validate_task_description(task)
         fields = _load_fields(fields_json, fields_file)
     except (URLValidationError, ValidationError, ValueError) as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="输入验证错误",
@@ -416,7 +416,7 @@ def pipeline_run_command(
         raise typer.Exit(1)
 
     mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
-    console.logger.info(
+    logger.info(
         Panel(
             f"[bold]列表页 URL:[/bold] {list_url}\n"
             f"[bold]任务描述:[/bold] {task}\n"
@@ -445,7 +445,7 @@ def pipeline_run_command(
             )
         )
 
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[green]流水线完成[/green]\n\n"
                 f"总处理 URL: {result.get('total_urls', 0)}\n"
@@ -457,10 +457,10 @@ def pipeline_run_command(
             )
         )
     except KeyboardInterrupt:
-        console.logger.info("\n[yellow]用户中断[/yellow]")
+        logger.info("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="执行错误",
@@ -501,7 +501,7 @@ def field_extract_command(
         urls = _load_urls(urls_file)
         fields = _load_fields(fields_json, fields_file)
     except (URLValidationError, ValidationError, ValueError) as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="Input error",
@@ -510,7 +510,7 @@ def field_extract_command(
         )
         raise typer.Exit(1)
 
-    console.logger.info(
+    logger.info(
         Panel(
             f"[bold]URL count:[/bold] {len(urls)}\n"
             f"[bold]Field count:[/bold] {len(fields)}\n"
@@ -533,7 +533,7 @@ def field_extract_command(
             )
         )
 
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[green]Field extraction finished[/green]\n\n"
                 f"Config: {output_dir}/extraction_config.json\n"
@@ -544,10 +544,10 @@ def field_extract_command(
             )
         )
     except KeyboardInterrupt:
-        console.logger.info("\n[yellow]Interrupted[/yellow]")
+        logger.info("\n[yellow]Interrupted[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="Execution error",
@@ -640,7 +640,7 @@ def collect_urls_command(
         list_url = validate_url(list_url)
         task = validate_task_description(task)
     except (URLValidationError, ValidationError) as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="输入验证错误",
@@ -650,7 +650,7 @@ def collect_urls_command(
         raise typer.Exit(1)
 
     # 显示配置
-    console.logger.info(
+    logger.info(
         Panel(
             f"[bold]列表页 URL:[/bold] {list_url}\n"
             f"[bold]任务描述:[/bold] {task}\n"
@@ -670,7 +670,7 @@ def collect_urls_command(
 
     # Dry-run 模式：只验证参数，不实际执行
     if dry_run:
-        console.logger.info(
+        logger.info(
             Panel(
                 "[green]✓ 参数验证通过[/green]\n\n"
                 "将执行以下操作：\n"
@@ -700,7 +700,7 @@ def collect_urls_command(
             )
 
         # 显示结果
-        console.logger.info("\n")
+        logger.info("\n")
 
         # 显示探索的详情页
         if result.detail_visits:
@@ -723,12 +723,12 @@ def collect_urls_command(
                         else visit.detail_page_url
                     ),
                 )
-            console.logger.info(table)
+            logger.info(table)
 
         # 显示提取的模式
         if result.common_pattern:
             pattern = result.common_pattern
-            console.logger.info(
+            logger.info(
                 Panel(
                     f"[bold]标签模式:[/bold] {pattern.tag_pattern or '无'}\n"
                     f"[bold]角色模式:[/bold] {pattern.role_pattern or '无'}\n"
@@ -741,7 +741,7 @@ def collect_urls_command(
             )
 
         # 显示收集结果
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[green]共收集到 {len(result.collected_urls)} 个详情页 URL[/green]\n\n"
                 f"结果已保存到:\n"
@@ -754,17 +754,17 @@ def collect_urls_command(
 
         # 显示前 10 个 URL
         if result.collected_urls:
-            console.logger.info("\n[bold]前 10 个 URL:[/bold]")
+            logger.info("\n[bold]前 10 个 URL:[/bold]")
             for i, url in enumerate(result.collected_urls[:10], 1):
-                console.logger.info(f"  {i}. {url}")
+                logger.info(f"  {i}. {url}")
             if len(result.collected_urls) > 10:
-                console.logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
+                logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
 
     except KeyboardInterrupt:
-        console.logger.info("\n[yellow]用户中断[/yellow]")
+        logger.info("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.logger.info(
+        logger.info(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="执行错误",
