@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
-from .click_utils import click_and_capture_new_page
+from .click_utils import click_and_capture_new_page, _ensure_guarded_page
 
 if TYPE_CHECKING:
     from browser_manager.guarded_page import GuardedPage
@@ -197,16 +197,43 @@ class ActionExecutor:
         await locator.click()
         await locator.fill(action.text, timeout=action.timeout_ms)
 
-        # 2. 输入后自动回车（默认 Enter，可由 key 覆盖）
+        # 2. 输入后自动回车（默认 Enter，可由 key 覆盖），并捕获可能新打开的标签页
         pressed_key = action.key or "Enter"
+        context = self.page.context
+        pages_before = len(context.pages)
+        new_page = None
         try:
-            await locator.press(pressed_key, timeout=action.timeout_ms)
+            async with context.expect_page(timeout=3000) as new_page_info:
+                await locator.press(pressed_key, timeout=action.timeout_ms)
+            new_page = await new_page_info.value
+        except PlaywrightTimeout:
+            # 未打开新标签页，忽略超时
+            pass
         except Exception:
             # 如果元素无法直接接收按键，尝试使用全局键盘模拟
             try:
-                await self.page.keyboard.press(pressed_key)
+                async with context.expect_page(timeout=3000) as new_page_info:
+                    await self.page.keyboard.press(pressed_key)
+                new_page = await new_page_info.value
+            except PlaywrightTimeout:
+                pass
             except Exception:
                 pass
+
+        # 兜底：按键触发新标签页但 expect_page 未捕获
+        if new_page is None and len(context.pages) > pages_before:
+            new_page = context.pages[-1]
+
+        if new_page is not None:
+            try:
+                await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            new_page = _ensure_guarded_page(new_page)
+            print(f"[Type] 检测到新标签页: {new_page.url}")
+            self._previous_page = self.page
+            self.page = new_page
+            self._new_page = new_page  # 保留引用供外部管理器感知
 
         # 3. 生成脚本步骤
         value = action.text
@@ -220,7 +247,7 @@ class ActionExecutor:
             description=action.thinking or f"在元素 [{action.mark_id}] 输入文本",
         )
 
-        return ActionResult(success=True), script_step
+        return ActionResult(success=True, new_url=self.page.url), script_step
 
     async def _execute_scroll(
         self,
