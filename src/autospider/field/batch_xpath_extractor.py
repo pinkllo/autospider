@@ -14,6 +14,10 @@ from .models import FieldExtractionResult, PageExtractionRecord
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 class BatchXPathExtractor:
@@ -51,19 +55,19 @@ class BatchXPathExtractor:
             seen.add(cleaned)
             unique_urls.append(cleaned)
         if len(unique_urls) != original_count:
-            print(f"[BatchXPathExtractor] URL 去重: {original_count} -> {len(unique_urls)}")
+            logger.info(f"[BatchXPathExtractor] URL 去重: {original_count} -> {len(unique_urls)}")
         urls = unique_urls
 
-        print(f"\n{'='*60}")
-        print("[BatchXPathExtractor] 开始批量字段提取")
-        print(f"[BatchXPathExtractor] 目标字段: {[f.get('name') for f in self.fields_config]}")
-        print(f"[BatchXPathExtractor] URL 数量: {len(urls)}")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info("[BatchXPathExtractor] 开始批量字段提取")
+        logger.info(f"[BatchXPathExtractor] 目标字段: {[f.get('name') for f in self.fields_config]}")
+        logger.info(f"[BatchXPathExtractor] URL 数量: {len(urls)}")
+        logger.info(f"{'='*60}\n")
 
         records: list[PageExtractionRecord] = []
 
         for i, url in enumerate(urls):
-            print(f"\n[BatchXPathExtractor] 提取 {i + 1}/{len(urls)}: {url[:80]}...")
+            logger.info(f"\n[BatchXPathExtractor] 提取 {i + 1}/{len(urls)}: {url[:80]}...")
             record = await self._extract_from_url(url)
             records.append(record)
             self._print_record_summary(record)
@@ -231,7 +235,7 @@ class BatchXPathExtractor:
         result_path = self.output_dir / "batch_extraction_result.json"
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
-        print(f"\n[BatchXPathExtractor] 结果已保存: {result_path}")
+        logger.info(f"\n[BatchXPathExtractor] 结果已保存: {result_path}")
 
         items_path = self.output_dir / "extracted_items.json"
         items = []
@@ -243,16 +247,16 @@ class BatchXPathExtractor:
 
         with open(items_path, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        print(f"[BatchXPathExtractor] 明细已保存: {items_path}")
+        logger.info(f"[BatchXPathExtractor] 明细已保存: {items_path}")
 
     def _print_record_summary(self, record: PageExtractionRecord) -> None:
         status = "✓ 成功" if record.success else "✗ 部分失败"
-        print(f"[BatchXPathExtractor] {status} - {record.url[:60]}...")
+        logger.info(f"[BatchXPathExtractor] {status} - {record.url[:60]}...")
         for field_result in record.fields:
             if field_result.value:
-                print(f"    • {field_result.field_name}: {field_result.value[:40]}...")
+                logger.info(f"    • {field_result.field_name}: {field_result.value[:40]}...")
             else:
-                print(f"    • {field_result.field_name}: (未提取) {field_result.error or ''}")
+                logger.info(f"    • {field_result.field_name}: (未提取) {field_result.error or ''}")
 
 
 async def batch_extract_fields_from_urls(

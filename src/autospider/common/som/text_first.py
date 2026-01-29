@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
+from ..logger import get_logger
 from ..protocol import parse_protocol_message
 from common.utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("disambiguate_by_text.yaml")
+logger = get_logger(__name__)
 
 
 async def resolve_mark_ids_from_map(
@@ -72,7 +74,10 @@ async def resolve_mark_ids_from_map(
             )
             if selected is None:
                 if allow_partial:
-                    print(f"[TextFirst] ⚠ 歧义重选失败，已跳过该条: text='{r.llm_text[:60]}'")
+                    logger.warning(
+                        "[TextFirst] ⚠ 歧义重选失败，已跳过该条: text='%s'",
+                        r.llm_text[:60],
+                    )
                     continue
                 raise ValueError(
                     f"歧义重选失败: text='{r.llm_text}' candidates={r.candidate_mark_ids}"
@@ -82,7 +87,7 @@ async def resolve_mark_ids_from_map(
 
         if r.status == "text_not_found":
             if allow_partial:
-                print(f"[TextFirst] ⚠ 未命中文本，已跳过该条: '{r.llm_text[:60]}'")
+                logger.warning("[TextFirst] ⚠ 未命中文本，已跳过该条: '%s'", r.llm_text[:60])
                 continue
             raise ValueError(f"未在当前候选框中找到目标文本: '{r.llm_text}'")
 

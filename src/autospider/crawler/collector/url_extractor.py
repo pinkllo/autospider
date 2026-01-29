@@ -8,12 +8,16 @@ from urllib.parse import urljoin, urlparse
 
 from ...common.browser.actions import ActionExecutor
 from ...common.browser.click_utils import click_and_capture_new_page
+from ...common.logger import get_logger
 from ...common.som import build_mark_id_to_xpath_map, set_overlay_visibility
 from ...common.types import Action, ActionType
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ...common.types import ElementMark, SoMSnapshot
+
+
+logger = get_logger(__name__)
 
 
 class URLExtractor:
@@ -59,11 +63,11 @@ class URLExtractor:
         if element.href:
             # 使用 urljoin 处理相对路径
             url = urljoin(self.list_url, element.href)
-            print(f"[Extract] ✓ 从 href 提取: {url[:60]}...")
+            logger.info(f"[Extract] ✓ 从 href 提取: {url[:60]}...")
             return url
 
         # 策略 2: 元素无 href，尝试点击获取（动态提取）
-        print("[Extract] 元素无 href，点击获取 URL...")
+        logger.info("[Extract] 元素无 href，点击获取 URL...")
         return await self.click_and_get_url(element, snapshot, nav_steps=nav_steps)
 
     async def click_and_get_url(
@@ -88,7 +92,7 @@ class URLExtractor:
             点击后产生的 URL，失败返回 None。
         """
         list_url = self.page.url
-        print(f"[Click] 当前 URL: {list_url[:60]}...")
+        logger.info(f"[Click] 当前 URL: {list_url[:60]}...")
 
         try:
             # 在执行点击动作前隐藏 SoM 遮罩，避免干扰点击
@@ -106,14 +110,14 @@ class URLExtractor:
             )
 
             if not result.success:
-                print(f"[Click] ✗ 点击失败: {result.error}")
+                logger.info(f"[Click] ✗ 点击失败: {result.error}")
                 return None
 
             # 检查是否产生了新页面（ActionExecutor 会自动捕获新页面）
             new_page = getattr(executor, "_new_page", None)
             if new_page is not None:
                 new_url = new_page.url
-                print(f"[Click] ✓ 检测到新标签页: {new_url[:60]}...")
+                logger.info(f"[Click] ✓ 检测到新标签页: {new_url[:60]}...")
                 try:
                     await new_page.close()
                 except Exception:
@@ -131,12 +135,12 @@ class URLExtractor:
             old_parsed = urlparse(list_url)
             new_parsed = urlparse(new_url)
 
-            print(f"[Click] 旧 URL: {list_url}")
-            print(f"[Click] 新 URL: {new_url}")
+            logger.info(f"[Click] 旧 URL: {list_url}")
+            logger.info(f"[Click] 新 URL: {new_url}")
 
             if new_url != list_url or old_parsed.fragment != new_parsed.fragment:
-                print("[Click] ✓ URL 已变化")
-                print("[Click] 返回列表页...")
+                logger.info("[Click] ✓ URL 已变化")
+                logger.info("[Click] 返回列表页...")
 
                 # 如果发生了跳转，需要导航回列表页以继续后续提取
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
@@ -152,7 +156,7 @@ class URLExtractor:
                 return new_url
 
             # 如果 URL 没有任何变化，说明该点击可能未触发导航
-            print("[Click] ✗ URL 未变化")
+            logger.info("[Click] ✗ URL 未变化")
             try:
                 # 尝试回退
                 await self.page.go_back(wait_until="domcontentloaded", timeout=5000)
@@ -174,7 +178,7 @@ class URLExtractor:
 
             return None
         except Exception as e:
-            print(f"[Click] ✗ 点击失败: {e}")
+            logger.info(f"[Click] ✗ 点击失败: {e}")
             # 异常情况下尝试恢复环境
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
@@ -263,7 +267,7 @@ class URLExtractor:
             return None
 
         except Exception as e:
-            print(f"[Collect-XPath] 点击失败: {e}")
+            logger.info(f"[Collect-XPath] 点击失败: {e}")
             # 异常恢复
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)

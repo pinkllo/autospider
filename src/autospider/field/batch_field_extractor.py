@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
+from ..common.logger import get_logger
 from ..common.storage import RedisQueueManager
 
 from .models import (
@@ -27,6 +28,9 @@ from .xpath_pattern import FieldXPathExtractor, validate_xpath_pattern
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+logger = get_logger(__name__)
 
 
 class BatchFieldExtractor:
@@ -87,12 +91,12 @@ class BatchFieldExtractor:
         Returns:
             批量提取结果
         """
-        print(f"\n{'='*60}")
-        print("[BatchFieldExtractor] 开始批量字段提取")
-        print(f"[BatchFieldExtractor] 目标字段: {[f.name for f in self.fields]}")
-        print(f"[BatchFieldExtractor] 探索数量: {self.explore_count}")
-        print(f"[BatchFieldExtractor] 校验数量: {self.validate_count}")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info("[BatchFieldExtractor] 开始批量字段提取")
+        logger.info(f"[BatchFieldExtractor] 目标字段: {[f.name for f in self.fields]}")
+        logger.info(f"[BatchFieldExtractor] 探索数量: {self.explore_count}")
+        logger.info(f"[BatchFieldExtractor] 校验数量: {self.validate_count}")
+        logger.info(f"{'='*60}\n")
 
         result = BatchExtractionResult(fields=self.fields)
 
@@ -101,12 +105,12 @@ class BatchFieldExtractor:
             urls = await self._get_urls_from_redis()
 
         if not urls:
-            print("[BatchFieldExtractor] ✗ 未获取到 URL")
+            logger.info("[BatchFieldExtractor] ✗ 未获取到 URL")
             return result
 
         total_needed = self.explore_count + self.validate_count
         if len(urls) < total_needed:
-            print(f"[BatchFieldExtractor] ⚠ URL 数量不足: {len(urls)} < {total_needed}")
+            logger.info(f"[BatchFieldExtractor] ⚠ URL 数量不足: {len(urls)} < {total_needed}")
             # 仍然继续，使用所有可用的 URL
 
         # 分配 URL
@@ -114,12 +118,12 @@ class BatchFieldExtractor:
         validate_urls = urls[self.explore_count : self.explore_count + self.validate_count]
 
         # 阶段 1：探索
-        print(f"\n{'='*60}")
-        print(f"[BatchFieldExtractor] 阶段 1：探索 ({len(explore_urls)} 个 URL)")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[BatchFieldExtractor] 阶段 1：探索 ({len(explore_urls)} 个 URL)")
+        logger.info(f"{'='*60}\n")
 
         for i, url in enumerate(explore_urls):
-            print(f"\n[BatchFieldExtractor] 探索 {i + 1}/{len(explore_urls)}: {url[:80]}...")
+            logger.info(f"\n[BatchFieldExtractor] 探索 {i + 1}/{len(explore_urls)}: {url[:80]}...")
             record = await self.field_extractor.extract_from_url(url)
             result.exploration_records.append(record)
             result.total_urls_explored += 1
@@ -128,9 +132,9 @@ class BatchFieldExtractor:
             self._print_record_summary(record)
 
         # 阶段 2：分析公共 XPath 模式
-        print(f"\n{'='*60}")
-        print("[BatchFieldExtractor] 阶段 2：分析公共 XPath 模式")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info("[BatchFieldExtractor] 阶段 2：分析公共 XPath 模式")
+        logger.info(f"{'='*60}\n")
 
         field_names = [f.name for f in self.fields]
         result.common_xpaths = self.xpath_extractor.extract_all_common_patterns(
@@ -140,24 +144,24 @@ class BatchFieldExtractor:
 
         # 打印公共 XPath
         for xpath_info in result.common_xpaths:
-            print(
+            logger.info(
                 f"[BatchFieldExtractor] ✓ 字段 '{xpath_info.field_name}': {xpath_info.xpath_pattern}"
             )
-            print(f"    置信度: {xpath_info.confidence:.2%}")
+            logger.info(f"    置信度: {xpath_info.confidence:.2%}")
 
         if not result.common_xpaths:
-            print("[BatchFieldExtractor] ⚠ 未提取到公共 XPath 模式")
+            logger.info("[BatchFieldExtractor] ⚠ 未提取到公共 XPath 模式")
             return result
 
         # 阶段 3：校验
-        print(f"\n{'='*60}")
-        print(f"[BatchFieldExtractor] 阶段 3：校验公共 XPath ({len(validate_urls)} 个 URL)")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[BatchFieldExtractor] 阶段 3：校验公共 XPath ({len(validate_urls)} 个 URL)")
+        logger.info(f"{'='*60}\n")
 
         if validate_urls:
             await self._validate_common_xpaths(result, validate_urls)
         else:
-            print("[BatchFieldExtractor] ⚠ 无可用的校验 URL，跳过校验阶段")
+            logger.info("[BatchFieldExtractor] ⚠ 无可用的校验 URL，跳过校验阶段")
 
         # 保存结果
         await self._save_results(result)
@@ -167,7 +171,7 @@ class BatchFieldExtractor:
     async def _get_urls_from_redis(self) -> list[str]:
         """从 Redis 队列获取待处理的 URL"""
         if not self.redis_manager:
-            print("[BatchFieldExtractor] ⚠ 未配置 Redis 管理器")
+            logger.info("[BatchFieldExtractor] ⚠ 未配置 Redis 管理器")
             return []
 
         try:
@@ -185,7 +189,7 @@ class BatchFieldExtractor:
             )
 
             if not tasks:
-                print("[BatchFieldExtractor] ⚠ 队列中无待处理任务")
+                logger.info("[BatchFieldExtractor] ⚠ 队列中无待处理任务")
                 return []
 
             urls = []
@@ -196,11 +200,11 @@ class BatchFieldExtractor:
                     # 记录任务映射，用于后续 ACK
                     self.task_mapping[url] = (stream_id, data_id)
 
-            print(f"[BatchFieldExtractor] 从 Redis 队列获取了 {len(urls)} 个任务")
+            logger.info(f"[BatchFieldExtractor] 从 Redis 队列获取了 {len(urls)} 个任务")
             return urls
 
         except Exception as e:
-            print(f"[BatchFieldExtractor] Redis 读取失败: {e}")
+            logger.info(f"[BatchFieldExtractor] Redis 读取失败: {e}")
             return []
 
     async def _validate_common_xpaths(
@@ -212,7 +216,7 @@ class BatchFieldExtractor:
         validation_success_count = 0
 
         for i, url in enumerate(validate_urls):
-            print(f"\n[BatchFieldExtractor] 校验 {i + 1}/{len(validate_urls)}: {url[:80]}...")
+            logger.info(f"\n[BatchFieldExtractor] 校验 {i + 1}/{len(validate_urls)}: {url[:80]}...")
 
             record = PageExtractionRecord(url=url)
             all_fields_ok = True
@@ -226,11 +230,11 @@ class BatchFieldExtractor:
                 )
 
                 if success:
-                    print(
+                    logger.info(
                         f"    ✓ 字段 '{xpath_info.field_name}': {value[:50] if value else 'N/A'}..."
                     )
                 else:
-                    print(f"    ✗ 字段 '{xpath_info.field_name}': 验证失败")
+                    logger.info(f"    ✗ 字段 '{xpath_info.field_name}': 验证失败")
                     all_fields_ok = False
 
             record.success = all_fields_ok
@@ -244,7 +248,7 @@ class BatchFieldExtractor:
         if validate_urls:
             success_rate = validation_success_count / len(validate_urls)
             result.validation_success = success_rate >= 0.8
-            print(f"\n[BatchFieldExtractor] 校验成功率: {success_rate:.0%}")
+            logger.info(f"\n[BatchFieldExtractor] 校验成功率: {success_rate:.0%}")
 
             # 标记已验证的 XPath
             for xpath_info in result.common_xpaths:
@@ -259,7 +263,7 @@ class BatchFieldExtractor:
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(extraction_config, f, ensure_ascii=False, indent=2)
 
-        print(f"\n[BatchFieldExtractor] 提取配置已保存: {config_path}")
+        logger.info(f"\n[BatchFieldExtractor] 提取配置已保存: {config_path}")
 
         # 保存详细结果
         detail_path = self.output_dir / "extraction_result.json"
@@ -308,11 +312,11 @@ class BatchFieldExtractor:
         with open(detail_path, "w", encoding="utf-8") as f:
             json.dump(detail_data, f, ensure_ascii=False, indent=2)
 
-        print(f"[BatchFieldExtractor] 详细结果已保存: {detail_path}")
+        logger.info(f"[BatchFieldExtractor] 详细结果已保存: {detail_path}")
 
         # ACK 处理成功的任务
         if self.redis_manager and self.task_mapping:
-            print("\n[BatchFieldExtractor] 处理任务 ACK...")
+            logger.info("\n[BatchFieldExtractor] 处理任务 ACK...")
             acked_count = 0
             failed_count = 0
 
@@ -349,19 +353,19 @@ class BatchFieldExtractor:
                         )
                         failed_count += 1
 
-            print(f"  ✓ ACK: {acked_count} 个任务")
-            print(f"  ✗ FAIL: {failed_count} 个任务")
+            logger.info(f"  ✓ ACK: {acked_count} 个任务")
+            logger.info(f"  ✗ FAIL: {failed_count} 个任务")
 
     def _print_record_summary(self, record: PageExtractionRecord) -> None:
         """打印单页提取结果摘要"""
         status = "✓ 成功" if record.success else "✗ 部分失败"
-        print(f"[BatchFieldExtractor] {status} - {record.url[:60]}...")
+        logger.info(f"[BatchFieldExtractor] {status} - {record.url[:60]}...")
 
         for field_result in record.fields:
             if field_result.value:
-                print(f"    • {field_result.field_name}: {field_result.value[:40]}...")
+                logger.info(f"    • {field_result.field_name}: {field_result.value[:40]}...")
             else:
-                print(f"    • {field_result.field_name}: (未提取) {field_result.error or ''}")
+                logger.info(f"    • {field_result.field_name}: (未提取) {field_result.error or ''}")
 
 
 async def extract_fields_from_urls(

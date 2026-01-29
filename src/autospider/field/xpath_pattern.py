@@ -10,6 +10,7 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from ..common.logger import get_logger
 from .models import (
     PageExtractionRecord,
     CommonFieldXPath,
@@ -17,6 +18,9 @@ from .models import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+logger = get_logger(__name__)
 
 
 class FieldXPathExtractor:
@@ -42,10 +46,10 @@ class FieldXPathExtractor:
             公共 XPath 模式，如果无法提取则返回 None
         """
         if len(records) < 2:
-            print(f"[FieldXPathExtractor] 记录数不足: {len(records)}")
+            logger.info(f"[FieldXPathExtractor] 记录数不足: {len(records)}")
             return None
 
-        print(
+        logger.info(
             f"[FieldXPathExtractor] 从 {len(records)} 条记录中提取字段 '{field_name}' 的公共 XPath..."
         )
 
@@ -57,21 +61,21 @@ class FieldXPathExtractor:
                 xpaths.append(field_result.xpath)
 
         if not xpaths:
-            print("[FieldXPathExtractor] ⚠ 未找到有效的 XPath")
+            logger.info("[FieldXPathExtractor] ⚠ 未找到有效的 XPath")
             return None
 
-        print(f"[FieldXPathExtractor] 收集到 {len(xpaths)} 个 XPath:")
+        logger.info(f"[FieldXPathExtractor] 收集到 {len(xpaths)} 个 XPath:")
         for xpath in xpaths:
-            print(f"  - {xpath}")
+            logger.info(f"  - {xpath}")
 
         # 找出公共模式
         common_pattern = self._find_common_xpath_pattern(xpaths)
 
         if not common_pattern:
-            print("[FieldXPathExtractor] ⚠ 未找到公共 XPath 模式")
+            logger.info("[FieldXPathExtractor] ⚠ 未找到公共 XPath 模式")
             return None
 
-        print(f"[FieldXPathExtractor] ✓ 公共 XPath 模式: {common_pattern}")
+        logger.info(f"[FieldXPathExtractor] ✓ 公共 XPath 模式: {common_pattern}")
 
         # 计算置信度
         normalized_count = self._count_matching_pattern(xpaths, common_pattern)
@@ -117,8 +121,8 @@ class FieldXPathExtractor:
         common_pattern, count = most_common[0]
         confidence = count / len(xpaths)
 
-        print(f"[FieldXPathExtractor] 最常见模式: {common_pattern}")
-        print(f"[FieldXPathExtractor] 出现次数: {count}/{len(xpaths)} (置信度: {confidence:.2%})")
+        logger.info(f"[FieldXPathExtractor] 最常见模式: {common_pattern}")
+        logger.info(f"[FieldXPathExtractor] 出现次数: {count}/{len(xpaths)} (置信度: {confidence:.2%})")
 
         # 置信度阈值
         if confidence >= 0.5:
@@ -210,5 +214,5 @@ async def validate_xpath_pattern(
         return True, value
 
     except Exception as e:
-        print(f"[validate_xpath_pattern] 验证失败: {e}")
+        logger.info(f"[validate_xpath_pattern] 验证失败: {e}")
         return False, None

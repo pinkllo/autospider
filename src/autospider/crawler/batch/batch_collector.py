@@ -101,19 +101,19 @@ class BatchCollector(BaseCollector):
         Returns:
             收集结果
         """
-        print("\n[BatchCollector] ===== 开始批量收集 URL =====")
+        logger.info("\n[BatchCollector] ===== 开始批量收集 URL =====")
 
         # 0. 加载配置
-        print("\n[Phase 0] 加载配置文件...")
+        logger.info("\n[Phase 0] 加载配置文件...")
         if not await self._load_config():
-            print("[Error] 配置文件加载失败")
+            logger.info("[Error] 配置文件加载失败")
             return self._create_empty_result()
 
-        print("[Phase 0] ✓ 配置加载成功")
-        print(f"  - 列表页: {self.list_url}")
-        print(f"  - 任务描述: {self.task_description}")
-        print(f"  - 导航步骤: {len(self.nav_steps)} 个")
-        print(f"  - 公共 XPath: {'已配置' if self.common_detail_xpath else '未配置'}")
+        logger.info("[Phase 0] ✓ 配置加载成功")
+        logger.info(f"  - 列表页: {self.list_url}")
+        logger.info(f"  - 任务描述: {self.task_description}")
+        logger.info(f"  - 导航步骤: {len(self.nav_steps)} 个")
+        logger.info(f"  - 公共 XPath: {'已配置' if self.common_detail_xpath else '未配置'}")
 
         # 0.5 加载历史进度
         previous_progress = self.progress_persistence.load_progress()
@@ -121,7 +121,7 @@ class BatchCollector(BaseCollector):
         is_resume = False
 
         if previous_progress and not self._is_progress_compatible(previous_progress):
-            print("\n[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
+            logger.info("\n[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
             previous_progress = None
 
         # 0.6 连接 Redis / 本地文件并加载历史 URL（使用基类方法）
@@ -129,8 +129,8 @@ class BatchCollector(BaseCollector):
             await self._load_previous_urls()
 
         if previous_progress and previous_progress.current_page_num > 1:
-            print(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
-            print(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")
+            logger.info(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
+            logger.info(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")
             target_page_num = previous_progress.current_page_num
             is_resume = True
 
@@ -139,12 +139,12 @@ class BatchCollector(BaseCollector):
             self.rate_controller.consecutive_success_count = (
                 previous_progress.consecutive_success_pages
             )
-            print(
+            logger.info(
                 f"[断点恢复] 恢复速率控制状态: 等级={previous_progress.backoff_level}, 连续成功={previous_progress.consecutive_success_pages}"
             )
 
         # 1. 导航到列表页
-        print("\n[Phase 1] 导航到列表页...")
+        logger.info("\n[Phase 1] 导航到列表页...")
         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(1)
 
@@ -153,10 +153,10 @@ class BatchCollector(BaseCollector):
 
         # 2. 重放导航步骤（如果有）
         if self.nav_steps:
-            print("\n[Phase 2] 重放导航步骤...")
+            logger.info("\n[Phase 2] 重放导航步骤...")
             nav_success = await self.navigation_handler.replay_nav_steps(self.nav_steps)
             if not nav_success:
-                print("[Warning] 导航步骤重放失败")
+                logger.info("[Warning] 导航步骤重放失败")
 
             if self.navigation_handler and self.navigation_handler.page is not self.page:
                 new_page = self.navigation_handler.page
@@ -165,23 +165,23 @@ class BatchCollector(BaseCollector):
 
         # 3. 断点恢复：跳转到目标页
         if target_page_num > 1:
-            print(f"\n[Phase 3] 断点恢复：尝试跳转到第 {target_page_num} 页...")
+            logger.info(f"\n[Phase 3] 断点恢复：尝试跳转到第 {target_page_num} 页...")
             actual_page = await self._resume_to_target_page(target_page_num)
             self.pagination_handler.current_page_num = actual_page
-            print(f"[Phase 3] ✓ 已定位到第 {actual_page} 页，继续收集")
+            logger.info(f"[Phase 3] ✓ 已定位到第 {actual_page} 页，继续收集")
 
         # 4. 收集阶段
         if self.common_detail_xpath:
-            print("\n[Phase 4] 收集阶段：使用公共 xpath 遍历列表页...")
+            logger.info("\n[Phase 4] 收集阶段：使用公共 xpath 遍历列表页...")
             await self._collect_phase_with_xpath()
         else:
-            print("\n[Phase 4] 收集阶段：LLM 遍历列表页...")
+            logger.info("\n[Phase 4] 收集阶段：LLM 遍历列表页...")
             await self._collect_phase_with_llm()
 
         # 5. 保存结果
         result = self._create_result()
-        print("\n[Complete] 收集完成!")
-        print(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
+        logger.info("\n[Complete] 收集完成!")
+        logger.info(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
 
         await self._save_result(result)
 
@@ -194,7 +194,7 @@ class BatchCollector(BaseCollector):
             是否加载成功
         """
         if not self.config_path.exists():
-            print(f"[Error] 配置文件不存在: {self.config_path}")
+            logger.info(f"[Error] 配置文件不存在: {self.config_path}")
             return False
 
         try:
@@ -209,7 +209,7 @@ class BatchCollector(BaseCollector):
 
             return True
         except Exception as e:
-            print(f"[Error] 加载配置失败: {e}")
+            logger.info(f"[Error] 加载配置失败: {e}")
             return False
 
     def _initialize_handlers(self) -> None:
@@ -300,12 +300,12 @@ class BatchCollector(BaseCollector):
         }
 
         output_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[Save] 结果已保存到: {output_file}")
+        logger.info(f"[Save] 结果已保存到: {output_file}")
 
         # 保存 URL 列表
         urls_file = self.output_dir / "urls.txt"
         urls_file.write_text("\n".join(result.collected_urls), encoding="utf-8")
-        print(f"[Save] URL 列表已保存到: {urls_file}")
+        logger.info(f"[Save] URL 列表已保存到: {urls_file}")
 
 
 # 便捷函数

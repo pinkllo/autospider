@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 from ...common.config import config
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 class AdaptiveRateController:
@@ -67,12 +71,12 @@ class AdaptiveRateController:
         """
         if self.current_level < self.max_level:
             self.current_level += 1
-            print(f"[速率控制] ⚠ 触发惩罚，降速等级提升至 {self.current_level}/{self.max_level}")
-            print(
+            logger.info(f"[速率控制] ⚠ 触发惩罚，降速等级提升至 {self.current_level}/{self.max_level}")
+            logger.info(
                 f"[速率控制] 当前延迟: {self.get_delay():.2f}秒 (基础 {self.base_delay}秒 × {self.get_delay_multiplier():.2f})"
             )
         else:
-            print(f"[速率控制] ⚠ 已达最大降速等级 {self.max_level}")
+            logger.info(f"[速率控制] ⚠ 已达最大降速等级 {self.max_level}")
 
         self.consecutive_success_count = 0
 
@@ -90,8 +94,8 @@ class AdaptiveRateController:
         """尝试信用恢复"""
         if self.current_level > 0:
             self.current_level -= 1
-            print(f"[速率控制] ✓ 信用恢复，降速等级降至 {self.current_level}/{self.max_level}")
-            print(f"[速率控制] 当前延迟: {self.get_delay():.2f}秒")
+            logger.info(f"[速率控制] ✓ 信用恢复，降速等级降至 {self.current_level}/{self.max_level}")
+            logger.info(f"[速率控制] 当前延迟: {self.get_delay():.2f}秒")
 
         self.consecutive_success_count = 0
 
@@ -99,7 +103,7 @@ class AdaptiveRateController:
         """重置状态"""
         self.current_level = 0
         self.consecutive_success_count = 0
-        print("[速率控制] 状态已重置")
+        logger.info("[速率控制] 状态已重置")
 
     def set_level(self, level: int) -> None:
         """设置降速等级（从 checkpoint 恢复时使用）
@@ -109,8 +113,8 @@ class AdaptiveRateController:
         """
         self.current_level = min(level, self.max_level)
         if self.current_level > 0:
-            print(f"[速率控制] 从检查点恢复，当前降速等级: {self.current_level}")
-            print(f"[速率控制] 当前延迟: {self.get_delay():.2f}秒")
+            logger.info(f"[速率控制] 从检查点恢复，当前降速等级: {self.current_level}")
+            logger.info(f"[速率控制] 当前延迟: {self.get_delay():.2f}秒")
 
     @property
     def is_slowed(self) -> bool:

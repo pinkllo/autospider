@@ -21,6 +21,10 @@ from ...common.storage.persistence import ConfigPersistence
 
 if TYPE_CHECKING:
     from typing import Any
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 # ============================================================================
@@ -68,37 +72,37 @@ class ScriptGenerator:
         Returns:
             生成的爬虫脚本代码
         """
-        print(f"[ScriptGenerator] 开始分析探索记录...")
+        logger.info(f"[ScriptGenerator] 开始分析探索记录...")
 
         # 尝试从配置文件读取（如果参数为空）
         if (not nav_steps or not common_detail_xpath) and self.config_persistence.exists():
-            print(f"[ScriptGenerator] 尝试从配置文件读取缺失的参数...")
+            logger.info(f"[ScriptGenerator] 尝试从配置文件读取缺失的参数...")
             saved_config = self.config_persistence.load()
             if saved_config:
                 if not nav_steps:
                     nav_steps = saved_config.nav_steps
-                    print(f"[ScriptGenerator] ✓ 从配置读取到 {len(nav_steps)} 个导航步骤")
+                    logger.info(f"[ScriptGenerator] ✓ 从配置读取到 {len(nav_steps)} 个导航步骤")
                 if not common_detail_xpath:
                     common_detail_xpath = saved_config.common_detail_xpath
-                    print(f"[ScriptGenerator] ✓ 从配置读取到公共 xpath: {common_detail_xpath}")
+                    logger.info(f"[ScriptGenerator] ✓ 从配置读取到公共 xpath: {common_detail_xpath}")
 
         if not detail_visits:
-            print(f"[ScriptGenerator] 没有探索记录，无法生成脚本")
+            logger.info(f"[ScriptGenerator] 没有探索记录，无法生成脚本")
             return ""
 
         # 提取导航步骤的 xpath（可直接复用到脚本）
         nav_xpaths = self._extract_nav_xpaths(nav_steps)
-        print(f"[ScriptGenerator] 提取到 {len(nav_xpaths)} 个导航步骤的 xpath")
+        logger.info(f"[ScriptGenerator] 提取到 {len(nav_xpaths)} 个导航步骤的 xpath")
 
         # 使用传入的公共 xpath 或从 detail_visits 提取
         detail_xpath = common_detail_xpath
         if not detail_xpath:
             detail_xpath = self._extract_detail_xpath(detail_visits)
-        print(f"[ScriptGenerator] 详情链接 xpath: {detail_xpath or 'N/A'}")
+        logger.info(f"[ScriptGenerator] 详情链接 xpath: {detail_xpath or 'N/A'}")
 
         # 如果有足够的 xpath 信息，直接生成脚本（无需 LLM）
         if nav_xpaths or detail_xpath:
-            print(f"[ScriptGenerator] 使用提取的 xpath 直接生成脚本...")
+            logger.info(f"[ScriptGenerator] 使用提取的 xpath 直接生成脚本...")
             script = self._generate_script_from_xpaths(
                 list_url=list_url,
                 task_description=task_description,
@@ -107,13 +111,13 @@ class ScriptGenerator:
                 collected_urls=collected_urls,
             )
             if script:
-                print(f"[ScriptGenerator] ✓ 脚本生成完成（{len(script)} 字符）")
+                logger.info(f"[ScriptGenerator] ✓ 脚本生成完成（{len(script)} 字符）")
                 self._validate_script(script)
                 return script
 
         # 不使用 LLM 回退，直接返回空字符串
         # 因为简化模板已经足够使用，不需要复杂的 LLM 生成
-        print(f"[ScriptGenerator] ⚠ 无法生成脚本（缺少 xpath 信息）")
+        logger.info(f"[ScriptGenerator] ⚠ 无法生成脚本（缺少 xpath 信息）")
         return ""
 
     def _extract_nav_xpaths(self, nav_steps: list[dict[str, Any]]) -> list[dict]:
@@ -252,23 +256,23 @@ class DetailCrawler:
     
     async def crawl(self, urls: list[str]) -> list[dict]:
         """爬取所有详情页"""
-        print(f"\\n[Crawler] 开始爬取 {{len(urls)}} 个详情页...")
+        logger.info(f"\\n[Crawler] 开始爬取 {{len(urls)}} 个详情页...")
         
         for i, url in enumerate(urls, 1):
-            print(f"[Crawler] ({{i}}/{{len(urls)}}) {{url[:100]}}...")
+            logger.info(f"[Crawler] ({{i}}/{{len(urls)}}) {{url[:100]}}...")
             
             try:
                 data = await self._crawl_one(url)
                 if data:
                     self.results.append(data)
-                    print(f"[Crawler] ✓ 成功: {{data.get('title', '')[:50]}}")
+                    logger.info(f"[Crawler] ✓ 成功: {{data.get('title', '')[:50]}}")
             except Exception as e:
-                print(f"[Crawler] ✗ 爬取失败: {{e}}")
+                logger.info(f"[Crawler] ✗ 爬取失败: {{e}}")
         
         # 保存结果
         self._save_results()
         
-        print(f"\\n[Crawler] 爬取完成! 成功 {{len(self.results)}}/{{len(urls)}} 个")
+        logger.info(f"\\n[Crawler] 爬取完成! 成功 {{len(self.results)}}/{{len(urls)}} 个")
         return self.results
     
     async def _crawl_one(self, url: str) -> dict | None:
@@ -302,7 +306,7 @@ class DetailCrawler:
             }}
             
         except Exception as e:
-            print(f"[Crawler] 页面加载失败: {{e}}")
+            logger.info(f"[Crawler] 页面加载失败: {{e}}")
             return None
     
     def _save_results(self):
@@ -310,7 +314,7 @@ class DetailCrawler:
         output_file = self.output_dir / "results.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
-        print(f"[Crawler] 结果已保存到: {{output_file}}")
+        logger.info(f"[Crawler] 结果已保存到: {{output_file}}")
 
 
 # ============================================================================
@@ -322,27 +326,27 @@ def load_urls() -> list[str]:
     urls_file = Path(CONFIG["urls_file"])
     
     if not urls_file.exists():
-        print(f"[Error] URL 文件不存在: {{urls_file}}")
-        print(f"[Error] 请先运行 url_collector 收集 URL")
+        logger.info(f"[Error] URL 文件不存在: {{urls_file}}")
+        logger.info(f"[Error] 请先运行 url_collector 收集 URL")
         return []
     
     urls = urls_file.read_text(encoding="utf-8").strip().split("\\n")
     urls = [u.strip() for u in urls if u.strip()]
     
-    print(f"[Main] 从 {{urls_file}} 加载了 {{len(urls)}} 个 URL")
+    logger.info(f"[Main] 从 {{urls_file}} 加载了 {{len(urls)}} 个 URL")
     return urls
 
 
 async def main():
     """主函数"""
-    print("=" * 60)
-    print("详情页爬虫脚本")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("详情页爬虫脚本")
+    logger.info("=" * 60)
     
     # 1. 加载已收集的 URL 列表
     urls = load_urls()
     if not urls:
-        print("[Main] 没有 URL 可爬取，退出")
+        logger.info("[Main] 没有 URL 可爬取，退出")
         return
     
     output_dir = Path(CONFIG["output_dir"])
@@ -361,9 +365,9 @@ async def main():
         finally:
             await browser.close()
     
-    print("\\n" + "=" * 60)
-    print("爬取完成!")
-    print("=" * 60)
+    logger.info("\\n" + "=" * 60)
+    logger.info("爬取完成!")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
@@ -524,11 +528,11 @@ if __name__ == "__main__":
     def _validate_script(self, script: str) -> None:
         """验证生成的脚本结构"""
         if "scrapy_playwright" in script and "scrapy.Spider" in script:
-            print(f"[ScriptGenerator] ✓ Scrapy + scrapy-playwright 脚本结构验证通过")
+            logger.info(f"[ScriptGenerator] ✓ Scrapy + scrapy-playwright 脚本结构验证通过")
         elif "scrapy" in script.lower():
-            print(f"[ScriptGenerator] ⚠ 脚本可能缺少 scrapy-playwright 配置")
+            logger.info(f"[ScriptGenerator] ⚠ 脚本可能缺少 scrapy-playwright 配置")
         else:
-            print(f"[ScriptGenerator] ⚠ 脚本可能不是 Scrapy 格式")
+            logger.info(f"[ScriptGenerator] ⚠ 脚本可能不是 Scrapy 格式")
 
 
 # ============================================================================

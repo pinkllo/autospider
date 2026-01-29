@@ -22,6 +22,7 @@ from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
+from ..common.logger import get_logger
 from ..common.protocol import coerce_bool
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
@@ -31,6 +32,8 @@ from .models import (
     FieldExtractionResult,
     PageExtractionRecord,
 )
+
+logger = get_logger(__name__)
 from .field_decider import FieldDecider
 
 if TYPE_CHECKING:
@@ -139,7 +142,7 @@ class FieldExtractor:
         try:
             return await self.page.content()
         except Exception as e:
-            print(f"[FieldExtractor] 获取页面 HTML 失败: {e}")
+            logger.info(f"[FieldExtractor] 获取页面 HTML 失败: {e}")
             return await self.page.inner_text("body")
 
     async def extract_from_url(self, url: str) -> PageExtractionRecord:
@@ -152,10 +155,10 @@ class FieldExtractor:
         Returns:
             页面提取记录
         """
-        print(f"\n{'='*60}")
-        print(f"[FieldExtractor] 开始提取: {url}")
-        print(f"[FieldExtractor] 目标字段: {[f.name for f in self.fields]}")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[FieldExtractor] 开始提取: {url}")
+        logger.info(f"[FieldExtractor] 目标字段: {[f.name for f in self.fields]}")
+        logger.info(f"{'='*60}\n")
 
         record = PageExtractionRecord(url=url)
 
@@ -166,16 +169,16 @@ class FieldExtractor:
 
             # 提取每个字段
             for field in self.fields:
-                print(f"\n[FieldExtractor] --- 提取字段: {field.name} ---")
+                logger.info(f"\n[FieldExtractor] --- 提取字段: {field.name} ---")
                 result = await self._extract_single_field(field, record.nav_steps)
                 record.fields.append(result)
 
                 if result.value:
-                    print(
+                    logger.info(
                         f"[FieldExtractor] ✓ 字段 '{field.name}' 提取成功: {result.value[:50]}..."
                     )
                 else:
-                    print(f"[FieldExtractor] ✗ 字段 '{field.name}' 提取失败: {result.error}")
+                    logger.info(f"[FieldExtractor] ✗ 字段 '{field.name}' 提取失败: {result.error}")
 
             # 检查是否所有必填字段都提取成功
             required_fields_ok = all(
@@ -184,7 +187,7 @@ class FieldExtractor:
             record.success = required_fields_ok
 
         except Exception as e:
-            print(f"[FieldExtractor] 提取异常: {e}")
+            logger.info(f"[FieldExtractor] 提取异常: {e}")
             import traceback
 
             traceback.print_exc()
@@ -305,9 +308,9 @@ class FieldExtractor:
                 verified = await self._verify_xpath(result.xpath, field_text)
                 if verified:
                     result.confidence = max(result.confidence, 0.9)
-                    print(f"[FieldExtractor] XPath 验证通过: {result.xpath}")
+                    logger.info(f"[FieldExtractor] XPath 验证通过: {result.xpath}")
                 else:
-                    print("[FieldExtractor] XPath 验证失败，使用 LLM 提取的值")
+                    logger.info("[FieldExtractor] XPath 验证失败，使用 LLM 提取的值")
 
     async def _navigate_to_field(
         self,
@@ -330,7 +333,7 @@ class FieldExtractor:
             最终决策结果
         """
         for step in range(self.max_nav_steps):
-            print(f"[FieldExtractor] 导航步骤 {step + 1}/{self.max_nav_steps}")
+            logger.info(f"[FieldExtractor] 导航步骤 {step + 1}/{self.max_nav_steps}")
 
             # 获取 SoM 快照
             snapshot = await inject_and_scan(self.page)
@@ -352,7 +355,7 @@ class FieldExtractor:
             )
 
             if not decision:
-                print("[FieldExtractor] LLM 决策失败，继续尝试")
+                logger.info("[FieldExtractor] LLM 决策失败，继续尝试")
                 continue
 
             action = decision.get("action")
@@ -389,10 +392,10 @@ class FieldExtractor:
                     found = bool(args.get("field_value") or args.get("field_text"))
                 if found:
                     field_text = args.get("field_value") or args.get("field_text") or ""
-                    print(f"[FieldExtractor] ✓ 找到字段: {field_text[:50]}...")
+                    logger.info(f"[FieldExtractor] ✓ 找到字段: {field_text[:50]}...")
                     await clear_overlay(self.page)
                     return decision
-                print("[FieldExtractor] ✗ 字段不存在")
+                logger.info("[FieldExtractor] ✗ 字段不存在")
                 await clear_overlay(self.page)
                 return decision
 
@@ -439,9 +442,9 @@ class FieldExtractor:
                             )
                         await self._execute_type(mark_id_value, text, snapshot)
                     except (TypeError, ValueError):
-                        print(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
+                        logger.info(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
                 else:
-                    print("[FieldExtractor] 输入动作缺少 mark_id 或 text")
+                    logger.info("[FieldExtractor] 输入动作缺少 mark_id 或 text")
                 await asyncio.sleep(0.5)
 
             elif action == "scroll":
@@ -454,12 +457,12 @@ class FieldExtractor:
                 await asyncio.sleep(0.5)
 
             else:
-                print(f"[FieldExtractor] 未知操作: {action}")
+                logger.info(f"[FieldExtractor] 未知操作: {action}")
 
             # 清除 SoM 覆盖层
             await clear_overlay(self.page)
 
-        print(f"[FieldExtractor] 达到最大导航步数 {self.max_nav_steps}")
+        logger.info(f"[FieldExtractor] 达到最大导航步数 {self.max_nav_steps}")
         return None
 
     async def _execute_click(self, mark_id: int, snapshot) -> bool:
@@ -480,7 +483,7 @@ class FieldExtractor:
 
             return result.success
         except Exception as e:
-            print(f"[FieldExtractor] 点击失败: {e}")
+            logger.info(f"[FieldExtractor] 点击失败: {e}")
             return False
 
     async def _execute_type(self, mark_id: int, text: str, snapshot) -> bool:
@@ -502,7 +505,7 @@ class FieldExtractor:
 
             return result.success
         except Exception as e:
-            print(f"[FieldExtractor] 输入失败: {e}")
+            logger.info(f"[FieldExtractor] 输入失败: {e}")
             return False
 
     async def _extract_xpath_for_text(
@@ -520,7 +523,7 @@ class FieldExtractor:
         Returns:
             XPath 提取结果
         """
-        print(f"[FieldExtractor] 在 HTML 中搜索: '{target_text[:30]}...'")
+        logger.info(f"[FieldExtractor] 在 HTML 中搜索: '{target_text[:30]}...'")
 
         # 获取页面 HTML
         html_content = await self.page.content()
@@ -529,15 +532,15 @@ class FieldExtractor:
         matches = self.fuzzy_searcher.search_in_html(html_content, target_text)
 
         if not matches:
-            print("[FieldExtractor] HTML 中未找到匹配")
+            logger.info("[FieldExtractor] HTML 中未找到匹配")
             return None
 
-        print(f"[FieldExtractor] 找到 {len(matches)} 个匹配")
+        logger.info(f"[FieldExtractor] 找到 {len(matches)} 个匹配")
 
         if len(matches) == 1:
             # 唯一匹配，直接使用
             match = matches[0]
-            print(f"[FieldExtractor] 唯一匹配: xpath={match.element_xpath}")
+            logger.info(f"[FieldExtractor] 唯一匹配: xpath={match.element_xpath}")
             return {
                 "xpath": match.element_xpath,
                 "xpath_candidates": [{"xpath": match.element_xpath, "priority": 1}],
@@ -545,7 +548,7 @@ class FieldExtractor:
             }
 
         # 多个匹配，需要消歧
-        print("[FieldExtractor] 多个匹配，启动消歧流程")
+        logger.info("[FieldExtractor] 多个匹配，启动消歧流程")
         selected_match = await self._disambiguate_matches(field, matches)
 
         if selected_match:
@@ -651,7 +654,7 @@ class FieldExtractor:
         try:
             await self.page.evaluate(js_code, candidates)
         except Exception as e:
-            print(f"[FieldExtractor] 高亮候选元素失败: {e}")
+            logger.info(f"[FieldExtractor] 高亮候选元素失败: {e}")
 
     async def _clear_highlights(self) -> None:
         """清除高亮"""
@@ -699,5 +702,5 @@ class FieldExtractor:
             return similarity >= 0.8
 
         except Exception as e:
-            print(f"[FieldExtractor] XPath 验证异常: {e}")
+            logger.info(f"[FieldExtractor] XPath 验证异常: {e}")
             return False

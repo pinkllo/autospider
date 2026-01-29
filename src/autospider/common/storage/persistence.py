@@ -14,6 +14,10 @@ from typing import Any
 # 引入通用文件操作工具
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
 from utils.file_utils import ensure_directory, save_json, load_json, file_exists
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 @dataclass
@@ -95,7 +99,7 @@ class ConfigPersistence:
         # 保存到文件
         data = config.to_dict()
         save_json(self.config_file, data)
-        print(f"[持久化] 配置已保存到: {self.config_file}")
+        logger.info(f"[持久化] 配置已保存到: {self.config_file}")
 
     def load(self) -> CollectionConfig | None:
         """加载配置
@@ -104,7 +108,7 @@ class ConfigPersistence:
             加载的配置，如果文件不存在则返回 None
         """
         if not file_exists(self.config_file):
-            print(f"[持久化] 配置文件不存在: {self.config_file}")
+            logger.info(f"[持久化] 配置文件不存在: {self.config_file}")
             return None
 
         try:
@@ -112,10 +116,10 @@ class ConfigPersistence:
             if data is None:
                 return None
             config = CollectionConfig.from_dict(data)
-            print(f"[持久化] 配置已加载: {self.config_file}")
+            logger.info(f"[持久化] 配置已加载: {self.config_file}")
             return config
         except Exception as e:
-            print(f"[持久化] 加载配置失败: {e}")
+            logger.info(f"[持久化] 加载配置失败: {e}")
             return None
 
     def exists(self) -> bool:
@@ -229,7 +233,7 @@ class ProgressPersistence:
                 return None
             return CollectionProgress.from_dict(data)
         except Exception as e:
-            print(f"[进度] 加载进度失败: {e}")
+            logger.info(f"[进度] 加载进度失败: {e}")
             return None
 
     def append_urls(self, urls: list[str]) -> None:

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from ...common.browser import ActionExecutor
 from ...common.browser.click_utils import click_and_capture_new_page
+from ...common.logger import get_logger
 from ...common.som import (
     clear_overlay,
     inject_and_scan,
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
     from ...common.llm import LLMDecider
+
+
+logger = get_logger(__name__)
 
 
 class NavigationHandler:
@@ -75,7 +79,7 @@ class NavigationHandler:
 
         while nav_step < self.max_nav_steps and not filter_done:
             nav_step += 1
-            print(f"\n[Nav] ----- 导航步骤 {nav_step} -----")
+            logger.info("[Nav] ----- 导航步骤 %s -----", nav_step)
 
             # 1. 观察：注入 SoM 并截图
             try:
@@ -93,9 +97,9 @@ class NavigationHandler:
                 mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
                 marks_text = format_marks_for_llm(snapshot)
 
-                print(f"[Nav] 发现 {len(snapshot.marks)} 个可交互元素")
+                logger.info("[Nav] 发现 %s 个可交互元素", len(snapshot.marks))
             except Exception as e:
-                print(f"[Nav] 观察失败: {e}")
+                logger.error("[Nav] 观察失败: %s", e)
                 break
 
             # 2. 决策：调用 LLM
@@ -126,26 +130,33 @@ class NavigationHandler:
                     snapshot=snapshot,
                 )
 
-                print(f"[Nav] LLM 决策: {action.action.value}")
-                print(f"[Nav] 思考: {action.thinking[:150] if action.thinking else 'N/A'}...")
+                logger.info("[Nav] LLM 决策: %s", action.action.value)
+                logger.info(
+                    "[Nav] 思考: %s...",
+                    action.thinking[:150] if action.thinking else "N/A",
+                )
                 if action.mark_id:
-                    print(f"[Nav] 目标元素: [{action.mark_id}] {action.target_text or ''}")
+                    logger.info(
+                        "[Nav] 目标元素: [%s] %s",
+                        action.mark_id,
+                        action.target_text or "",
+                    )
             except Exception as e:
-                print(f"[Nav] 决策失败: {e}")
+                logger.error("[Nav] 决策失败: %s", e)
                 break
 
             # 3. 执行动作
             if action.action == ActionType.DONE:
-                print("[Nav] 筛选操作完成")
+                logger.info("[Nav] 筛选操作完成")
                 filter_done = True
                 break
 
             if action.action == ActionType.RETRY:
-                print("[Nav] 重试")
+                logger.info("[Nav] 重试")
                 continue
 
             if action.action == ActionType.EXTRACT:
-                print("[Nav] 收到 extract，导航模式不执行提取，按 done 处理")
+                logger.warning("[Nav] 收到 extract，导航模式不执行提取，按 done 处理")
                 filter_done = True
                 break
 
@@ -160,9 +171,9 @@ class NavigationHandler:
                     nav_step,
                 )
 
-                print(f"[Nav] 执行结果: {'成功' if result.success else '失败'}")
+                logger.info("[Nav] 执行结果: %s", "成功" if result.success else "失败")
                 if result.error:
-                    print(f"[Nav] 错误: {result.error}")
+                    logger.warning("[Nav] 错误: %s", result.error)
 
                 # 如果打开了新标签页，切换到新页面继续探索
                 if hasattr(self.executor, "_new_page") and self.executor._new_page:
@@ -171,7 +182,7 @@ class NavigationHandler:
                     self.executor.page = new_page
                     self.executor._new_page = None
                     self.list_url = self.page.url
-                    print(f"[Nav] ✓ 切换到新标签页: {self.page.url}")
+                    logger.info("[Nav] ✓ 切换到新标签页: %s", self.page.url)
 
                 # 获取被点击元素的详细信息
                 clicked_element = None
@@ -216,15 +227,15 @@ class NavigationHandler:
                 await asyncio.sleep(1)
 
             except Exception as e:
-                print(f"[Nav] 执行失败: {e}")
+                logger.error("[Nav] 执行失败: %s", e)
                 continue
 
         if filter_done:
-            print(f"[Nav] ✓ 导航阶段完成，共执行 {nav_step} 步")
+            logger.info("[Nav] ✓ 导航阶段完成，共执行 %s 步", nav_step)
             await asyncio.sleep(1)
             return True
         else:
-            print(f"[Nav] ⚠ 导航阶段达到最大步数 {self.max_nav_steps}，继续探索")
+            logger.warning("[Nav] ⚠ 导航阶段达到最大步数 %s，继续探索", self.max_nav_steps)
             return False
 
     async def replay_nav_steps(self, nav_steps: list[dict] = None) -> bool:
@@ -266,8 +277,10 @@ class NavigationHandler:
                                     target_text = step.get("target_text") or step.get(
                                         "clicked_element_text", ""
                                     )
-                                    print(
-                                        f"[Replay] 点击: {target_text[:30]}... (xpath: {xpath[:50]}...)"
+                                    logger.info(
+                                        "[Replay] 点击: %s... (xpath: %s...)",
+                                        target_text[:30],
+                                        xpath[:50],
                                     )
                                     try:
                                         new_page = await click_and_capture_new_page(
@@ -281,14 +294,20 @@ class NavigationHandler:
                                         if new_page is not None:
                                             self.page = new_page
                                             self.list_url = self.page.url
-                                            print(f"[Replay] ✓ 切换到新标签页: {self.page.url}")
+                                            logger.info(
+                                                "[Replay] ✓ 切换到新标签页: %s", self.page.url
+                                            )
                                     except Exception:
                                         pass
                                     await asyncio.sleep(1)
                                 elif action_type == "type":
                                     text = step.get("text") or ""
                                     key = step.get("key") or "Enter"
-                                    print(f"[Replay] 输入: {text[:30]}... (xpath: {xpath[:50]}...)")
+                                    logger.info(
+                                        "[Replay] 输入: %s... (xpath: %s...)",
+                                        text[:30],
+                                        xpath[:50],
+                                    )
                                     await locator.first.click(timeout=5000)
                                     await locator.first.fill(text, timeout=5000)
                                     try:
@@ -300,16 +319,16 @@ class NavigationHandler:
                                             pass
                                     await asyncio.sleep(0.5)
                         except Exception as e:
-                            print(f"[Replay] ✗ 执行失败: {e}")
+                            logger.error("[Replay] ✗ 执行失败: %s", e)
                             step_success = False
             elif action_type == "scroll":
                 delta = step.get("scroll_delta") or (0, 300)
                 try:
-                    print(f"[Replay] 滚动: {delta}")
+                    logger.info("[Replay] 滚动: %s", delta)
                     await self.page.mouse.wheel(delta[0], delta[1])
                     await asyncio.sleep(0.3)
                 except Exception as e:
-                    print(f"[Replay] ✗ 滚动失败: {e}")
+                    logger.error("[Replay] ✗ 滚动失败: %s", e)
                     step_success = False
             elif action_type == "navigate":
                 url = step.get("url")
@@ -317,30 +336,30 @@ class NavigationHandler:
                     step_success = False
                 else:
                     try:
-                        print(f"[Replay] 导航: {url}")
+                        logger.info("[Replay] 导航: %s", url)
                         await self.page.goto(url, wait_until="domcontentloaded", timeout=10000)
                         await asyncio.sleep(0.5)
                     except Exception as e:
-                        print(f"[Replay] ✗ 导航失败: {e}")
+                        logger.error("[Replay] ✗ 导航失败: %s", e)
                         step_success = False
             elif action_type == "wait":
                 timeout_ms = step.get("timeout_ms") or 2000
                 try:
-                    print(f"[Replay] 等待: {timeout_ms}ms")
+                    logger.info("[Replay] 等待: %sms", timeout_ms)
                     await self.page.wait_for_load_state("networkidle", timeout=timeout_ms)
                 except Exception:
                     pass
             elif action_type == "go_back":
                 try:
-                    print("[Replay] 返回上一页")
+                    logger.info("[Replay] 返回上一页")
                     await self.page.go_back(wait_until="domcontentloaded", timeout=10000)
                     await asyncio.sleep(0.5)
                 except Exception as e:
-                    print(f"[Replay] ✗ 返回失败: {e}")
+                    logger.error("[Replay] ✗ 返回失败: %s", e)
                     step_success = False
             elif action_type == "go_back_tab":
                 try:
-                    print("[Replay] 返回上一个标签页")
+                    logger.info("[Replay] 返回上一个标签页")
                     current_page = self.page
                     raw_current = (
                         current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
@@ -363,7 +382,7 @@ class NavigationHandler:
                         self.list_url = self.page.url
                         await asyncio.sleep(0.5)
                 except Exception as e:
-                    print(f"[Replay] ✗ 返回标签页失败: {e}")
+                    logger.error("[Replay] ✗ 返回标签页失败: %s", e)
                     step_success = False
             else:
                 continue

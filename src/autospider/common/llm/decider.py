@@ -17,6 +17,10 @@ from common.utils.prompt_template import render_template
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ..types import AgentState, SoMSnapshot
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 # ============================================================================
@@ -194,7 +198,7 @@ class LLMDecider:
 
             # 如果连续滚动太多次，强制尝试其他操作
             if self.scroll_count >= self.max_consecutive_scrolls:
-                print(f"[Decide] 警告: 已连续滚动 {self.scroll_count} 次，可能需要其他操作")
+                logger.info(f"[Decide] 警告: 已连续滚动 {self.scroll_count} 次，可能需要其他操作")
         else:
             self.scroll_count = 0  # 重置滚动计数
 
@@ -206,7 +210,7 @@ class LLMDecider:
             if history["reached_bottom"] and scroll_info.is_at_top:
                 history["reached_top_after_bottom"] = True
                 history["fully_scrolled"] = True
-                print(f"[Decide] 📜 页面已完整滚动: {page_url[:50]}...")
+                logger.info(f"[Decide] 📜 页面已完整滚动: {page_url[:50]}...")
 
         # 生成操作签名用于循环检测
         action_sig = f"{action.action.value}:{action.mark_id}:{action.target_text}"
@@ -217,7 +221,7 @@ class LLMDecider:
         # 检测循环模式
         loop_detected = self._detect_loop()
         if loop_detected:
-            print("[Decide] ⚠️ 检测到循环操作模式！")
+            logger.info("[Decide] ⚠️ 检测到循环操作模式！")
 
         # 记录到历史
         self.action_history.append(

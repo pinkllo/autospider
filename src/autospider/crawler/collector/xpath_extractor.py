@@ -5,8 +5,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from ...common.logger import get_logger
+
 if TYPE_CHECKING:
     from .models import DetailPageVisit
+
+
+logger = get_logger(__name__)
 
 
 class XPathExtractor:
@@ -21,7 +26,7 @@ class XPathExtractor:
         if len(detail_visits) < 2:
             return None
 
-        print(f"[XPathExtractor] 从 {len(detail_visits)} 个访问记录中提取公共 xpath...")
+        logger.info(f"[XPathExtractor] 从 {len(detail_visits)} 个访问记录中提取公共 xpath...")
 
         # 收集所有 xpath（选择每个元素的最高优先级 xpath）
         xpaths = []
@@ -35,20 +40,20 @@ class XPathExtractor:
                     xpaths.append(sorted_candidates[0]["xpath"])
 
         if not xpaths:
-            print("[XPathExtractor] ⚠ 未找到有效的 xpath")
+            logger.info("[XPathExtractor] ⚠ 未找到有效的 xpath")
             return None
 
-        print(f"[XPathExtractor] 提取到 {len(xpaths)} 个 xpath:")
+        logger.info(f"[XPathExtractor] 提取到 {len(xpaths)} 个 xpath:")
         for xpath in xpaths:
-            print(f"  - {xpath}")
+            logger.info(f"  - {xpath}")
 
         # 找出公共模式
         common_pattern = self._find_common_xpath_pattern(xpaths)
 
         if common_pattern:
-            print(f"[XPathExtractor] ✓ 公共 xpath 模式: {common_pattern}")
+            logger.info(f"[XPathExtractor] ✓ 公共 xpath 模式: {common_pattern}")
         else:
-            print("[XPathExtractor] ⚠ 未找到公共 xpath 模式")
+            logger.info("[XPathExtractor] ⚠ 未找到公共 xpath 模式")
 
         return common_pattern
 
@@ -82,7 +87,7 @@ class XPathExtractor:
         common_pattern, count = most_common[0]
         confidence = count / len(xpaths)
 
-        print(
+        logger.info(
             f"[XPathExtractor] 最常见模式: {common_pattern}, 出现 {count}/{len(xpaths)} 次 (置信度: {confidence:.2%})"
         )
 

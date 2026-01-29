@@ -20,6 +20,10 @@ from ..common.channel.factory import create_url_channel
 from ..common.channel.base import URLTask, URLChannel
 from ..crawler.explore.url_collector import URLCollector
 from ..field import FieldDefinition, BatchFieldExtractor, BatchXPathExtractor
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 async def run_pipeline(
@@ -106,7 +110,7 @@ async def run_pipeline(
             summary["collected_urls"] = len(result.collected_urls)
         except Exception as exc:  # noqa: BLE001
             state["error"] = f"producer_error: {exc}"
-            print(f"[Pipeline] Producer failed: {exc}")
+            logger.info(f"[Pipeline] Producer failed: {exc}")
         finally:
             producer_done.set()
             await channel.close()
@@ -124,7 +128,7 @@ async def run_pipeline(
 
         if not urls:
             state["error"] = "no_urls_for_exploration"
-            print("[Pipeline] No URLs collected for exploration.")
+            logger.info("[Pipeline] No URLs collected for exploration.")
             xpath_ready.set()
             return
 
@@ -141,7 +145,7 @@ async def run_pipeline(
         fields_config = result.to_extraction_config().get("fields", [])
         if not fields_config:
             state["error"] = "no_fields_config"
-            print("[Pipeline] No fields config generated from exploration.")
+            logger.info("[Pipeline] No fields config generated from exploration.")
         state["fields_config"] = fields_config
         xpath_ready.set()
 

@@ -12,6 +12,10 @@ from .click_utils import click_and_capture_new_page, _ensure_guarded_page
 
 if TYPE_CHECKING:
     from browser_manager.guarded_page import GuardedPage
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 
 class ActionExecutor:
@@ -152,7 +156,7 @@ class ActionExecutor:
         )
 
         if new_page is not None:
-            print(f"[Click] 检测到新标签页: {new_page.url}")
+            logger.info(f"[Click] 检测到新标签页: {new_page.url}")
             # 立即切换当前执行器的页面引用，确保后续动作在正确的页面上执行
             self._previous_page = self.page
             self.page = new_page
@@ -230,7 +234,7 @@ class ActionExecutor:
             except Exception:
                 pass
             new_page = _ensure_guarded_page(new_page)
-            print(f"[Type] 检测到新标签页: {new_page.url}")
+            logger.info(f"[Type] 检测到新标签页: {new_page.url}")
             self._previous_page = self.page
             self.page = new_page
             self._new_page = new_page  # 保留引用供外部管理器感知

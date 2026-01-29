@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 
 from ...common.config import config
+from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
 from ...common.som import (
@@ -34,6 +35,9 @@ from ..collector import (
 if TYPE_CHECKING:
     from playwright.async_api import Page
     from ...common.types import SoMSnapshot
+
+
+logger = get_logger(__name__)
 
 
 class ConfigGenerator:
@@ -105,13 +109,13 @@ class ConfigGenerator:
         Returns:
             生成的配置对象
         """
-        print("\n[ConfigGenerator] ===== 开始生成爬取配置 =====")
-        print(f"[ConfigGenerator] 任务描述: {self.task_description}")
-        print(f"[ConfigGenerator] 列表页: {self.list_url}")
-        print(f"[ConfigGenerator] 将探索 {self.explore_count} 个详情页")
+        logger.info("\n[ConfigGenerator] ===== 开始生成爬取配置 =====")
+        logger.info(f"[ConfigGenerator] 任务描述: {self.task_description}")
+        logger.info(f"[ConfigGenerator] 列表页: {self.list_url}")
+        logger.info(f"[ConfigGenerator] 将探索 {self.explore_count} 个详情页")
 
         # 1. 导航到列表页
-        print("\n[Phase 1] 导航到列表页...")
+        logger.info("\n[Phase 1] 导航到列表页...")
         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(1)
 
@@ -119,10 +123,10 @@ class ConfigGenerator:
         self._initialize_handlers()
 
         # 2. 导航阶段（筛选操作）
-        print("\n[Phase 2] 导航阶段：根据任务描述进行筛选操作（LLM决策）...")
+        logger.info("\n[Phase 2] 导航阶段：根据任务描述进行筛选操作（LLM决策）...")
         nav_success = await self.navigation_handler.run_navigation_phase()
         if not nav_success:
-            print("[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
+            logger.info("[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
         self.nav_steps = self.navigation_handler.nav_steps
 
         if self.navigation_handler and self.navigation_handler.page is not self.page:
@@ -131,41 +135,41 @@ class ConfigGenerator:
             self._sync_page_references(new_page, list_url=new_list_url)
 
         # 3. 探索阶段（进入详情页）
-        print(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
+        logger.info(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
         await self._explore_phase()
 
         if len(self.detail_visits) < 2:
-            print(
+            logger.info(
                 f"[Warning] 只探索到 {len(self.detail_visits)} 个详情页，需要至少 2 个才能提取模式"
             )
             return self._create_empty_config()
 
         # 3.5 提取公共 xpath
-        print("\n[Phase 3.5] 提取公共 xpath...")
+        logger.info("\n[Phase 3.5] 提取公共 xpath...")
         self.common_detail_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
         if self.common_detail_xpath:
-            print(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
+            logger.info(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
         else:
-            print("[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
+            logger.info("[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
 
         # 3.6 提取分页控件
-        print("\n[Phase 3.6] 提取分页控件 xpath...")
+        logger.info("\n[Phase 3.6] 提取分页控件 xpath...")
         pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
         if pagination_xpath:
-            print(f"[Phase 3.6] ✓ 提取到分页控件 xpath: {pagination_xpath}")
+            logger.info(f"[Phase 3.6] ✓ 提取到分页控件 xpath: {pagination_xpath}")
         else:
-            print("[Phase 3.6] ⚠ 未找到分页控件，将只收集当前页")
+            logger.info("[Phase 3.6] ⚠ 未找到分页控件，将只收集当前页")
 
         # 3.6.1 提取跳转控件（用于断点恢复）
-        print("\n[Phase 3.6.1] 提取跳转控件...")
+        logger.info("\n[Phase 3.6.1] 提取跳转控件...")
         jump_widget_xpath = await self.pagination_handler.extract_jump_widget_xpath()
         if jump_widget_xpath:
-            print("[Phase 3.6.1] ✓ 提取到跳转控件")
+            logger.info("[Phase 3.6.1] ✓ 提取到跳转控件")
         else:
-            print("[Phase 3.6.1] ⚠ 未找到跳转控件，第二阶段策略不可用")
+            logger.info("[Phase 3.6.1] ⚠ 未找到跳转控件，第二阶段策略不可用")
 
         # 4. 创建并保存配置
-        print("\n[Phase 4] 保存配置...")
+        logger.info("\n[Phase 4] 保存配置...")
         collection_config = CollectionConfig(
             nav_steps=self.nav_steps,
             common_detail_xpath=self.common_detail_xpath,
@@ -176,12 +180,12 @@ class ConfigGenerator:
         )
         self.config_persistence.save(collection_config)
 
-        print("\n[Complete] 配置生成完成!")
-        print(f"  - 探索了 {len(self.detail_visits)} 个详情页")
-        print(f"  - 导航步骤: {len(self.nav_steps)} 个")
-        print(f"  - 公共 XPath: {'已提取' if self.common_detail_xpath else '未提取'}")
-        print(f"  - 分页控件: {'已提取' if pagination_xpath else '未提取'}")
-        print(f"  - 跳转控件: {'已提取' if jump_widget_xpath else '未提取'}")
+        logger.info("\n[Complete] 配置生成完成!")
+        logger.info(f"  - 探索了 {len(self.detail_visits)} 个详情页")
+        logger.info(f"  - 导航步骤: {len(self.nav_steps)} 个")
+        logger.info(f"  - 公共 XPath: {'已提取' if self.common_detail_xpath else '未提取'}")
+        logger.info(f"  - 分页控件: {'已提取' if pagination_xpath else '未提取'}")
+        logger.info(f"  - 跳转控件: {'已提取' if jump_widget_xpath else '未提取'}")
 
         return collection_config
 
@@ -245,12 +249,12 @@ class ConfigGenerator:
 
         while explored < self.explore_count and attempts < max_attempts:
             attempts += 1
-            print(
+            logger.info(
                 f"\n[Explore] ===== 尝试 {attempts}/{max_attempts}，已探索 {explored}/{self.explore_count} ====="
             )
 
             # 扫描页面
-            print("[Explore] 扫描页面...")
+            logger.info("[Explore] 扫描页面...")
             await clear_overlay(self.page)
             snapshot = await inject_and_scan(self.page)
             screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
@@ -258,23 +262,23 @@ class ConfigGenerator:
             # 保存截图
             screenshot_path = self.screenshots_dir / f"explore_{attempts:03d}.png"
             screenshot_path.write_bytes(screenshot_bytes)
-            print(f"[Explore] 截图已保存: {screenshot_path.name}")
+            logger.info(f"[Explore] 截图已保存: {screenshot_path.name}")
 
             # 使用 LLM 决策
-            print("[Explore] 调用 LLM 决策...")
+            logger.info("[Explore] 调用 LLM 决策...")
             llm_decision = await self.llm_decision_maker.ask_for_decision(
                 snapshot, screenshot_base64
             )
 
             if llm_decision is None:
-                print("[Explore] LLM 决策失败，尝试滚动...")
+                logger.info("[Explore] LLM 决策失败，尝试滚动...")
                 if await smart_scroll(self.page):
                     consecutive_bottom_hits = 0
                 else:
                     consecutive_bottom_hits += 1
-                    print(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
+                    logger.info(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
                     if consecutive_bottom_hits >= max_bottom_hits:
-                        print("[Explore] ⚠ 连续到达页面底部，停止探索")
+                        logger.info("[Explore] ⚠ 连续到达页面底部，停止探索")
                         break
                 continue
 
@@ -339,7 +343,7 @@ class ConfigGenerator:
         """处理当前页面就是详情页的情况"""
         current_url = self.page.url
         if current_url not in self.visited_detail_urls:
-            print(f"[Explore] ✓ LLM 判断当前页面就是详情页: {current_url[:60]}...")
+            logger.info(f"[Explore] ✓ LLM 判断当前页面就是详情页: {current_url[:60]}...")
 
             visit = DetailPageVisit(
                 list_page_url=self.list_url,
@@ -356,10 +360,10 @@ class ConfigGenerator:
             self.detail_visits.append(visit)
             self.visited_detail_urls.add(current_url)
             self.step_index += 1
-            print(f"[Explore] 已探索 {explored + 1}/{self.explore_count} 个详情页")
+            logger.info(f"[Explore] 已探索 {explored + 1}/{self.explore_count} 个详情页")
 
             # 返回列表页
-            print("[Explore] 返回列表页...")
+            logger.info("[Explore] 返回列表页...")
             await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(1)
             return True
@@ -384,7 +388,7 @@ class ConfigGenerator:
         mark_ids = []
 
         if mark_id_text_map:
-            print(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
+            logger.info(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
 
             # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
             if config.url_collector.validate_mark_id:
@@ -399,25 +403,25 @@ class ConfigGenerator:
             else:
                 mark_ids = [int(k) for k in mark_id_text_map.keys()]
         elif old_mark_ids:
-            print(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
+            logger.info(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
             mark_ids = old_mark_ids
 
         if not mark_ids:
-            print("[Explore] 没有选中任何链接")
+            logger.info("[Explore] 没有选中任何链接")
             return explored
 
-        print(f"[Explore] 理由: {reasoning[:100]}...")
+        logger.info(f"[Explore] 理由: {reasoning[:100]}...")
 
         # 获取候选元素
         candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
-        print(f"[Explore] 找到 {len(candidates)} 个候选元素")
+        logger.info(f"[Explore] 找到 {len(candidates)} 个候选元素")
 
         # 遍历候选，提取 URL
         for i, candidate in enumerate(candidates, 1):
             if explored >= self.explore_count:
                 break
 
-            print(
+            logger.info(
                 f"[Explore] 处理候选 {i}/{len(candidates)}: [{candidate.mark_id}] {candidate.text[:30]}..."
             )
             url = await self.url_extractor.extract_from_element(
@@ -444,8 +448,8 @@ class ConfigGenerator:
                 self.visited_detail_urls.add(url)
                 explored += 1
                 self.step_index += 1
-                print(f"[Explore] ✓ 获取到详情页 URL: {url[:60]}...")
-                print(f"[Explore] 已探索 {explored}/{self.explore_count} 个详情页")
+                logger.info(f"[Explore] ✓ 获取到详情页 URL: {url[:60]}...")
+                logger.info(f"[Explore] 已探索 {explored}/{self.explore_count} 个详情页")
 
         return explored
 
@@ -458,7 +462,7 @@ class ConfigGenerator:
             mark_id = int(mark_id_raw) if mark_id_raw is not None else None
         except (TypeError, ValueError):
             mark_id = None
-        print(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
+        logger.info(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
 
         # 修改原因：全项目统一“文本优先纠正 mark_id”，避免 LLM 读错编号导致误点
         if config.url_collector.validate_mark_id and target_text:
@@ -498,7 +502,7 @@ class ConfigGenerator:
                 self.detail_visits.append(visit)
                 self.visited_detail_urls.add(url)
                 self.step_index += 1
-                print("[Explore] ✓ 获取到详情页 URL")
+                logger.info("[Explore] ✓ 获取到详情页 URL")
                 return True
         return False
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from ...common.config import config
 from ...common.browser.actions import ActionExecutor
+from ...common.logger import get_logger
 from ...common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
     from .llm_decision import LLMDecisionMaker
+
+
+logger = get_logger(__name__)
 
 
 class PaginationHandler:
@@ -47,19 +51,19 @@ class PaginationHandler:
 
         策略：先用 LLM 视觉识别，失败则使用增强的规则兜底
         """
-        print("[Extract-Pagination] 开始提取分页控件 xpath...")
+        logger.info("[Extract-Pagination] 开始提取分页控件 xpath...")
 
         # 策略1: 优先使用 LLM 视觉识别（准确度更高）
         if self.llm_decision_maker:
-            print("[Extract-Pagination] 策略1: 使用 LLM 视觉识别...")
+            logger.info("[Extract-Pagination] 策略1: 使用 LLM 视觉识别...")
             result = await self.extract_pagination_xpath_with_llm()
             if result:
-                print(f"[Extract-Pagination] ✓ LLM 识别成功: {result}")
+                logger.info(f"[Extract-Pagination] ✓ LLM 识别成功: {result}")
                 return result
-            print("[Extract-Pagination] LLM 识别失败，切换到规则兜底...")
+            logger.info("[Extract-Pagination] LLM 识别失败，切换到规则兜底...")
 
         # 策略2: 规则兜底 - 增强的分页按钮选择器
-        print("[Extract-Pagination] 策略2: 使用规则识别...")
+        logger.info("[Extract-Pagination] 策略2: 使用规则识别...")
         common_selectors = [
             # 中文文本匹配
             'a:has-text("下一页")',
@@ -142,13 +146,13 @@ class PaginationHandler:
                     # 验证元素是否可见且可点击
                     first_elem = locator.first
                     if await first_elem.is_visible():
-                        print(f"[Extract-Pagination] ✓ 规则识别成功: {selector}")
+                        logger.info(f"[Extract-Pagination] ✓ 规则识别成功: {selector}")
                         self.pagination_xpath = selector
                         return selector
             except Exception:
                 continue
 
-        print("[Extract-Pagination] ⚠ 所有策略均失败，未能提取分页控件")
+        logger.info("[Extract-Pagination] ⚠ 所有策略均失败，未能提取分页控件")
         return None
 
     async def extract_jump_widget_xpath(self) -> dict[str, str] | None:
@@ -162,20 +166,20 @@ class PaginationHandler:
         Returns:
             {"input": "输入框xpath", "button": "按钮xpath"} 或 None
         """
-        print("[Extract-JumpWidget] 开始提取页码跳转控件...")
+        logger.info("[Extract-JumpWidget] 开始提取页码跳转控件...")
 
         # 策略1: 优先使用 LLM 视觉识别（准确度更高）
         if self.llm_decision_maker:
-            print("[Extract-JumpWidget] 策略1: 使用 LLM 视觉识别...")
+            logger.info("[Extract-JumpWidget] 策略1: 使用 LLM 视觉识别...")
             result = await self._extract_jump_widget_with_llm()
             if result:
-                print(f"[Extract-JumpWidget] ✓ LLM 识别成功: {result}")
+                logger.info(f"[Extract-JumpWidget] ✓ LLM 识别成功: {result}")
                 self.jump_widget_xpath = result
                 return result
-            print("[Extract-JumpWidget] LLM 识别失败，切换到规则兜底...")
+            logger.info("[Extract-JumpWidget] LLM 识别失败，切换到规则兜底...")
 
         # 策略2: 规则兜底
-        print("[Extract-JumpWidget] 策略2: 使用规则识别...")
+        logger.info("[Extract-JumpWidget] 策略2: 使用规则识别...")
         input_xpath = None
         button_xpath = None
 
@@ -225,7 +229,7 @@ class PaginationHandler:
                 locator = self.page.locator(selector)
                 if await locator.count() > 0 and await locator.first.is_visible():
                     input_xpath = selector
-                    print(f"[Extract-JumpWidget] ✓ 找到输入框: {selector}")
+                    logger.info(f"[Extract-JumpWidget] ✓ 找到输入框: {selector}")
                     break
             except Exception:
                 continue
@@ -236,17 +240,17 @@ class PaginationHandler:
                     locator = self.page.locator(selector)
                     if await locator.count() > 0 and await locator.first.is_visible():
                         button_xpath = selector
-                        print(f"[Extract-JumpWidget] ✓ 找到按钮: {selector}")
+                        logger.info(f"[Extract-JumpWidget] ✓ 找到按钮: {selector}")
                         break
                 except Exception:
                     continue
 
         if input_xpath and button_xpath:
             self.jump_widget_xpath = {"input": input_xpath, "button": button_xpath}
-            print("[Extract-JumpWidget] ✓ 成功提取跳转控件")
+            logger.info("[Extract-JumpWidget] ✓ 成功提取跳转控件")
             return self.jump_widget_xpath
         else:
-            print("[Extract-JumpWidget] ⚠ 未能提取完整的跳转控件")
+            logger.info("[Extract-JumpWidget] ⚠ 未能提取完整的跳转控件")
             return None
 
     async def _extract_jump_widget_with_llm(self) -> dict[str, str] | None:
@@ -282,7 +286,7 @@ class PaginationHandler:
                 input_text = input_obj.get("text") or ""
                 button_text = button_obj.get("text") or ""
 
-                print(
+                logger.info(
                     f"[Extract-JumpWidget-LLM] 找到输入框 [{input_mark_id}], 按钮 [{button_mark_id}]"
                 )
 
@@ -357,15 +361,15 @@ class PaginationHandler:
                 if input_xpath and button_xpath:
                     return {"input": input_xpath, "button": button_xpath}
                 elif input_xpath:
-                    print("[Extract-JumpWidget-LLM] 找到输入框但未找到按钮的 xpath")
+                    logger.info("[Extract-JumpWidget-LLM] 找到输入框但未找到按钮的 xpath")
                     return None
             else:
                 reasoning = args.get("reasoning") if isinstance(args, dict) else ""
-                print(
+                logger.info(
                     f"[Extract-JumpWidget-LLM] 未找到跳转控件: {reasoning if data else ''}"
                 )
         except Exception as e:
-            print(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
+            logger.info(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
 
         return None
 
@@ -411,7 +415,7 @@ class PaginationHandler:
 
             if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
                 reasoning = args.get("reasoning") or ""
-                print(
+                logger.info(
                     f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw}]: {reasoning}"
                 )
 
@@ -440,17 +444,17 @@ class PaginationHandler:
 
                     if best_xpath:
                         self.pagination_xpath = best_xpath
-                        print(f"[Extract-Pagination-LLM] ✓ 提取到 xpath: {best_xpath}")
+                        logger.info(f"[Extract-Pagination-LLM] ✓ 提取到 xpath: {best_xpath}")
                         return best_xpath
             else:
                 reasoning = args.get("reasoning") if isinstance(args, dict) else ""
-                print(
+                logger.info(
                     f"[Extract-Pagination-LLM] 未找到分页按钮: {reasoning if data else ''}"
                 )
         except Exception as e:
-            print(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
+            logger.info(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
 
-        print("[Extract-Pagination] ⚠ 未能提取分页控件 xpath")
+        logger.info("[Extract-Pagination] ⚠ 未能提取分页控件 xpath")
         return None
 
     async def find_and_click_next_page(self) -> bool:
@@ -475,7 +479,7 @@ class PaginationHandler:
                     locator = self.page.locator(self.pagination_xpath)
 
                 if await locator.count() > 0 and await locator.first.is_visible():
-                    print("[Pagination] 策略1: 使用提取的 xpath...")
+                    logger.info("[Pagination] 策略1: 使用提取的 xpath...")
 
                     # 获取随机延迟
                     from ...common.utils.delay import get_random_delay
@@ -490,24 +494,24 @@ class PaginationHandler:
                     await asyncio.sleep(config.url_collector.page_load_delay)
 
                     self.current_page_num += 1
-                    print(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
+                    logger.info(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                     return True
             except Exception as e:
-                print(f"[Pagination] 策略1 失败: {e}")
+                logger.info(f"[Pagination] 策略1 失败: {e}")
 
         # 策略2: 使用 LLM 实时视觉识别
         if self.llm_decision_maker:
-            print("[Pagination] 策略2: 使用 LLM 视觉识别...")
+            logger.info("[Pagination] 策略2: 使用 LLM 视觉识别...")
             try:
                 result = await self.find_next_page_with_llm()
                 if result:
                     return True
-                print("[Pagination] LLM 识别失败，切换到规则兜底...")
+                logger.info("[Pagination] LLM 识别失败，切换到规则兜底...")
             except Exception as e:
-                print(f"[Pagination] 策略2 失败: {e}")
+                logger.info(f"[Pagination] 策略2 失败: {e}")
 
         # 策略3: 增强的规则兜底
-        print("[Pagination] 策略3: 使用规则识别...")
+        logger.info("[Pagination] 策略3: 使用规则识别...")
         common_selectors = [
             # 中文文本
             'a:has-text("下一页")',
@@ -564,7 +568,7 @@ class PaginationHandler:
                     # 检查可见性
                     is_visible = await first_elem.is_visible()
                     if is_visible:
-                        print(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
+                        logger.info(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
 
                         from ...common.utils.delay import get_random_delay
 
@@ -579,13 +583,13 @@ class PaginationHandler:
                         await asyncio.sleep(config.url_collector.page_load_delay)
 
                         self.current_page_num += 1
-                        print(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
+                        logger.info(f"[Pagination] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                         return True
             except Exception as e:
-                print(f"[Pagination] 规则 '{selector}' 失败: {e}")
+                logger.info(f"[Pagination] 规则 '{selector}' 失败: {e}")
                 continue
 
-        print("[Pagination] ⚠ 所有策略均失败，未找到下一页按钮")
+        logger.info("[Pagination] ⚠ 所有策略均失败，未找到下一页按钮")
         return False
 
     async def find_next_page_with_llm(self, screenshot_base64: str = None) -> bool:
@@ -630,7 +634,7 @@ class PaginationHandler:
                 target_text = target_text or (args.get("target_text") or "")
 
             if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
-                print(f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw}]")
+                logger.info(f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw}]")
 
                 try:
                     mark_id_value = int(mark_id_raw)
@@ -648,13 +652,13 @@ class PaginationHandler:
                     )
 
                 if mark_id_value is None:
-                    print(f"[Pagination-LLM] mark_id 无效，无法点击: {mark_id_raw}")
+                    logger.info(f"[Pagination-LLM] mark_id 无效，无法点击: {mark_id_raw}")
                     return False
 
                 mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
                 executor = ActionExecutor(self.page)
 
-                print(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
+                logger.info(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
                 from ...common.utils.delay import get_random_delay
 
                 delay = get_random_delay(
@@ -682,21 +686,21 @@ class PaginationHandler:
                     except Exception:
                         pass
                     executor._new_page = None
-                    print("[Pagination-LLM] Unexpected new tab opened; treat as failure.")
+                    logger.info("[Pagination-LLM] Unexpected new tab opened; treat as failure.")
                     return False
 
                 if not result.success:
-                    print(f"[Pagination-LLM] 点击失败: {result.error}")
+                    logger.info(f"[Pagination-LLM] 点击失败: {result.error}")
                     return False
 
                 await asyncio.sleep(config.url_collector.page_load_delay)
                 self.current_page_num += 1
-                print(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
+                logger.info(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                 return True
             else:
                 reasoning = args.get("reasoning") if isinstance(args, dict) else ""
-                print(f"[Pagination-LLM] 未找到下一页: {reasoning if data else ''}")
+                logger.info(f"[Pagination-LLM] 未找到下一页: {reasoning if data else ''}")
         except Exception as e:
-            print(f"[Pagination-LLM] LLM 识别失败: {e}")
+            logger.info(f"[Pagination-LLM] LLM 识别失败: {e}")
 
         return False

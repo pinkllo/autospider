@@ -12,8 +12,13 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from ...common.logger import get_logger
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+logger = get_logger(__name__)
 
 
 def _is_xpath_selector(selector: str | None) -> bool:
@@ -116,14 +121,14 @@ class URLPatternStrategy(ResumeStrategy):
     async def try_resume(self, page: "Page", target_page: int) -> tuple[bool, int]:
         """尝试通过 URL 直接跳转"""
         if not self.page_param:
-            print(f"[{self.name}] URL 中未检测到页码参数")
+            logger.info(f"[{self.name}] URL 中未检测到页码参数")
             return False, 1
 
         target_url = self._build_url_for_page(target_page)
         if not target_url:
             return False, 1
 
-        print(f"[{self.name}] 尝试跳转到: {target_url}")
+        logger.info(f"[{self.name}] 尝试跳转到: {target_url}")
 
         try:
             await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
@@ -136,14 +141,14 @@ class URLPatternStrategy(ResumeStrategy):
             if self.page_param in params:
                 current_page = int(params[self.page_param][0])
                 if current_page == target_page:
-                    print(f"[{self.name}] ✓ 成功跳转到第 {target_page} 页")
+                    logger.info(f"[{self.name}] ✓ 成功跳转到第 {target_page} 页")
                     return True, target_page
 
-            print(f"[{self.name}] 跳转后验证失败，URL 可能被重定向")
+            logger.info(f"[{self.name}] 跳转后验证失败，URL 可能被重定向")
             return False, 1
 
         except Exception as e:
-            print(f"[{self.name}] 跳转失败: {e}")
+            logger.info(f"[{self.name}] 跳转失败: {e}")
             return False, 1
 
 
@@ -168,29 +173,29 @@ class WidgetJumpStrategy(ResumeStrategy):
     async def try_resume(self, page: "Page", target_page: int) -> tuple[bool, int]:
         """尝试通过页码输入控件跳转"""
         if not self.jump_widget_xpath:
-            print(f"[{self.name}] 未提供跳转控件 xpath")
+            logger.info(f"[{self.name}] 未提供跳转控件 xpath")
             return False, 1
 
         input_xpath = self.jump_widget_xpath.get("input")
         button_xpath = self.jump_widget_xpath.get("button")
 
         if not input_xpath or not button_xpath:
-            print(f"[{self.name}] 跳转控件 xpath 不完整")
+            logger.info(f"[{self.name}] 跳转控件 xpath 不完整")
             return False, 1
 
         try:
             input_locator = _build_locator(page, input_xpath)
             if not input_locator or await input_locator.count() == 0:
-                print(f"[{self.name}] 未找到页码输入框")
+                logger.info(f"[{self.name}] 未找到页码输入框")
                 return False, 1
 
             # 清空并输入页码
             await input_locator.first.fill(str(target_page))
-            print(f"[{self.name}] 已输入页码: {target_page}")
+            logger.info(f"[{self.name}] 已输入页码: {target_page}")
 
             button_locator = _build_locator(page, button_xpath)
             if not button_locator or await button_locator.count() == 0:
-                print(f"[{self.name}] 未找到确定按钮")
+                logger.info(f"[{self.name}] 未找到确定按钮")
                 return False, 1
 
             await button_locator.first.click()
@@ -200,11 +205,11 @@ class WidgetJumpStrategy(ResumeStrategy):
 
             await asyncio.sleep(2)
 
-            print(f"[{self.name}] ✓ 已通过控件跳转到第 {target_page} 页")
+            logger.info(f"[{self.name}] ✓ 已通过控件跳转到第 {target_page} 页")
             return True, target_page
 
         except Exception as e:
-            print(f"[{self.name}] 控件跳转失败: {e}")
+            logger.info(f"[{self.name}] 控件跳转失败: {e}")
             return False, 1
 
 
@@ -314,14 +319,14 @@ class SmartSkipStrategy(ResumeStrategy):
     async def try_resume(self, page: "Page", target_page: int) -> tuple[bool, int]:
         """通过首项检测快速跳过已爬页面"""
         if not self.detail_xpath or not self.pagination_xpath:
-            print(f"[{self.name}] 缺少必要的 xpath 配置")
+            logger.info(f"[{self.name}] 缺少必要的 xpath 配置")
             return False, 1
 
         if not self.collected_urls:
-            print(f"[{self.name}] 无已收集 URL，从第 1 页开始")
+            logger.info(f"[{self.name}] 无已收集 URL，从第 1 页开始")
             return True, 1
 
-        print(f"[{self.name}] 开始快速跳过已爬页面...")
+        logger.info(f"[{self.name}] 开始快速跳过已爬页面...")
 
         current_page = 1
         max_skip_pages = target_page + 10  # 防止无限循环
@@ -331,33 +336,33 @@ class SmartSkipStrategy(ResumeStrategy):
             first_url = await self._get_first_url(page)
 
             if not first_url:
-                print(f"[{self.name}] 第 {current_page} 页无法获取首条 URL")
+                logger.info(f"[{self.name}] 第 {current_page} 页无法获取首条 URL")
                 break
 
             # 检查首条 URL 是否已存在
             if first_url in self.collected_urls:
-                print(f"[{self.name}] 第 {current_page} 页首条已存在，快速跳过")
+                logger.info(f"[{self.name}] 第 {current_page} 页首条已存在，快速跳过")
 
                 # 点击下一页
                 if not await self._click_next_page(page):
-                    print(f"[{self.name}] 无法翻页，停止在第 {current_page} 页")
+                    logger.info(f"[{self.name}] 无法翻页，停止在第 {current_page} 页")
                     break
 
                 current_page += 1
             else:
                 # 首条不存在，说明到达断点附近
-                print(f"[{self.name}] 第 {current_page} 页首条为新数据")
+                logger.info(f"[{self.name}] 第 {current_page} 页首条为新数据")
 
                 # 回溯一页以确保完整性
                 if current_page > 1:
-                    print(f"[{self.name}] 回溯到第 {current_page - 1} 页以确保完整性")
+                    logger.info(f"[{self.name}] 回溯到第 {current_page - 1} 页以确保完整性")
                     if await self._click_prev_page(page):
                         current_page -= 1
 
-                print(f"[{self.name}] ✓ 定位到第 {current_page} 页")
+                logger.info(f"[{self.name}] ✓ 定位到第 {current_page} 页")
                 return True, current_page
 
-        print(f"[{self.name}] 快速跳过完成，当前第 {current_page} 页")
+        logger.info(f"[{self.name}] 快速跳过完成，当前第 {current_page} 页")
         return True, current_page
 
 
@@ -397,18 +402,18 @@ class ResumeCoordinator:
         Returns:
             实际恢复到的页码
         """
-        print(f"\n[恢复协调器] 目标: 恢复到第 {target_page} 页")
+        logger.info(f"\n[恢复协调器] 目标: 恢复到第 {target_page} 页")
 
         for i, strategy in enumerate(self.strategies, 1):
-            print(f"\n[恢复协调器] 尝试策略 {i}/{len(self.strategies)}: {strategy.name}")
+            logger.info(f"\n[恢复协调器] 尝试策略 {i}/{len(self.strategies)}: {strategy.name}")
 
             success, actual_page = await strategy.try_resume(page, target_page)
 
             if success:
-                print(f"[恢复协调器] ✓ 策略 '{strategy.name}' 成功，当前第 {actual_page} 页")
+                logger.info(f"[恢复协调器] ✓ 策略 '{strategy.name}' 成功，当前第 {actual_page} 页")
                 return actual_page
             else:
-                print(f"[恢复协调器] 策略 '{strategy.name}' 失败，尝试下一个")
+                logger.info(f"[恢复协调器] 策略 '{strategy.name}' 失败，尝试下一个")
 
-        print("[恢复协调器] ⚠ 所有策略失败，从第 1 页开始")
+        logger.info("[恢复协调器] ⚠ 所有策略失败，从第 1 页开始")
         return 1

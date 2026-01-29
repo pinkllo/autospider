@@ -18,10 +18,14 @@ import unicodedata
 from typing import TYPE_CHECKING
 
 from ..config import config
+from ..logger import get_logger
 
 if TYPE_CHECKING:
     from ..types import SoMSnapshot, ElementMark
     from playwright.async_api import Page
+
+
+logger = get_logger(__name__)
 
 
 class MarkIdValidationResult:
@@ -127,7 +131,7 @@ class MarkIdValidator:
                     results.append(result)
                     resolved_mark_ids.append(llm_mark_id)
                     if self.debug:
-                        print(f"[Validator] ✓ id_match: mark_id={llm_mark_id}")
+                        logger.debug("[Validator] ✓ id_match: mark_id=%s", llm_mark_id)
                     continue
 
             # 2) 否则：以文本为准，在当前候选元素中搜索
@@ -153,8 +157,10 @@ class MarkIdValidator:
                 results.append(result)
                 resolved_mark_ids.append(resolved_id)
                 if self.debug:
-                    print(
-                        f"[Validator] ✓ text_unique: '{llm_text[:50]}...' -> mark_id={resolved_id}"
+                    logger.debug(
+                        "[Validator] ✓ text_unique: '%s...' -> mark_id=%s",
+                        llm_text[:50],
+                        resolved_id,
                     )
                 continue
 
@@ -171,8 +177,10 @@ class MarkIdValidator:
                 )
                 results.append(result)
                 if self.debug:
-                    print(
-                        f"[Validator] ? text_ambiguous: '{llm_text[:50]}...' -> {candidate_mark_ids}"
+                    logger.debug(
+                        "[Validator] ? text_ambiguous: '%s...' -> %s",
+                        llm_text[:50],
+                        candidate_mark_ids,
                     )
                 continue
 
@@ -189,7 +197,7 @@ class MarkIdValidator:
             )
             results.append(result)
             if self.debug:
-                print(f"[Validator] ✗ text_not_found: '{llm_text[:50]}...'")
+                logger.debug("[Validator] ✗ text_not_found: '%s...'", llm_text[:50])
 
         # 去重并保持稳定顺序
         unique_resolved: list[int] = []

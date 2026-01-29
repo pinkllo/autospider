@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.utils.prompt_template import render_template
+from ..common.logger import get_logger
 from ..common.utils.paths import get_prompt_path
 from ..common.protocol import parse_protocol_message, coerce_bool
 from .models import FieldDefinition
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 
 # Prompt 模板文件路径
 PROMPT_TEMPLATE_PATH = get_prompt_path("field_extractor.yaml")
+logger = get_logger(__name__)
 
 
 class FieldDecider:
@@ -265,9 +267,9 @@ class FieldDecider:
         """
         current_url = self.page.url
 
-        print(f"[FieldDecider] 导航决策 - 字段: {field.name}")
-        print(f"[FieldDecider] 当前页面: {current_url[:80]}...")
-        print(f"[FieldDecider] 已执行步数: {nav_steps_count}")
+        logger.info(f"[FieldDecider] 导航决策 - 字段: {field.name}")
+        logger.info(f"[FieldDecider] 当前页面: {current_url[:80]}...")
+        logger.info(f"[FieldDecider] 已执行步数: {nav_steps_count}")
 
         # 构建滚动状态描述
         scroll_status = "无滚动信息"
@@ -330,7 +332,7 @@ class FieldDecider:
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
-            print(f"[FieldDecider] 响应: {response_text[:150]}...")
+            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
             message = self._parse_response_json(response_text)
             if message:
@@ -340,20 +342,20 @@ class FieldDecider:
                 if action == "extract":
                     kind = str(args.get("kind") or "").lower()
                     if kind and kind != "field":
-                        print(f"[FieldDecider] kind 不匹配: {kind}")
+                        logger.info(f"[FieldDecider] kind 不匹配: {kind}")
                         return None
                     field_name = args.get("field_name")
                     if field_name and not self._field_names_match(field_name, field.name):
-                        print(
+                        logger.info(
                             f"[FieldDecider] 字段名不匹配: '{field_name}' != '{field.name}'"
                         )
                         return None
 
-                print(f"[FieldDecider] 决策: {action}")
+                logger.info(f"[FieldDecider] 决策: {action}")
                 return message
-            print("[FieldDecider] 响应中未找到 JSON")
+            logger.info("[FieldDecider] 响应中未找到 JSON")
         except Exception as e:
-            print(f"[FieldDecider] 决策失败: {e}")
+            logger.info(f"[FieldDecider] 决策失败: {e}")
             import traceback
 
             traceback.print_exc()
@@ -375,7 +377,7 @@ class FieldDecider:
         Returns:
             提取结果字典，包含 found, field_value, confidence 等
         """
-        print(f"[FieldDecider] 提取字段文本 - 字段: {field.name}")
+        logger.info(f"[FieldDecider] 提取字段文本 - 字段: {field.name}")
 
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -409,7 +411,7 @@ class FieldDecider:
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
-            print(f"[FieldDecider] 响应: {response_text[:150]}...")
+            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
             message = self._parse_response_json(response_text)
             if message:
@@ -417,17 +419,17 @@ class FieldDecider:
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
 
                 if action != "extract":
-                    print(f"[FieldDecider] 非 extract 动作，忽略: {action}")
+                    logger.info(f"[FieldDecider] 非 extract 动作，忽略: {action}")
                     return None
 
                 kind = str(args.get("kind") or "").lower()
                 if kind and kind != "field":
-                    print(f"[FieldDecider] kind 不匹配: {kind}")
+                    logger.info(f"[FieldDecider] kind 不匹配: {kind}")
                     return None
 
                 field_name = args.get("field_name")
                 if field_name and not self._field_names_match(field_name, field.name):
-                    print(f"[FieldDecider] 字段名不匹配: '{field_name}' != '{field.name}'")
+                    logger.info(f"[FieldDecider] 字段名不匹配: '{field_name}' != '{field.name}'")
                     return None
 
                 found = coerce_bool(args.get("found"))
@@ -435,12 +437,12 @@ class FieldDecider:
                     found = bool(args.get("field_value") or args.get("field_text"))
                 if found:
                     value = args.get("field_value") or args.get("field_text") or ""
-                    print(f"[FieldDecider] 提取到值: {str(value)[:50]}...")
+                    logger.info(f"[FieldDecider] 提取到值: {str(value)[:50]}...")
                 else:
-                    print("[FieldDecider] 未找到字段")
+                    logger.info("[FieldDecider] 未找到字段")
                 return message
         except Exception as e:
-            print(f"[FieldDecider] 提取失败: {e}")
+            logger.info(f"[FieldDecider] 提取失败: {e}")
 
         return None
 
@@ -461,7 +463,7 @@ class FieldDecider:
         Returns:
             选择结果字典，包含 selected_mark_id 和 reasoning
         """
-        print(f"[FieldDecider] 多候选消歧 - 字段: {field.name}, 候选数: {len(candidates)}")
+        logger.info(f"[FieldDecider] 多候选消歧 - 字段: {field.name}, 候选数: {len(candidates)}")
 
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -497,13 +499,13 @@ class FieldDecider:
         try:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
-            print(f"[FieldDecider] 响应: {response_text[:150]}...")
+            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
             message = self._parse_response_json(response_text)
             if message:
                 action = message.get("action")
                 if action != "select":
-                    print(f"[FieldDecider] 非 select 动作，忽略: {action}")
+                    logger.info(f"[FieldDecider] 非 select 动作，忽略: {action}")
                     return None
 
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
@@ -514,10 +516,10 @@ class FieldDecider:
                         selected = items[0].get("mark_id")
                 if selected is None:
                     selected = args.get("mark_id")
-                print(f"[FieldDecider] 选择: mark_id={selected}")
+                logger.info(f"[FieldDecider] 选择: mark_id={selected}")
                 return message
         except Exception as e:
-            print(f"[FieldDecider] 消歧失败: {e}")
+            logger.info(f"[FieldDecider] 消歧失败: {e}")
 
         return None
 
