@@ -62,3 +62,52 @@ async def click_and_capture_new_page(
     return new_page
 
 
+async def press_and_capture_new_page(
+    *,
+    page: "Page | GuardedPage",
+    locator: "Locator",
+    key: str,
+    press_timeout_ms: int = 5000,
+    expect_page_timeout_ms: int = 3000,
+    load_state: str = "domcontentloaded",
+    load_timeout_ms: int = 10000,
+) -> "Page | GuardedPage | None":
+    """按键并捕获新打开的页面（如果有）。
+
+    说明：
+    - 优先使用 locator.press；失败时回退到 page.keyboard.press。
+    - 如果 expect_page 超时但页面数量增加，则回退到最后一个页面。
+    - 此助手函数仅返回新页面；它不会切换或关闭页面。
+    """
+    context = page.context
+    pages_before = len(context.pages)
+
+    new_page: "Page | None" = None
+    try:
+        async with context.expect_page(timeout=expect_page_timeout_ms) as new_page_info:
+            await locator.press(key, timeout=press_timeout_ms)
+        new_page = await new_page_info.value
+    except PlaywrightTimeout:
+        pass
+    except Exception:
+        # 如果元素无法直接接收按键，尝试使用全局键盘模拟
+        try:
+            async with context.expect_page(timeout=expect_page_timeout_ms) as new_page_info:
+                await page.keyboard.press(key)
+            new_page = await new_page_info.value
+        except PlaywrightTimeout:
+            pass
+        except Exception:
+            pass
+
+    # 兜底：按键触发新标签页但 expect_page 未捕获
+    if new_page is None and len(context.pages) > pages_before:
+        new_page = context.pages[-1]
+
+    if new_page is not None:
+        try:
+            await new_page.wait_for_load_state(load_state, timeout=load_timeout_ms)
+        except Exception:
+            pass
+
+    return new_page

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
-from .click_utils import click_and_capture_new_page
+from .click_utils import click_and_capture_new_page, press_and_capture_new_page
 
 if TYPE_CHECKING:
     from browser_manager.guarded_page import GuardedPage
@@ -203,36 +203,16 @@ class ActionExecutor:
 
         # 2. 输入后自动回车（默认 Enter，可由 key 覆盖），并捕获可能新打开的标签页
         pressed_key = action.key or "Enter"
-        context = self.page.context
-        pages_before = len(context.pages)
-        new_page = None
-        try:
-            async with context.expect_page(timeout=3000) as new_page_info:
-                await locator.press(pressed_key, timeout=action.timeout_ms)
-            new_page = await new_page_info.value
-        except PlaywrightTimeout:
-            # 未打开新标签页，忽略超时
-            pass
-        except Exception:
-            # 如果元素无法直接接收按键，尝试使用全局键盘模拟
-            try:
-                async with context.expect_page(timeout=3000) as new_page_info:
-                    await self.page.keyboard.press(pressed_key)
-                new_page = await new_page_info.value
-            except PlaywrightTimeout:
-                pass
-            except Exception:
-                pass
-
-        # 兜底：按键触发新标签页但 expect_page 未捕获
-        if new_page is None and len(context.pages) > pages_before:
-            new_page = context.pages[-1]
-
+        new_page = await press_and_capture_new_page(
+            page=self.page,
+            locator=locator,
+            key=pressed_key,
+            press_timeout_ms=action.timeout_ms,
+            expect_page_timeout_ms=3000,
+            load_state="domcontentloaded",
+            load_timeout_ms=10000,
+        )
         if new_page is not None:
-            try:
-                await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
-            except Exception:
-                pass
             logger.info(f"[Type] 检测到新标签页: {new_page.url}")
             self._previous_page = self.page
             self.page = new_page
