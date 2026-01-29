@@ -54,8 +54,6 @@ class ActionExecutor:
                 return await self._execute_click(action, mark_id_to_xpath, step_index)
             elif action.action == ActionType.TYPE:
                 return await self._execute_type(action, mark_id_to_xpath, step_index)
-            elif action.action == ActionType.PRESS:
-                return await self._execute_press(action, mark_id_to_xpath, step_index)
             elif action.action == ActionType.SCROLL:
                 return await self._execute_scroll(action, step_index)
             elif action.action == ActionType.NAVIGATE:
@@ -199,23 +197,16 @@ class ActionExecutor:
         await locator.click()
         await locator.fill(action.text, timeout=action.timeout_ms)
 
-        # 2. 处理后续按键（如回车搜索）
-        pressed_key = action.key
-        if not pressed_key:
-            # 智能推断：如果是搜索框，通常需要按回车
-            target_hint = f"{action.target_text or ''} {action.expectation or ''}"
-            if "搜索" in target_hint or "search" in target_hint.lower():
-                pressed_key = "Enter"
-
-        if pressed_key:
+        # 2. 输入后自动回车（默认 Enter，可由 key 覆盖）
+        pressed_key = action.key or "Enter"
+        try:
+            await locator.press(pressed_key, timeout=action.timeout_ms)
+        except Exception:
+            # 如果元素无法直接接收按键，尝试使用全局键盘模拟
             try:
-                await locator.press(pressed_key, timeout=action.timeout_ms)
+                await self.page.keyboard.press(pressed_key)
             except Exception:
-                # 如果元素无法直接接收按键，尝试使用全局键盘模拟
-                try:
-                    await self.page.keyboard.press(pressed_key)
-                except Exception:
-                    pass
+                pass
 
         # 3. 生成脚本步骤
         value = action.text
@@ -227,39 +218,6 @@ class ActionExecutor:
             value=value,
             key=pressed_key,
             description=action.thinking or f"在元素 [{action.mark_id}] 输入文本",
-        )
-
-        return ActionResult(success=True), script_step
-
-    async def _execute_press(
-        self,
-        action: Action,
-        mark_id_to_xpath: dict[int, list[str]],
-        step_index: int,
-    ) -> tuple[ActionResult, ScriptStep | None]:
-        """
-        执行纯按键动作（如 Enter, Escape, ArrowDown 等）。
-        """
-        key = action.key or "Enter"
-
-        locator = None
-        used_xpath = None
-        if action.mark_id is not None:
-            xpaths = mark_id_to_xpath.get(action.mark_id, [])
-            locator, used_xpath = await self._find_element_by_xpath_list(xpaths)
-
-        # 优先在特定元素上按键，否则在页面上全局按键
-        if locator:
-            await locator.press(key)
-        else:
-            await self.page.keyboard.press(key)
-
-        script_step = ScriptStep(
-            step=step_index,
-            action=ScriptStepType.PRESS,
-            target_xpath=used_xpath,
-            key=key,
-            description=action.thinking or f"按键 {key}",
         )
 
         return ActionResult(success=True), script_step

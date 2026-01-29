@@ -142,7 +142,6 @@ class LLMDecider:
             in {
                 ActionType.CLICK,
                 ActionType.TYPE,
-                ActionType.PRESS,
                 ActionType.EXTRACT,
             }
         ):
@@ -480,6 +479,7 @@ class LLMDecider:
             # 常见同义/历史动作名
             "scroll_down": "scroll",
             "scroll_up": "scroll",
+            "press": "retry",
         }
         action_str = action_aliases.get(action_str, action_str)
 
@@ -498,9 +498,6 @@ class LLMDecider:
         if action_type is None:
             if args.get("text") and args.get("mark_id") is not None:
                 action_type = ActionType.TYPE
-                inferred = True
-            elif args.get("key"):
-                action_type = ActionType.PRESS
                 inferred = True
             elif args.get("scroll_delta") is not None:
                 action_type = ActionType.SCROLL

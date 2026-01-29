@@ -109,7 +109,6 @@ class ActionType(str, Enum):
 
     CLICK = "click"
     TYPE = "type"
-    PRESS = "press"
     SCROLL = "scroll"
     NAVIGATE = "navigate"
     WAIT = "wait"
@@ -127,7 +126,7 @@ class Action(BaseModel):
     mark_id: int | None = Field(default=None, description="目标元素编号")
     target_text: str | None = Field(default=None, description="目标文本（用于校验）")
     text: str | None = Field(default=None, description="输入文本（type 动作）")
-    key: str | None = Field(default=None, description="按键（press 动作）")
+    key: str | None = Field(default=None, description="按键（type 动作可选，默认 Enter）")
     url: str | None = Field(default=None, description="导航 URL")
     scroll_delta: tuple[int, int] | None = Field(default=None, description="滚动量 (dx, dy)")
     timeout_ms: int = Field(default=5000, description="等待超时")
@@ -155,7 +154,6 @@ class ScriptStepType(str, Enum):
 
     CLICK = "click"
     TYPE = "type"
-    PRESS = "press"
     SCROLL = "scroll"
     NAVIGATE = "navigate"
     WAIT = "wait"

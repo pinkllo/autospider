@@ -282,45 +282,21 @@ class NavigationHandler:
                                     await asyncio.sleep(1)
                                 elif action_type == "type":
                                     text = step.get("text") or ""
+                                    key = step.get("key") or "Enter"
                                     print(f"[Replay] 输入: {text[:30]}... (xpath: {xpath[:50]}...)")
                                     await locator.first.click(timeout=5000)
                                     await locator.first.fill(text, timeout=5000)
+                                    try:
+                                        await locator.first.press(key, timeout=5000)
+                                    except Exception:
+                                        try:
+                                            await self.page.keyboard.press(key)
+                                        except Exception:
+                                            pass
                                     await asyncio.sleep(0.5)
                         except Exception as e:
                             print(f"[Replay] ✗ 执行失败: {e}")
                             step_success = False
-            elif action_type == "press":
-                key = step.get("key") or "Enter"
-                xpath_candidates = step.get("clicked_element_xpath_candidates", [])
-                if xpath_candidates:
-                    xpath_candidates_sorted = sorted(
-                        xpath_candidates, key=lambda x: x.get("priority", 99)
-                    )
-                    xpath = (
-                        xpath_candidates_sorted[0].get("xpath") if xpath_candidates_sorted else None
-                    )
-                    if xpath:
-                        try:
-                            locator = self.page.locator(f"xpath={xpath}")
-                            if await locator.count() > 0:
-                                print(f"[Replay] 按键: {key} (xpath: {xpath[:50]}...)")
-                                await locator.first.press(key)
-                                await asyncio.sleep(0.5)
-                            else:
-                                step_success = False
-                        except Exception as e:
-                            print(f"[Replay] ✗ 按键失败: {e}")
-                            step_success = False
-                    else:
-                        step_success = False
-                else:
-                    try:
-                        print(f"[Replay] 按键: {key} (全局)")
-                        await self.page.keyboard.press(key)
-                        await asyncio.sleep(0.5)
-                    except Exception as e:
-                        print(f"[Replay] ✗ 按键失败: {e}")
-                        step_success = False
             elif action_type == "scroll":
                 delta = step.get("scroll_delta") or (0, 300)
                 try:
