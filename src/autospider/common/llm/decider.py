@@ -39,7 +39,7 @@ class LLMDecider:
         api_key: str | None = None,
         api_base: str | None = None,
         model: str | None = None,
-        history_screenshots: int = 3,  # 发送最近几步的截图
+        history_screenshots: int = 3,  # 保留参数以兼容调用方（不再发送历史截图）
     ):
         self.api_key = api_key or config.llm.api_key
         self.api_base = api_base or config.llm.api_base
@@ -77,9 +77,9 @@ class LLMDecider:
         self.recent_action_signatures: list[str] = []
         self.max_signature_history: int = 10
 
-        # 截图历史：保存最近几步的截图用于发送给 LLM
+        # 历史截图功能已移除，保留字段仅用于兼容历史参数
         self.history_screenshots: int = history_screenshots
-        self.screenshot_history: list[dict] = []  # [{step, screenshot_base64, action, page_url}]
+        self.screenshot_history: list[dict] = []
 
     async def decide(
         self,
@@ -233,14 +233,6 @@ class LLMDecider:
             }
         )
 
-        # 保存截图到历史（用于下次决策时发送给 LLM）
-        self._save_screenshot_to_history(
-            step=state.step_index,
-            screenshot_base64=screenshot_base64,
-            action=action.action.value,
-            page_url=page_url,
-        )
-
         return action
 
     def _save_screenshot_to_history(
@@ -265,9 +257,9 @@ class LLMDecider:
         self, text_content: str, current_screenshot: str, current_step: int
     ) -> list:
         """
-        构建包含历史截图的多模态消息内容
+        构建多模态消息内容（仅发送当前截图）
 
-        返回格式: [text, image1, text1, image2, text2, ..., current_image]
+        返回格式: [text, current_image]
         """
         content = []
 
@@ -279,42 +271,7 @@ class LLMDecider:
             }
         )
 
-        # 2. 添加历史截图（如果有的话）
-        # 获取最近的 N-1 张历史截图（不包括当前这一步）
-        history_to_show = (
-            self.screenshot_history[-(self.history_screenshots - 1) :]
-            if self.screenshot_history
-            else []
-        )
-
-        if history_to_show:
-            content.append(
-                {
-                    "type": "text",
-                    "text": "\n---\n## 📸 历史截图（帮助你理解之前的操作）\n",
-                }
-            )
-
-            for i, hist in enumerate(history_to_show):
-                # 添加截图说明
-                content.append(
-                    {
-                        "type": "text",
-                        "text": f"### 步骤 {hist['step'] + 1} 的截图（执行了 {hist['action']}）：",
-                    }
-                )
-                # 添加截图（使用 low detail 节省 token）
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{hist['screenshot_base64']}",
-                            "detail": "low",  # 历史截图用低分辨率
-                        },
-                    }
-                )
-
-        # 3. 添加当前截图说明和截图
+        # 2. 添加当前截图说明和截图
         content.append(
             {
                 "type": "text",
