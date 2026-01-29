@@ -60,6 +60,7 @@ class TaskPlanner:
             model=self.model,
             temperature=0.1,
             max_tokens=2000,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
 
     async def plan(self, start_url: str, task: str, target_text: str) -> TaskPlan:

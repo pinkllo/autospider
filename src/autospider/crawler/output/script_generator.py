@@ -45,6 +45,7 @@ class ScriptGenerator:
             model=config.llm.planner_model or config.llm.model,
             temperature=0.1,
             max_tokens=4096,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
         # 持久化管理器，用于读取配置
         self.config_persistence = ConfigPersistence(output_dir)

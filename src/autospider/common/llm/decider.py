@@ -58,6 +58,7 @@ class LLMDecider:
             model=self.model,
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
 
         # 任务计划（由 planner 设置）
