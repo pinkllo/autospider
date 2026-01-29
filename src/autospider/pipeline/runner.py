@@ -30,6 +30,7 @@ async def run_pipeline(
     headless: bool = False,
     explore_count: int | None = None,
     validate_count: int | None = None,
+    max_pages: int | None = None,
     pipeline_mode: str | None = None,
 ) -> dict:
     """并发运行列表采集和详情提取。
@@ -42,6 +43,7 @@ async def run_pipeline(
         headless: 是否以无头模式运行浏览器。
         explore_count: 用于探索规则的详情页数量。
         validate_count: 用于验证规则的详情页数量。
+        max_pages: 列表页最大翻页次数（可覆盖配置）。
         pipeline_mode: 流水线模式（如 'local' 或 'redis'）。
 
     Returns:
@@ -52,6 +54,10 @@ async def run_pipeline(
 
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
+    previous_max_pages: int | None = None
+    if max_pages is not None:
+        previous_max_pages = config.url_collector.max_pages
+        config.url_collector.max_pages = int(max_pages)
 
     channel, redis_manager = create_url_channel(
         mode=pipeline_mode,
@@ -202,6 +208,8 @@ async def run_pipeline(
             consumer(),
         )
     finally:
+        if previous_max_pages is not None:
+            config.url_collector.max_pages = previous_max_pages
         summary["finished_at"] = datetime.now().isoformat()
         if state.get("error"):
             summary["error"] = state.get("error")
