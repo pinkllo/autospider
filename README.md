@@ -89,7 +89,7 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
 ```
-
+                           
 > [!TIP]
 > 系统的所有内部默认值均在 `src/autospider/common/config.py` 中集中管理，遵循 Pydantic 定义。
 

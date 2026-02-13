@@ -9,12 +9,23 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional, AsyncGenerator, Dict, List, Literal, Any
 from playwright.async_api import async_playwright, Browser, Playwright, Page
-from playwright_stealth import Stealth
 from loguru import logger
 
 from .guard import PageGuard
 # 导入 handlers 包触发所有内置处理器的自动注册
 from . import handlers
+
+try:
+    # playwright-stealth 旧版本 API
+    from playwright_stealth import Stealth  # type: ignore
+except Exception:
+    Stealth = None  # type: ignore
+
+try:
+    # playwright-stealth 新版本 API（按页面注入）
+    from playwright_stealth import stealth_async as apply_stealth_async
+except Exception:
+    apply_stealth_async = None
 
 
 class BrowserEngine:
@@ -38,6 +49,7 @@ class BrowserEngine:
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._stealth_context: Optional[Any] = None
+        self._playwright_started_direct: bool = False
         self._current_headless: bool = default_headless
         self._lock = asyncio.Lock()
         self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -117,8 +129,13 @@ class BrowserEngine:
             # 初始化 Playwright（仅首次调用时执行）
             # 使用 Stealth 插件包装，绕过网站的自动化检测
             if not self._playwright:
-                self._stealth_context = Stealth().use_async(async_playwright())
-                self._playwright = await self._stealth_context.__aenter__()
+                if Stealth is not None:
+                    self._stealth_context = Stealth().use_async(async_playwright())
+                    self._playwright = await self._stealth_context.__aenter__()
+                    self._playwright_started_direct = False
+                else:
+                    self._playwright = await async_playwright().start()
+                    self._playwright_started_direct = True
 
             # 带重试机制的浏览器启动
             # 网络环境不稳定时，浏览器下载/启动可能失败
@@ -191,6 +208,11 @@ class BrowserEngine:
         context = await self._browser.new_context(**options)
         page = await context.new_page()
         page.set_default_timeout(timeout or self.default_timeout)
+        if apply_stealth_async is not None:
+            try:
+                await apply_stealth_async(page)
+            except Exception as e:
+                logger.debug(f"[Engine] 应用 stealth_async 失败（可忽略）: {e}")
 
         # 自动挂载 PageGuard（使用全局注册表中的处理器）
         # 启用 Guard 时返回 GuardedPage 代理类，实现业务代码无感等待
@@ -205,12 +227,20 @@ class BrowserEngine:
             
             # 监听新页面事件，自动为新页面挂载 Guard
             # 这确保了通过 window.open, target="_blank" 或中间键打开的新标签页也能被监控
-            def _on_new_page(new_page: Page):
+            async def _setup_new_page(new_page: Page):
+                if apply_stealth_async is not None:
+                    try:
+                        await apply_stealth_async(new_page)
+                    except Exception as e:
+                        logger.debug(f"[Engine] 新页面应用 stealth_async 失败（可忽略）: {e}")
                 logger.debug(f"[Engine] 检测到新页面打开: {new_page.url}")
                 guard.attach_to_page(new_page)
                 # 新页面打开后立即执行一次巡检
                 asyncio.create_task(guard.run_inspection(new_page))
-            
+
+            def _on_new_page(new_page: Page):
+                asyncio.create_task(_setup_new_page(new_page))
+
             context.on("page", _on_new_page)
 
         try:
@@ -231,8 +261,12 @@ class BrowserEngine:
             await self._browser.close()
         if self._stealth_context and self._owner_loop == current_loop:
             await self._stealth_context.__aexit__(None, None, None)
+        elif self._playwright and self._playwright_started_direct and self._owner_loop == current_loop:
+            await self._playwright.stop()
         self._browser = None
         self._playwright = None
+        self._stealth_context = None
+        self._playwright_started_direct = False
 
 
 # ========== 全局单例管理 ==========

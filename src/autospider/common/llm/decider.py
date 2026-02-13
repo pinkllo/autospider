@@ -43,7 +43,7 @@ class LLMDecider:
         api_key: str | None = None,
         api_base: str | None = None,
         model: str | None = None,
-        history_screenshots: int = 3,  # 保留参数以兼容调用方（不再发送历史截图）
+        history_screenshots: int = 3,  # 兼容参数：历史截图功能已移除
     ):
         self.api_key = api_key or config.llm.api_key
         self.api_base = api_base or config.llm.api_base
@@ -82,9 +82,8 @@ class LLMDecider:
         self.recent_action_signatures: list[str] = []
         self.max_signature_history: int = 10
 
-        # 历史截图功能已移除，保留字段仅用于兼容历史参数
-        self.history_screenshots: int = history_screenshots
-        self.screenshot_history: list[dict] = []
+        # 历史截图功能已移除，保留参数仅用于兼容旧调用方
+        _ = history_screenshots
 
     async def decide(
         self,
@@ -114,7 +113,7 @@ class LLMDecider:
             state, marks_text, target_found_in_page, scroll_info
         )
 
-        # 构建消息内容（包含历史截图 + 当前截图）
+        # 构建消息内容（仅包含当前截图）
         message_content = self._build_multimodal_content(
             user_content, screenshot_base64, state.step_index
         )
@@ -238,24 +237,6 @@ class LLMDecider:
         )
 
         return action
-
-    def _save_screenshot_to_history(
-        self, step: int, screenshot_base64: str, action: str, page_url: str
-    ) -> None:
-        """保存截图到历史记录"""
-        self.screenshot_history.append(
-            {
-                "step": step,
-                "screenshot_base64": screenshot_base64,
-                "action": action,
-                "page_url": page_url,
-            }
-        )
-
-        # 只保留最近 N 张截图
-        max_history = self.history_screenshots + 1  # 多保留一张以防万一
-        if len(self.screenshot_history) > max_history:
-            self.screenshot_history = self.screenshot_history[-max_history:]
 
     def _build_multimodal_content(
         self, text_content: str, current_screenshot: str, current_step: int

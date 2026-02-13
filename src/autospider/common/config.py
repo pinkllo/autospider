@@ -185,24 +185,37 @@ class FieldExtractorConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
-    """Pipeline config (memory/file/redis)."""
+    """Pipeline 配置 (支持 memory/file/redis 模式)"""
 
+    # 运行模式: memory (内存), file (本地文件), redis (Redis 队列)
     mode: str = Field(default_factory=lambda: os.getenv("PIPELINE_MODE", "redis"))
+    
+    # 内存模式下的队列最大容量
     memory_queue_size: int = Field(
         default_factory=lambda: int(os.getenv("PIPELINE_MEMORY_QUEUE_SIZE", "1000"))
     )
+    
+    # 文件模式下的轮询检查间隔（秒）
     file_poll_interval: float = Field(
         default_factory=lambda: float(os.getenv("PIPELINE_FILE_POLL_INTERVAL", "1.0"))
     )
+    
+    # 文件模式下用于记录爬取进度的游标文件名
     file_cursor_name: str = Field(
         default_factory=lambda: os.getenv("PIPELINE_FILE_CURSOR_NAME", "urls.cursor.json")
     )
+    
+    # 从队列获取任务的超时时间（秒）
     fetch_timeout_s: float = Field(
         default_factory=lambda: float(os.getenv("PIPELINE_FETCH_TIMEOUT", "5"))
     )
+    
+    # 批量获取任务的数量
     batch_fetch_size: int = Field(
         default_factory=lambda: int(os.getenv("PIPELINE_BATCH_FETCH_SIZE", "20"))
     )
+    
+    # 批量同步/刷写进度的数量
     batch_flush_size: int = Field(
         default_factory=lambda: int(os.getenv("PIPELINE_BATCH_FLUSH_SIZE", "20"))
     )
