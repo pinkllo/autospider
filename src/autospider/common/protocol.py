@@ -45,6 +45,39 @@ def _normalize_action(value: Any | None) -> str:
     return str(value).strip().lower() if value else ""
 
 
+_ACTION_ALIASES = {
+    "scroll_down": "scroll",
+    "scroll_up": "scroll",
+    "press": "retry",
+}
+
+_ROOT_ARG_KEYS = (
+    "kind",
+    "purpose",
+    "page_kind",
+    "target_text",
+    "text",
+    "key",
+    "url",
+    "reasoning",
+    "summary",
+    "found",
+    "mark_id",
+    "selected_mark_id",
+    "items",
+    "input",
+    "button",
+    "scroll_delta",
+    "field_name",
+    "field_text",
+    "field_value",
+    "location_description",
+    "confidence",
+    "timeout_ms",
+    "expectation",
+)
+
+
 def _coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
     """将各种 bool 表示形式统一转换为 Python bool"""
     if value is None:
@@ -147,7 +180,7 @@ def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
     if not text:
         return None
 
-    cleaned = _normalize_quotes(_strip_code_fences(text))
+    cleaned = _strip_code_fences(text)
     ext = _FieldExtractor(cleaned)
 
     action = ext.string("action")
@@ -199,28 +232,42 @@ def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
     return out
 
 
-def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
-    """从 LLM 文本中提取并解析 JSON 对象"""
-    cleaned = _normalize_quotes(_strip_code_fences(text or ""))
-
-    # 优先：括号匹配提取
-    for cand in _iter_json_candidates(cleaned):
+def _try_parse_json_dict(text: str) -> dict[str, Any] | None:
+    """尝试从文本中直接解析 JSON 字典（不做抢救）。"""
+    for cand in _iter_json_candidates(text):
         try:
             if isinstance(data := json.loads(_cleanup_json_text(cand)), dict):
                 return data
         except Exception:
             continue
 
-    # 兼容：贪婪正则匹配
-    if match := re.search(r"\{[\s\S]*\}", cleaned):
+    if match := re.search(r"\{[\s\S]*\}", text):
         try:
             if isinstance(data := json.loads(_cleanup_json_text(match.group(0))), dict):
                 return data
         except Exception:
             pass
 
-    # 兜底：抢救式解析
-    return _salvage_json_like_dict(cleaned)
+    return None
+
+
+def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
+    """从 LLM 文本中提取并解析 JSON 对象"""
+    cleaned = _strip_code_fences(text or "")
+
+    # 优先：不改写原文，避免将字符串中的中文引号破坏成非法 JSON
+    if parsed := _try_parse_json_dict(cleaned):
+        return parsed
+
+    # 兜底1：处理“键名或分隔符用了中文引号”的场景
+    normalized = _normalize_quotes(cleaned)
+    if normalized != cleaned and (parsed := _try_parse_json_dict(normalized)):
+        return parsed
+
+    # 兜底2：抢救式解析（先原文，再归一化文本）
+    return _salvage_json_like_dict(cleaned) or (
+        _salvage_json_like_dict(normalized) if normalized != cleaned else None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -237,15 +284,66 @@ def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, An
     if not isinstance(data, dict):
         return None
 
+    args = data.get("args") if isinstance(data.get("args"), dict) else {}
+    args = dict(args)
+    for key in _ROOT_ARG_KEYS:
+        if key not in args and data.get(key) is not None:
+            args[key] = data.get(key)
+
     action = _normalize_action(data.get("action"))
+    if not action:
+        for key in ("next_action", "operation", "decision"):
+            action = _normalize_action(data.get(key))
+            if action:
+                break
+
+    purpose = _normalize_action(args.get("purpose"))
+    kind = _normalize_action(args.get("kind"))
+    selection_purposes = {
+        "detail_links",
+        "field_match",
+        "pagination_next",
+        "next_page",
+        "jump_widget",
+        "page_jump",
+    }
+
+    if not action:
+        if args.get("selected_mark_id") is not None:
+            action = "select"
+        elif isinstance(args.get("items"), list) and purpose in selection_purposes:
+            action = "select"
+        elif purpose in selection_purposes and (
+            args.get("mark_id") is not None
+            or args.get("input") is not None
+            or args.get("button") is not None
+        ):
+            action = "select"
+        elif kind in {"field", "fields"} or any(
+            k in args for k in ("field_name", "field_text", "field_value")
+        ):
+            action = "extract"
+        elif args.get("page_kind") is not None:
+            action = "report"
+        elif args.get("scroll_delta") is not None:
+            action = "scroll"
+        elif args.get("url"):
+            action = "navigate"
+        elif args.get("text") and args.get("mark_id") is not None:
+            action = "type"
+        elif args.get("mark_id") is not None:
+            action = "click"
+
+    action = _ACTION_ALIASES.get(action, action)
     if not action:
         return None
 
-    args = data.get("args") if isinstance(data.get("args"), dict) else {}
     message: dict[str, Any] = {"action": action, "args": args}
 
     thinking = data.get("thinking")
     if isinstance(thinking, str) and thinking:
         message["thinking"] = thinking
+    elif isinstance(args.get("reasoning"), str) and args.get("reasoning"):
+        message["thinking"] = args.get("reasoning")
 
     return message
