@@ -383,6 +383,11 @@ def pipeline_run_command(
         "--max-pages",
         help="列表页最大翻页次数（覆盖配置）",
     ),
+    consumer_concurrency: int | None = typer.Option(
+        None,
+        "--consumer-concurrency",
+        help="详情抽取消费者并发数（默认取配置）",
+    ),
     pipeline_mode: str = typer.Option(
         "",
         "--mode",
@@ -422,6 +427,7 @@ def pipeline_run_command(
             f"[bold]任务描述:[/bold] {task}\n"
             f"[bold]字段数量:[/bold] {len(fields)}\n"
             f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
+            f"[bold]消费者并发:[/bold] {consumer_concurrency if consumer_concurrency is not None else '默认'}\n"
             f"[bold]模式:[/bold] {mode_text}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}",
@@ -440,6 +446,7 @@ def pipeline_run_command(
                 headless=headless,
                 explore_count=field_explore_count,
                 validate_count=field_validate_count,
+                consumer_concurrency=consumer_concurrency,
                 max_pages=max_pages,
                 pipeline_mode=pipeline_mode.strip() or None,
             )

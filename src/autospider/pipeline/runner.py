@@ -34,6 +34,7 @@ async def run_pipeline(
     headless: bool = False,
     explore_count: int | None = None,
     validate_count: int | None = None,
+    consumer_concurrency: int | None = None,
     max_pages: int | None = None,
     pipeline_mode: str | None = None,
 ) -> dict:
@@ -47,6 +48,7 @@ async def run_pipeline(
         headless: 是否以无头模式运行浏览器。
         explore_count: 用于探索规则的详情页数量。
         validate_count: 用于验证规则的详情页数量。
+        consumer_concurrency: 消费者并发数（每个 worker 使用独立页面）。
         max_pages: 列表页最大翻页次数（可覆盖配置）。
         pipeline_mode: 流水线模式（如 'local' 或 'redis'）。
 
@@ -58,6 +60,10 @@ async def run_pipeline(
 
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
+    consumer_workers = max(
+        1,
+        int(consumer_concurrency or config.pipeline.consumer_concurrency),
+    )
     previous_max_pages: int | None = None
     if max_pages is not None:
         previous_max_pages = config.url_collector.max_pages
@@ -77,6 +83,7 @@ async def run_pipeline(
         "mode": (pipeline_mode or config.pipeline.mode),
         "total_urls": 0,
         "success_count": 0,
+        "consumer_concurrency": consumer_workers,
         "started_at": datetime.now().isoformat(),
         "finished_at": "",
         "items_file": str(items_path),
@@ -158,52 +165,65 @@ async def run_pipeline(
             await _fail_tasks(explore_tasks, "xpath_config_missing")
             return
 
-        # 使用高效的 XPath 提取器
-        extractor = BatchXPathExtractor(
-            page=detail_session.page,
-            fields_config=fields_config,
-            output_dir=output_dir,
+        logger.info(f"[Pipeline] Consumer workers: {consumer_workers}")
+
+        queue_size = max(
+            consumer_workers * 2,
+            consumer_workers * config.pipeline.batch_flush_size,
         )
+        task_queue: asyncio.Queue[URLTask | None] = asyncio.Queue(maxsize=queue_size)
+        summary_lock = asyncio.Lock()
 
-        # 首先处理在探索阶段已经领取的任务
-        await _process_tasks(
-            extractor=extractor,
-            tasks=explore_tasks,
-            items_path=items_path,
-            summary=summary,
-        )
+        async def feeder() -> None:
+            # 先处理探索阶段已经领取的任务
+            for task in explore_tasks:
+                await task_queue.put(task)
 
-        # 持续从通道中提取新任务并批量处理
-        buffer: list[URLTask] = []
-        while True:
-            batch = await channel.fetch(
-                max_items=config.pipeline.batch_fetch_size,
-                timeout_s=config.pipeline.fetch_timeout_s,
-            )
-            if not batch:
-                if producer_done.is_set():
-                    break
-                continue
-
-            buffer.extend(batch)
-
-            if len(buffer) >= config.pipeline.batch_flush_size:
-                await _process_tasks(
-                    extractor=extractor,
-                    tasks=buffer,
-                    items_path=items_path,
-                    summary=summary,
+            # 再持续从 channel 拉取新任务
+            while True:
+                batch = await channel.fetch(
+                    max_items=config.pipeline.batch_fetch_size,
+                    timeout_s=config.pipeline.fetch_timeout_s,
                 )
-                buffer = []
+                if not batch:
+                    if producer_done.is_set():
+                        break
+                    continue
+                for task in batch:
+                    await task_queue.put(task)
 
-        # 处理剩余的缓冲区任务
-        if buffer:
-            await _process_tasks(
-                extractor=extractor,
-                tasks=buffer,
-                items_path=items_path,
-                summary=summary,
+            # 通知 worker 退出
+            for _ in range(consumer_workers):
+                await task_queue.put(None)
+
+        async def worker(_worker_id: int) -> None:
+            session = BrowserSession(headless=headless)
+            await session.start()
+            extractor = BatchXPathExtractor(
+                page=session.page,
+                fields_config=fields_config,
+                output_dir=output_dir,
             )
+
+            try:
+                while True:
+                    task = await task_queue.get()
+                    if task is None:
+                        return
+                    await _process_task(
+                        extractor=extractor,
+                        task=task,
+                        items_path=items_path,
+                        summary=summary,
+                        summary_lock=summary_lock,
+                    )
+            finally:
+                await session.stop()
+
+        await asyncio.gather(
+            feeder(),
+            *(worker(i + 1) for i in range(consumer_workers)),
+        )
 
     try:
         await asyncio.gather(
@@ -258,47 +278,62 @@ async def _collect_tasks(
     return tasks
 
 
-async def _process_tasks(
+async def _process_task(
     extractor: BatchXPathExtractor,
-    tasks: list[URLTask],
+    task: URLTask,
     items_path: Path,
     summary: dict,
+    summary_lock: asyncio.Lock,
 ) -> None:
-    """批量执行任务提取并保存结果。
-
-    对传入的任务列表逐一进行数据提取，并将结果持久化到 JSONL 文件，同时维护统计信息。
+    """执行单条任务提取并保存结果。
 
     Args:
         extractor: XPath 提取器实例。
-        tasks: 待处理的任务列表。
+        task: 待处理任务。
         items_path: 结果保存的文件路径 (JSONL)。
         summary: 流水线汇总统计信息字典。
+        summary_lock: 写文件与更新汇总时使用的互斥锁。
     """
-    for task in tasks:
-        url = task.url
-        if not url:
-            continue
+    url = (task.url or "").strip()
+    if not url:
+        await task.fail_task("empty_url")
+        return
 
-        # 执行提取动作
+    try:
         record = await extractor._extract_from_url(url)
-        
-        # 将提取到的字段映射为简单的键值对字典
-        item = {"url": record.url}
-        for field_result in record.fields:
-            item[field_result.field_name] = field_result.value
+    except Exception as exc:  # noqa: BLE001
+        # 兜底处理：确保单条失败不会中断整条流水线
+        async with summary_lock:
+            _append_jsonl(
+                items_path,
+                {
+                    "url": url,
+                    "_error": f"extractor_exception: {exc}",
+                },
+            )
+            summary["total_urls"] += 1
+        await task.fail_task(f"extractor_exception: {exc}")
+        return
 
-        # 将结果追加到 JSONL 文件
+    # 将提取到的字段映射为简单的键值对字典
+    item = {"url": record.url}
+    for field_result in record.fields:
+        item[field_result.field_name] = field_result.value
+
+    # 将结果追加到 JSONL 文件并更新统计（并发下需要互斥）
+    async with summary_lock:
         _append_jsonl(items_path, item)
         summary["total_urls"] += 1
-
         if record.success:
             summary["success_count"] += 1
-            # 标记任务成功（Redis 模式下会进行 ACK）
-            await task.ack_task()
-        else:
-            # 标记任务失败并记录原因
-            reason = _build_error_reason(record)
-            await task.fail_task(reason)
+
+    if record.success:
+        # 标记任务成功（Redis 模式下会进行 ACK）
+        await task.ack_task()
+    else:
+        # 标记任务失败并记录原因
+        reason = _build_error_reason(record)
+        await task.fail_task(reason)
 
 
 async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:

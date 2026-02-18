@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from common.utils.prompt_template import render_template
+from ...common.utils.prompt_template import render_template
 from ...common.logger import get_logger
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
 from ...common.protocol import parse_protocol_message

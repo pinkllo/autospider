@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ...common.config import config
-from common.utils.prompt_template import render_template
+from ...common.utils.prompt_template import render_template
 from ...common.utils.paths import get_prompt_path
 from ...common.storage.persistence import ConfigPersistence
 

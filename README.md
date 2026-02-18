@@ -119,6 +119,7 @@ autospider pipeline-run \
   --task "采集详情页中的标题和发布时间" \
   --fields-file fields.json \
   --mode memory \
+  --consumer-concurrency 3 \
   --output output
 ```
 

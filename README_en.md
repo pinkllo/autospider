@@ -87,6 +87,7 @@ autospider pipeline-run \
   --task "Extract title and publish date from detail pages" \
   --fields-file fields.json \
   --mode memory \
+  --consumer-concurrency 3 \
   --output output
 ```
 

@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..config import config
 from ..logger import get_logger
 from ..protocol import parse_protocol_message
-from common.utils.prompt_template import render_template
+from ..utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
 from .mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks

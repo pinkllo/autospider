@@ -12,7 +12,7 @@ from ..types import Action, ActionType, ScrollInfo
 from ..protocol import parse_protocol_message
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
-from common.utils.prompt_template import render_template
+from ..utils.prompt_template import render_template
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

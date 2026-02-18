@@ -220,6 +220,11 @@ class PipelineConfig(BaseModel):
         default_factory=lambda: int(os.getenv("PIPELINE_BATCH_FLUSH_SIZE", "20"))
     )
 
+    # 详情抽取消费者并发数（每个 worker 使用独立页面）
+    consumer_concurrency: int = Field(
+        default_factory=lambda: int(os.getenv("PIPELINE_CONSUMER_CONCURRENCY", "3"))
+    )
+
 
 class Config(BaseModel):
     """全局配置"""
