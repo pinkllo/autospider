@@ -218,6 +218,7 @@ class URLCollector(BaseCollector):
                 logger.info(
                     f"[Warning] 只探索到 {len(self.detail_visits)} 个详情页，需要至少 2 个才能提取模式"
                 )
+                self._save_progress_status(status="FAILED", append_urls=True)
                 return self._create_result()
 
             # 3.5 提取公共 xpath
@@ -307,6 +308,7 @@ class URLCollector(BaseCollector):
         logger.info(f"  - 探索了 {len(self.detail_visits)} 个详情页")
         logger.info(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
 
+        self._save_progress_status(status="COMPLETED", append_urls=True)
         return result
 
     def _initialize_handlers(self) -> None:

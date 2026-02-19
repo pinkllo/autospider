@@ -107,6 +107,7 @@ class BatchCollector(BaseCollector):
         logger.info("\n[Phase 0] 加载配置文件...")
         if not await self._load_config():
             logger.info("[Error] 配置文件加载失败")
+            self._save_progress_status(status="FAILED", append_urls=True)
             return self._create_empty_result()
 
         logger.info("[Phase 0] ✓ 配置加载成功")
@@ -184,6 +185,7 @@ class BatchCollector(BaseCollector):
         logger.info(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
 
         await self._save_result(result)
+        self._save_progress_status(status="COMPLETED", append_urls=True)
 
         return result
 

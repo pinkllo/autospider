@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from ..common.config import config
 
@@ -144,6 +146,12 @@ class BatchXPathExtractor:
             )
 
             if not xpath:
+                if self._should_fill_with_task_url(field):
+                    result.value = url
+                    result.confidence = 1.0
+                    result.extraction_method = "task_url"
+                    record.fields.append(result)
+                    continue
                 result.error = "未提供 XPath"
                 record.fields.append(result)
                 continue
@@ -151,28 +159,26 @@ class BatchXPathExtractor:
             try:
                 # 检查页面状态并尝试提取
                 await self._ensure_page()
-                element = self.page.locator(f"xpath={xpath}").first
-                value = await element.inner_text(timeout=self.timeout_ms)
-                value = value.strip()
-                if value:
+                locator = self.page.locator(f"xpath={xpath}")
+                value, error = await self._extract_field_value(locator, field)
+                if value is not None:
                     result.value = value
                     result.confidence = 0.9
                 else:
-                    result.error = "XPath 未返回内容"
+                    result.error = error or "XPath 未返回内容"
             except Exception as e:
                 # 针对“页面已关闭”错误进行容错处理
                 if self._is_closed_error(e):
                     try:
                         logger.info(f"[BatchXPathExtractor] 页面关闭，尝试恢复并重新提取: {name}")
                         await self._recover_and_reload(url)
-                        element = self.page.locator(f"xpath={xpath}").first
-                        value = await element.inner_text(timeout=self.timeout_ms)
-                        value = value.strip()
-                        if value:
+                        locator = self.page.locator(f"xpath={xpath}")
+                        value, error = await self._extract_field_value(locator, field)
+                        if value is not None:
                             result.value = value
                             result.confidence = 0.9
                         else:
-                            result.error = "XPath 未返回内容"
+                            result.error = error or "XPath 未返回内容"
                     except Exception as retry_error:
                         result.error = f"XPath 提取失败: {retry_error}"
                 else:
@@ -189,6 +195,172 @@ class BatchXPathExtractor:
         record.success = required_fields_ok
 
         return record
+
+    async def _extract_field_value(self, locator, field: dict) -> tuple[str | None, str | None]:
+        """按字段语义提取单个字段值，避免 XPath 过宽时误取 `.first`。"""
+        try:
+            count = await locator.count()
+        except Exception as e:
+            return None, f"XPath 计数失败: {e}"
+
+        if count <= 0:
+            return None, "XPath 未匹配到元素"
+
+        data_type = str(field.get("data_type") or "text").lower()
+        prefer_url = self._is_url_type(data_type)
+
+        # 采样多个候选，避免 .first 误命中
+        max_candidates = min(count, 8)
+        candidates: list[str] = []
+        for idx in range(max_candidates):
+            value = await self._read_candidate_value(locator.nth(idx), prefer_url=prefer_url)
+            if value:
+                cleaned = value.strip()
+                if cleaned:
+                    candidates.append(cleaned)
+
+        if not candidates:
+            return None, "XPath 未返回内容"
+
+        best = self._select_best_candidate(
+            candidates=candidates,
+            data_type=data_type,
+        )
+        if best is None:
+            return None, "XPath 匹配到多个候选且语义冲突（疑似范围过宽）"
+        return best, None
+
+    async def _read_candidate_value(self, element_locator, prefer_url: bool) -> str | None:
+        """读取单个候选值；URL 字段优先取 href/src。"""
+        try:
+            if prefer_url:
+                for attr in ("href", "src", "data-href"):
+                    attr_val = await element_locator.get_attribute(attr, timeout=self.timeout_ms)
+                    if attr_val and attr_val.strip():
+                        return attr_val.strip()
+
+            text = await element_locator.inner_text(timeout=self.timeout_ms)
+            text = (text or "").strip()
+            if text:
+                return text
+        except Exception:
+            return None
+        return None
+
+    def _select_best_candidate(
+        self,
+        candidates: list[str],
+        data_type: str,
+    ) -> str | None:
+        """从多候选中按语义选优。"""
+        unique_candidates: list[str] = []
+        seen: set[str] = set()
+        for value in candidates:
+            if value in seen:
+                continue
+            seen.add(value)
+            unique_candidates.append(value)
+
+        scored = []
+        for value in unique_candidates:
+            score = self._score_candidate(
+                value=value,
+                data_type=data_type,
+            )
+            scored.append((score, value))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if not scored:
+            return None
+
+        top_score, top_value = scored[0]
+        if top_score < 0:
+            return None
+
+        # Top2 分差过小且值不同，判定歧义，避免误提取
+        if len(scored) > 1:
+            second_score, second_value = scored[1]
+            if (top_score - second_score) < 1.0 and self._normalize_text(top_value) != self._normalize_text(second_value):
+                return None
+
+        return top_value
+
+    def _score_candidate(
+        self,
+        value: str,
+        data_type: str,
+    ) -> float:
+        score = 0.0
+        text = value.strip()
+        if not text:
+            return -10.0
+
+        # 通用：文本过长通常是容器误命中
+        if len(text) > 120:
+            score -= 3.0
+        elif len(text) <= 40:
+            score += 0.5
+
+        if self._is_url_type(data_type):
+            if self._looks_like_url(text):
+                score += 4.0
+            else:
+                score -= 4.0
+            return score
+
+        if data_type == "number":
+            if self._looks_like_number(text):
+                score += 3.0
+            else:
+                score -= 4.0
+            return score
+
+        if data_type == "date":
+            if self._looks_like_date(text):
+                score += 3.0
+            else:
+                score -= 3.0
+            return score
+
+        return score
+
+    def _is_url_type(self, data_type: str) -> bool:
+        return data_type == "url"
+
+    def _should_fill_with_task_url(self, field: dict) -> bool:
+        source = str(field.get("extraction_source") or "").strip().lower()
+        if source == "task_url":
+            return True
+
+        data_type = str(field.get("data_type") or "").strip().lower()
+        name = str(field.get("name") or "").strip().lower()
+        if data_type == "url" and name in {"detail_url", "url", "source_url", "page_url"}:
+            return True
+        return False
+
+    def _looks_like_url(self, value: str) -> bool:
+        text = (value or "").strip()
+        if text.startswith("/"):
+            return True
+        try:
+            parsed = urlparse(text)
+            return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        except Exception:
+            return False
+
+    def _looks_like_number(self, value: str) -> bool:
+        return bool(re.fullmatch(r"[^\d\-+]*[-+]?\d[\d,\.\s]*[^\d]*", (value or "").strip()))
+
+    def _looks_like_date(self, value: str) -> bool:
+        text = (value or "").strip()
+        patterns = [
+            r"\d{4}[-/年]\d{1,2}([-/月]\d{1,2}日?)?",
+            r"\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?",
+        ]
+        return any(re.search(p, text) for p in patterns)
+
+    def _normalize_text(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value or "").strip().lower()
 
     async def _safe_goto(self, url: str) -> None:
         """安全地导航到指定 URL，包含简单的页面关闭恢复"""

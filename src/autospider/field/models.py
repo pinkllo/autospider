@@ -99,12 +99,22 @@ class BatchExtractionResult:
 
     def to_extraction_config(self) -> dict:
         """转换为提取配置（可用于批量爬取）"""
+        validation_available = self.total_urls_validated > 0
+        xpath_map = {x.field_name: x for x in self.common_xpaths}
         return {
             "fields": [
                 {
                     "name": f.name,
                     "description": f.description,
-                    "xpath": self.get_common_xpath(f.name),
+                    "xpath": (
+                        xpath_map[f.name].xpath_pattern
+                        if f.name in xpath_map
+                        and (not validation_available or xpath_map[f.name].validated)
+                        else None
+                    ),
+                    "xpath_validated": (
+                        xpath_map[f.name].validated if f.name in xpath_map else False
+                    ),
                     "required": f.required,
                     "data_type": f.data_type,
                 }

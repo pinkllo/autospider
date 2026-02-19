@@ -32,6 +32,11 @@ class LLMConfig(BaseModel):
     planner_api_base: str | None = Field(
         default_factory=lambda: os.getenv("SILICON_PLANNER_API_BASE", None)
     )
+    trace_enabled: bool = Field(
+        default_factory=lambda: os.getenv("LLM_TRACE_ENABLED", "true").lower() == "true"
+    )
+    trace_file: str = Field(default_factory=lambda: os.getenv("LLM_TRACE_FILE", "output/llm_trace.jsonl"))
+    trace_max_chars: int = Field(default_factory=lambda: int(os.getenv("LLM_TRACE_MAX_CHARS", "20000")))
     temperature: float = 0.1
     max_tokens: int = 8192  # 增加 token 限制，避免 JSON 被截断
 

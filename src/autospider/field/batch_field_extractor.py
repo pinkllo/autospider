@@ -24,7 +24,11 @@ from .models import (
     PageExtractionRecord,
 )
 from .field_extractor import FieldExtractor
-from .xpath_pattern import FieldXPathExtractor, validate_xpath_pattern
+from .xpath_pattern import (
+    FieldXPathExtractor,
+    XPathValueLLMValidator,
+    validate_xpath_pattern,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -77,6 +81,7 @@ class BatchFieldExtractor:
             output_dir=output_dir,
         )
         self.xpath_extractor = FieldXPathExtractor()
+        self.xpath_value_validator = XPathValueLLMValidator()
 
         # 任务映射：URL -> (stream_id, data_id)
         self.task_mapping: dict[str, tuple[str, str]] = {}
@@ -137,7 +142,7 @@ class BatchFieldExtractor:
         logger.info(f"{'='*60}\n")
 
         field_names = [f.name for f in self.fields]
-        result.common_xpaths = self.xpath_extractor.extract_all_common_patterns(
+        result.common_xpaths = await self.xpath_extractor.extract_all_common_patterns(
             records=result.exploration_records,
             field_names=field_names,
         )
@@ -214,45 +219,73 @@ class BatchFieldExtractor:
     ) -> None:
         """校验公共 XPath 模式"""
         validation_success_count = 0
+        field_def_map = {f.name: f for f in self.fields}
+        field_stats: dict[str, dict[str, int]] = {
+            x.field_name: {"success": 0, "total": 0} for x in result.common_xpaths
+        }
+        required_field_names = {f.name for f in self.fields if f.required}
 
         for i, url in enumerate(validate_urls):
             logger.info(f"\n[BatchFieldExtractor] 校验 {i + 1}/{len(validate_urls)}: {url[:80]}...")
 
             record = PageExtractionRecord(url=url)
-            all_fields_ok = True
+            all_required_fields_ok = True
 
             # 对每个公共 XPath 进行验证
             for xpath_info in result.common_xpaths:
+                field_def = field_def_map.get(xpath_info.field_name)
                 success, value = await validate_xpath_pattern(
                     page=self.page,
                     url=url,
                     xpath_pattern=xpath_info.xpath_pattern,
+                    data_type=(field_def.data_type if field_def else None),
+                    field_name=xpath_info.field_name,
+                    field_description=(field_def.description if field_def else ""),
+                    llm_validator=self.xpath_value_validator,
                 )
+                stats = field_stats.setdefault(
+                    xpath_info.field_name, {"success": 0, "total": 0}
+                )
+                stats["total"] += 1
 
                 if success:
                     logger.info(
                         f"    ✓ 字段 '{xpath_info.field_name}': {value[:50] if value else 'N/A'}..."
                     )
+                    stats["success"] += 1
                 else:
                     logger.info(f"    ✗ 字段 '{xpath_info.field_name}': 验证失败")
-                    all_fields_ok = False
+                    if xpath_info.field_name in required_field_names:
+                        all_required_fields_ok = False
 
-            record.success = all_fields_ok
+            record.success = all_required_fields_ok
             result.validation_records.append(record)
             result.total_urls_validated += 1
 
-            if all_fields_ok:
+            if all_required_fields_ok:
                 validation_success_count += 1
 
-        # 判断校验是否整体成功
-        if validate_urls:
-            success_rate = validation_success_count / len(validate_urls)
-            result.validation_success = success_rate >= 0.8
-            logger.info(f"\n[BatchFieldExtractor] 校验成功率: {success_rate:.0%}")
+        # 字段级校验：分别判断每个字段 XPath 是否可用
+        for xpath_info in result.common_xpaths:
+            stats = field_stats.get(xpath_info.field_name, {"success": 0, "total": 0})
+            total = stats["total"]
+            success = stats["success"]
+            success_rate = (success / total) if total else 0.0
+            xpath_info.validated = success_rate >= 0.8
+            logger.info(
+                f"[BatchFieldExtractor] 字段校验率 '{xpath_info.field_name}': "
+                f"{success_rate * 100:.0f}% ({success}/{total}) -> "
+                f"{'通过' if xpath_info.validated else '不通过'}"
+            )
 
-            # 标记已验证的 XPath
-            for xpath_info in result.common_xpaths:
-                xpath_info.validated = result.validation_success
+        # 判断整体校验是否成功（必填字段都通过 + 页面级成功率达标）
+        if validate_urls:
+            page_success_rate = validation_success_count / len(validate_urls)
+            required_xpath_ok = all(
+                x.validated for x in result.common_xpaths if x.field_name in required_field_names
+            )
+            result.validation_success = page_success_rate >= 0.8 and required_xpath_ok
+            logger.info(f"\n[BatchFieldExtractor] 页面级成功率: {page_success_rate:.0%}")
 
     async def _save_results(self, result: BatchExtractionResult) -> None:
         """保存提取结果"""

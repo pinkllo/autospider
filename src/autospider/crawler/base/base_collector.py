@@ -577,8 +577,19 @@ class BaseCollector(ABC):
         - 采集状态（页码、URL 计数、速率等级等）到 progress.json
         - 新发现的 URL 增量追加到 urls.txt
         """
+        self._save_progress_status(status="RUNNING", append_urls=True)
+
+    def _save_progress_status(
+        self,
+        status: str,
+        pause_reason: str | None = None,
+        append_urls: bool = False,
+    ) -> None:
+        """按指定状态持久化进度。"""
+        normalized_status = (status or "RUNNING").upper()
         progress = CollectionProgress(
-            status="RUNNING",
+            status=normalized_status,
+            pause_reason=pause_reason,
             list_url=self.list_url,
             task_description=self.task_description,
             current_page_num=(
@@ -588,10 +599,9 @@ class BaseCollector(ABC):
             backoff_level=self.rate_controller.current_level,
             consecutive_success_pages=self.rate_controller.consecutive_success_count,
         )
-        # 保存基础进度
         self.progress_persistence.save_progress(progress)
-        # 增量追加 URL 到文件
-        self._append_new_urls_to_progress()
+        if append_urls:
+            self._append_new_urls_to_progress()
 
     def _append_new_urls_to_progress(self) -> None:
         """将新增的 URL 增量保存到本地文件

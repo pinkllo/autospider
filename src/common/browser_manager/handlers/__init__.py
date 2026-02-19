@@ -6,10 +6,12 @@ handlers 子模块
 
 # 导入所有内置处理器，触发其自动注册
 from . import login_handler
+from . import captcha_handler
+from . import challenge_handler
+from . import rate_limit_handler
 
 # 未来扩展：
-# from . import captcha_handler
-# from . import rate_limit_handler
+# from . import xxx_handler
 
 # 导出基类供外部继承
 from .base import BaseAnomalyHandler

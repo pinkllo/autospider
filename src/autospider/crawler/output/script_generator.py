@@ -46,6 +46,7 @@ class ScriptGenerator:
             temperature=0.1,
             max_tokens=4096,
             model_kwargs={"response_format": {"type": "json_object"}},
+            extra_body={"enable_thinking": False},
         )
         # 持久化管理器，用于读取配置
         self.config_persistence = ConfigPersistence(output_dir)

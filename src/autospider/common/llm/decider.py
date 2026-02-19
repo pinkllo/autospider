@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -13,6 +14,7 @@ from ..protocol import parse_protocol_message
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
+from .trace_logger import append_llm_trace
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -59,6 +61,7 @@ class LLMDecider:
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
             model_kwargs={"response_format": {"type": "json_object"}},
+            extra_body={"enable_thinking": False},
         )
 
         # 任务计划（由 planner 设置）
@@ -108,9 +111,14 @@ class LLMDecider:
         Returns:
             下一步操作
         """
+        tab_context = await self._collect_tab_context(page)
         # 构建用户消息
         user_content = self._build_user_message(
-            state, marks_text, target_found_in_page, scroll_info
+            state,
+            marks_text,
+            target_found_in_page,
+            scroll_info,
+            tab_context,
         )
 
         # 构建消息内容（仅包含当前截图）
@@ -135,6 +143,36 @@ class LLMDecider:
 
         # 解析响应
         action = self._parse_response(response_text)
+        action = self._normalize_back_action(action, tab_context)
+
+        append_llm_trace(
+            component="decider",
+            payload={
+                "model": self.model,
+                "state": {
+                    "step_index": state.step_index,
+                    "page_url": state.page_url,
+                    "page_title": state.page_title,
+                    "task": state.input.task,
+                    "target_text": state.input.target_text,
+                },
+                "tab_context": tab_context,
+                "input": {
+                    "system_prompt": system_prompt,
+                    "user_content": user_content,
+                    "marks_text": marks_text,
+                    "target_found_in_page": target_found_in_page,
+                    "scroll_info": (
+                        scroll_info.model_dump() if scroll_info is not None else None
+                    ),
+                    "screenshot_base64_len": len(screenshot_base64 or ""),
+                },
+                "output": {
+                    "raw_response": str(response_text),
+                    "parsed_action": action.model_dump(),
+                },
+            },
+        )
 
         snapshot_to_use = snapshot or state.current_snapshot
         if (
@@ -325,6 +363,7 @@ class LLMDecider:
         marks_text: str,
         target_found_in_page: bool = False,
         scroll_info: ScrollInfo | None = None,
+        tab_context: dict[str, Any] | None = None,
     ) -> str:
         """构建用户消息（包含历史记录）"""
         parts = []
@@ -390,6 +429,7 @@ class LLMDecider:
 
         # 当前状态
         parts.append(f"## 当前页面\n- URL: {state.page_url}\n- 标题: {state.page_title}")
+        parts.append(self._format_tab_context(tab_context))
         parts.append(
             f"## 当前步骤\n第 {state.step_index + 1} 步（最多 {state.input.max_steps} 步）"
         )
@@ -448,6 +488,123 @@ class LLMDecider:
         )
 
         return "\n\n".join(parts)
+
+    async def _collect_tab_context(self, page: "Page" | None) -> dict[str, Any]:
+        """收集标签页与回退能力上下文，用于区分 go_back 与 go_back_tab。"""
+        context: dict[str, Any] = {
+            "available": False,
+            "tab_count": 1,
+            "current_tab_index": 1,
+            "history_length": None,
+            "can_go_back": None,
+            "tabs_preview": [],
+        }
+        if page is None:
+            return context
+
+        try:
+            pages = list(page.context.pages)
+            if pages:
+                context["tab_count"] = len(pages)
+
+                raw_current = self._unwrap_page(page)
+                current_index = 1
+                preview: list[str] = []
+                for idx, candidate in enumerate(pages, start=1):
+                    raw_candidate = self._unwrap_page(candidate)
+                    if raw_current is not None and raw_candidate is raw_current:
+                        current_index = idx
+                    url = getattr(candidate, "url", "") or ""
+                    if idx <= 5:
+                        preview.append(f"{idx}. {url[:120]}")
+
+                context["current_tab_index"] = current_index
+                context["tabs_preview"] = preview
+        except Exception:
+            pass
+
+        try:
+            history_length_raw = await page.evaluate(
+                "() => (window.history && window.history.length) ? window.history.length : 1"
+            )
+            history_length = int(history_length_raw)
+            context["history_length"] = history_length
+            context["can_go_back"] = history_length > 1
+        except Exception:
+            context["history_length"] = None
+            context["can_go_back"] = None
+
+        context["available"] = True
+        return context
+
+    def _format_tab_context(self, tab_context: dict[str, Any] | None) -> str:
+        """格式化标签页上下文文本，喂给 LLM。"""
+        if not tab_context or not tab_context.get("available"):
+            return "## 标签页状态\n- 未获取到标签页信息。"
+
+        tab_count = int(tab_context.get("tab_count") or 1)
+        current_idx = int(tab_context.get("current_tab_index") or 1)
+        history_length = tab_context.get("history_length")
+        can_go_back = tab_context.get("can_go_back")
+        tabs_preview = tab_context.get("tabs_preview") or []
+
+        lines = [
+            "## 标签页状态",
+            f"- 当前标签页序号: {current_idx}/{tab_count}",
+            f"- 当前页历史长度: {history_length if history_length is not None else '未知'}",
+            (
+                f"- 当前页可否 go_back: {'是' if can_go_back else '否'}"
+                if can_go_back is not None
+                else "- 当前页可否 go_back: 未知"
+            ),
+        ]
+        if tab_count <= 1:
+            lines.append("- 强规则: 当前只有 1 个标签页，禁止使用 go_back_tab。")
+        else:
+            lines.append(
+                "- 强规则: 只有在“当前页是新标签页且要关闭回到原标签”时才使用 go_back_tab；"
+                "否则优先用 go_back。"
+            )
+        if tabs_preview:
+            lines.append("- 已打开标签页 URL（最多 5 个）:")
+            for item in tabs_preview:
+                lines.append(f"  - {item}")
+
+        return "\n".join(lines)
+
+    def _normalize_back_action(self, action: Action, tab_context: dict[str, Any]) -> Action:
+        """对 go_back / go_back_tab 做安全纠偏，减少模型误判。"""
+        tab_count = int(tab_context.get("tab_count") or 1)
+        history_length = tab_context.get("history_length")
+        can_go_back = tab_context.get("can_go_back")
+
+        if action.action == ActionType.GO_BACK_TAB and tab_count <= 1:
+            action.action = ActionType.GO_BACK
+            tip = "自动纠偏: 单标签页改为 go_back"
+            action.thinking = f"{action.thinking} | {tip}" if action.thinking else tip
+            return action
+
+        if (
+            action.action == ActionType.GO_BACK
+            and tab_count > 1
+            and history_length is not None
+            and can_go_back is False
+        ):
+            action.action = ActionType.GO_BACK_TAB
+            tip = "自动纠偏: 当前页无历史且多标签页，改为 go_back_tab"
+            action.thinking = f"{action.thinking} | {tip}" if action.thinking else tip
+
+        return action
+
+    def _unwrap_page(self, page: Any) -> Any:
+        """兼容 GuardedPage 与原生 Page。"""
+        unwrap = getattr(page, "unwrap", None)
+        if callable(unwrap):
+            try:
+                return unwrap()
+            except Exception:
+                return page
+        return page
 
     def _parse_response(self, response_text: str) -> Action:
         """解析 LLM 响应"""

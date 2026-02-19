@@ -172,13 +172,11 @@ class LoginHandler(BaseAnomalyHandler):
         2. 注入提示横幅
         3. 并行监控三种成功条件
         4. 任一条件满足后保存状态
-        5. 如果是 iframe 弹窗模式，刷新页面以应用登录状态
+        5. 统一刷新动作由 PageGuard 在 handler 结束后执行
         """
         logger.warning(">>> 触发人工登录模式 <<<")
         
         success_reason = None
-        is_iframe_popup_mode = not self._is_login_url(page.url)
-        
         try:
             # 1. 记录初始状态
             await self._capture_initial_state(page)
@@ -196,23 +194,7 @@ class LoginHandler(BaseAnomalyHandler):
                 # 只有检测到成功时才保存状态
                 await self._save_auth_state(page)
                 
-                # 4. 如果是 iframe 弹窗模式，刷新页面以应用登录状态
-                # 因为主页面没有发生跳转，需要刷新才能显示登录后的内容
-                if is_iframe_popup_mode:
-                    logger.info("[登录处理] iframe 模式：刷新所有页面以应用登录状态")
-                    # 刷新 Context 中的所有页面（包括新打开的标签页）
-                    for p in page.context.pages:
-                        try:
-                            # 忽略已关闭的页面
-                            if p.is_closed():
-                                continue
-                                
-                            logger.debug(f"[登录处理] 正在刷新页面: {p.url}")
-                            await p.reload()
-                            # 简单的等待，不需要严格等待每个人页面完全加载，避免阻塞太久
-                            # await p.wait_for_load_state("domcontentloaded")
-                        except Exception as e:
-                            logger.warning(f"[登录处理] 刷新页面失败: {e}")
+                # 4. 刷新动作由 PageGuard 在 handler 完成后统一执行
             else:
                 logger.warning(">>> 等待超时，未检测到登录成功，不保存状态 <<<")
             

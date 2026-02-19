@@ -28,6 +28,8 @@ class PageGuard:
     def __init__(self):
         self._is_handling = False  # 标记是否正在处理异常
         self._lock = asyncio.Lock()  # 并发锁，确保同一时间只有一个处理器在工作
+        self._poll_tasks: dict[int, asyncio.Task] = {}
+        self._poll_interval_s = 1.0
         
         # 空闲事件：用于阻塞等待处理完成
         # set() = 空闲状态，clear() = 处理中状态
@@ -67,6 +69,9 @@ class PageGuard:
                         try:
                             # 发现问题，执行对应处理方法
                             await handler.handle(page)
+                            # 统一后置动作：异常处理后刷新当前 context 的全部页面，
+                            # 让共享风控状态在各标签页尽快同步生效。
+                            await self._refresh_context_pages(page, source_handler=handler.name)
                         finally:
                             # 无论成功与否，都重置处理状态并释放等待者
                             self._is_handling = False
@@ -80,6 +85,28 @@ class PageGuard:
                     self._is_handling = False
                     self._idle_event.set()
                     logger.error(f"[PageGuard] 处理器 {handler.name} 运行出错: {e}")
+
+    async def _refresh_context_pages(self, page: Page, source_handler: str) -> None:
+        """刷新当前 BrowserContext 内的所有页面。"""
+        try:
+            pages = list(page.context.pages)
+        except Exception as e:
+            logger.debug(f"[PageGuard] 获取 context.pages 失败（忽略）: {e}")
+            return
+
+        if not pages:
+            return
+
+        logger.info(
+            f"[PageGuard] 异常处理完成（{source_handler}），开始刷新当前 context 全部页面: {len(pages)} 个"
+        )
+        for p in pages:
+            try:
+                if p.is_closed():
+                    continue
+                await p.reload(wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                logger.debug(f"[PageGuard] 刷新页面失败（忽略）: {e}")
 
     async def wait_until_idle(self) -> None:
         """
@@ -100,6 +127,13 @@ class PageGuard:
         - framenavigated: 主框架导航完成 + 登录相关 iframe 导航
         - domcontentloaded: DOM 加载完成（捕获弹窗式登录）
         """
+        # 避免重复绑定同一个页面
+        try:
+            if getattr(page, "_guard_attached", False):
+                return
+        except Exception:
+            pass
+
         # 登录相关关键词（用于判断 iframe 是否需要触发检测）
         login_keywords = ["login", "passport", "signin", "member", "auth"]
         
@@ -113,6 +147,13 @@ class PageGuard:
             frame_url = frame.url.lower()
             return any(k in frame_url for k in login_keywords)
         
+        # 标记绑定状态，供外部兜底逻辑使用
+        try:
+            setattr(page, "_page_guard", self)
+            setattr(page, "_guard_attached", True)
+        except Exception:
+            pass
+
         # 监听 frame 导航（主框架 + 登录相关 iframe）
         page.on("framenavigated", lambda frame: 
             asyncio.create_task(self.run_inspection(page)) 
@@ -123,8 +164,39 @@ class PageGuard:
         page.on("domcontentloaded", lambda: 
             asyncio.create_task(self.run_inspection(page))
         )
+
+        # 启动轻量轮询，覆盖“无导航触发的风控弹窗（如滑块）”
+        self._ensure_polling(page)
         
         logger.debug("[PageGuard] 已挂载到当前页面（支持 iframe 检测）")
+
+    def _ensure_polling(self, page: Page) -> None:
+        """确保页面巡检轮询任务已启动。"""
+        page_id = id(page)
+        task = self._poll_tasks.get(page_id)
+        if task and not task.done():
+            return
+        self._poll_tasks[page_id] = asyncio.create_task(self._poll_page(page))
+
+    async def _poll_page(self, page: Page) -> None:
+        """页面巡检轮询：用于检测无导航触发的异常。"""
+        page_id = id(page)
+        try:
+            while True:
+                try:
+                    if page.is_closed():
+                        break
+                except Exception:
+                    break
+
+                try:
+                    await self.run_inspection(page)
+                except Exception as e:
+                    logger.debug(f"[PageGuard] 轮询巡检异常（忽略）: {e}")
+
+                await asyncio.sleep(self._poll_interval_s)
+        finally:
+            self._poll_tasks.pop(page_id, None)
 
 
 # ==================== 全局工具函数 ====================

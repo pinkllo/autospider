@@ -15,6 +15,7 @@ from rich.table import Table
 from .common.browser import create_browser_session
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
+from .common.llm import TaskClarifier, DialogueMessage
 from .common.logger import get_logger
 from .field import FieldDefinition
 from .pipeline import run_pipeline
@@ -132,6 +133,33 @@ def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
         raise ValueError("字段定义不能为空")
 
     return fields
+
+
+def _load_generated_fields(generated_fields: list[FieldDefinition]) -> list[FieldDefinition]:
+    """校验 AI 生成字段列表。"""
+    if not generated_fields:
+        raise ValueError("AI 未生成有效字段，请补充更具体的字段要求")
+    return generated_fields
+
+
+def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
+    """构建字段预览表格。"""
+    table = Table(title="AI 生成字段")
+    table.add_column("name", style="cyan")
+    table.add_column("description", style="green")
+    table.add_column("type", style="magenta")
+    table.add_column("required", style="yellow")
+    table.add_column("example", style="blue")
+
+    for field in fields:
+        table.add_row(
+            field.name,
+            field.description,
+            field.data_type,
+            "是" if field.required else "否",
+            field.example or "",
+        )
+    return table
 
 def _load_urls(urls_file: str) -> list[str]:
     path = Path(urls_file)
@@ -383,6 +411,11 @@ def pipeline_run_command(
         "--max-pages",
         help="列表页最大翻页次数（覆盖配置）",
     ),
+    target_url_count: int | None = typer.Option(
+        None,
+        "--target-url-count",
+        help="目标采集 URL 数量（覆盖配置）",
+    ),
     consumer_concurrency: int | None = typer.Option(
         None,
         "--consumer-concurrency",
@@ -427,6 +460,7 @@ def pipeline_run_command(
             f"[bold]任务描述:[/bold] {task}\n"
             f"[bold]字段数量:[/bold] {len(fields)}\n"
             f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
+            f"[bold]目标 URL 数:[/bold] {target_url_count if target_url_count is not None else '默认'}\n"
             f"[bold]消费者并发:[/bold] {consumer_concurrency if consumer_concurrency is not None else '默认'}\n"
             f"[bold]模式:[/bold] {mode_text}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
@@ -448,6 +482,7 @@ def pipeline_run_command(
                 validate_count=field_validate_count,
                 consumer_concurrency=consumer_concurrency,
                 max_pages=max_pages,
+                target_url_count=target_url_count,
                 pipeline_mode=pipeline_mode.strip() or None,
             )
         )
@@ -468,6 +503,251 @@ def pipeline_run_command(
         raise typer.Exit(130)
     except Exception as e:
         logger.info(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="执行错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+
+@app.command("chat-pipeline")
+def chat_pipeline_command(
+    request: str = typer.Option(
+        "",
+        "--request",
+        "-r",
+        help="初始自然语言需求（可为空，程序会交互询问）",
+    ),
+    max_turns: int = typer.Option(
+        6,
+        "--max-turns",
+        help="多轮澄清的最大轮数",
+    ),
+    field_explore_count: int | None = typer.Option(
+        None,
+        "--field-explore-count",
+        help="字段探索数量（默认取配置）",
+    ),
+    field_validate_count: int | None = typer.Option(
+        None,
+        "--field-validate-count",
+        help="字段校验数量（默认取配置）",
+    ),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        help="列表页最大翻页次数（可覆盖 AI 推断）",
+    ),
+    target_url_count: int | None = typer.Option(
+        None,
+        "--target-url-count",
+        help="目标采集 URL 数量（可覆盖 AI 推断）",
+    ),
+    consumer_concurrency: int | None = typer.Option(
+        None,
+        "--consumer-concurrency",
+        help="详情抽取消费者并发数（默认取配置）",
+    ),
+    pipeline_mode: str = typer.Option(
+        "",
+        "--mode",
+        help="通道模式: memory/file/redis",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--no-headless",
+        help="是否使用无头模式",
+    ),
+    output_dir: str = typer.Option(
+        "output",
+        "--output",
+        "-o",
+        help="输出目录",
+    ),
+):
+    """全自然语言多轮交互后执行流水线。"""
+    if max_turns < 1:
+        console.print(
+            Panel(
+                "[red]max-turns 必须 >= 1[/red]",
+                title="参数错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    initial_request = request.strip()
+    if not initial_request:
+        initial_request = typer.prompt("请描述你想爬取什么（可模糊）").strip()
+
+    if not initial_request:
+        console.print(
+            Panel(
+                "[red]需求不能为空[/red]",
+                title="输入错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    try:
+        clarifier = TaskClarifier()
+    except Exception as e:
+        console.print(
+            Panel(
+                f"[red]澄清器初始化失败: {str(e)}[/red]",
+                title="执行错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    history: list[DialogueMessage] = [DialogueMessage(role="user", content=initial_request)]
+    final_task = None
+
+    for turn in range(1, max_turns + 1):
+        result = run_async_safely(clarifier.clarify(history))
+
+        if result.status == "reject":
+            console.print(
+                Panel(
+                    f"[red]{result.reason or '该任务暂不支持自动执行'}[/red]",
+                    title="任务拒绝",
+                    style="red",
+                )
+            )
+            raise typer.Exit(1)
+
+        if result.status == "ready" and result.task is not None:
+            final_task = result.task
+            break
+
+        question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
+        console.print(
+            Panel(
+                question,
+                title=f"AI 澄清问题 ({turn}/{max_turns})",
+                style="yellow",
+            )
+        )
+        answer = typer.prompt("你的回答").strip()
+        if not answer:
+            answer = "请按常见默认方案继续，并明确你的默认假设。"
+
+        history.append(DialogueMessage(role="assistant", content=question))
+        history.append(DialogueMessage(role="user", content=answer))
+
+    if final_task is None:
+        console.print(
+            Panel(
+                "[red]在限定轮数内仍未澄清完成。请提供更明确的信息后重试。[/red]",
+                title="澄清未完成",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    try:
+        list_url = validate_url(final_task.list_url)
+        task_description = validate_task_description(final_task.task_description)
+        fields = _load_generated_fields(final_task.fields)
+    except (URLValidationError, ValidationError, ValueError) as e:
+        console.print(
+            Panel(
+                f"[red]{str(e)}[/red]",
+                title="AI 结果校验失败",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    use_max_pages = max_pages if max_pages is not None else final_task.max_pages
+    use_target_url_count = (
+        target_url_count
+        if target_url_count is not None
+        else final_task.target_url_count
+    )
+    use_consumer_concurrency = (
+        consumer_concurrency
+        if consumer_concurrency is not None
+        else final_task.consumer_concurrency
+    )
+    use_field_explore_count = (
+        field_explore_count
+        if field_explore_count is not None
+        else final_task.field_explore_count
+    )
+    use_field_validate_count = (
+        field_validate_count
+        if field_validate_count is not None
+        else final_task.field_validate_count
+    )
+    mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
+    intent_text = final_task.intent or "未提供"
+
+    console.print(
+        Panel(
+            f"[bold]识别意图:[/bold] {intent_text}\n"
+            f"[bold]列表页 URL:[/bold] {list_url}\n"
+            f"[bold]任务描述:[/bold] {task_description}\n"
+            f"[bold]字段数量:[/bold] {len(fields)}\n"
+            f"[bold]最大翻页:[/bold] {use_max_pages if use_max_pages is not None else '默认'}\n"
+            f"[bold]目标 URL 数:[/bold] "
+            f"{use_target_url_count if use_target_url_count is not None else '默认'}\n"
+            f"[bold]字段探索数:[/bold] "
+            f"{use_field_explore_count if use_field_explore_count is not None else '默认'}\n"
+            f"[bold]字段校验数:[/bold] "
+            f"{use_field_validate_count if use_field_validate_count is not None else '默认'}\n"
+            f"[bold]消费者并发:[/bold] "
+            f"{use_consumer_concurrency if use_consumer_concurrency is not None else '默认'}\n"
+            f"[bold]模式:[/bold] {mode_text}\n"
+            f"[bold]无头模式:[/bold] {headless}\n"
+            f"[bold]输出目录:[/bold] {output_dir}",
+            title="AI 生成任务配置",
+            style="cyan",
+        )
+    )
+    console.print(_build_generated_fields_table(fields))
+
+    if not typer.confirm("是否确认并开始执行流水线？", default=True):
+        logger.info("[yellow]已取消执行[/yellow]")
+        return
+
+    try:
+        run_result = run_async_safely(
+            run_pipeline(
+                list_url=list_url,
+                task_description=task_description,
+                fields=fields,
+                output_dir=output_dir,
+                headless=headless,
+                explore_count=use_field_explore_count,
+                validate_count=use_field_validate_count,
+                consumer_concurrency=use_consumer_concurrency,
+                max_pages=use_max_pages,
+                target_url_count=use_target_url_count,
+                pipeline_mode=pipeline_mode.strip() or None,
+            )
+        )
+
+        console.print(
+            Panel(
+                f"[green]流水线完成[/green]\n\n"
+                f"总处理 URL: {run_result.get('total_urls', 0)}\n"
+                f"成功数量: {run_result.get('success_count', 0)}\n"
+                f"明细输出: {run_result.get('items_file', '')}\n"
+                f"汇总输出: {output_dir}/pipeline_summary.json",
+                title="执行完成",
+                style="green",
+            )
+        )
+    except KeyboardInterrupt:
+        logger.info("\n[yellow]用户中断[/yellow]")
+        raise typer.Exit(130)
+    except Exception as e:
+        console.print(
             Panel(
                 f"[red]{str(e)}[/red]",
                 title="执行错误",

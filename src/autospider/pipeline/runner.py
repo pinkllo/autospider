@@ -25,6 +25,56 @@ from autospider.common.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _is_valid_xpath(xpath: object) -> bool:
+    """判断字段配置中的 XPath 是否有效。"""
+    return isinstance(xpath, str) and xpath.strip().startswith("/")
+
+
+def _prepare_fields_config(
+    fields_config: list[dict],
+) -> tuple[list[dict], list[str], list[str]]:
+    """清洗字段配置并返回 (有效字段, 缺失 XPath 的必填字段, 缺失 XPath 的可选字段)。"""
+    valid_fields: list[dict] = []
+    missing_required: list[str] = []
+    missing_optional: list[str] = []
+
+    for field in fields_config:
+        if not isinstance(field, dict):
+            continue
+
+        field_name = str(field.get("name") or "").strip() or "<unknown>"
+        xpath = field.get("xpath")
+        required = bool(field.get("required", True))
+        data_type = str(field.get("data_type") or "").strip().lower()
+
+        if _is_valid_xpath(xpath):
+            normalized = dict(field)
+            normalized["xpath"] = str(xpath).strip()
+            valid_fields.append(normalized)
+            continue
+
+        # URL 字段可直接从任务 URL 回填，避免“必填但无 XPath”阻断整条流水线
+        if data_type == "url":
+            normalized = dict(field)
+            normalized["xpath"] = None
+            normalized["extraction_source"] = "task_url"
+            valid_fields.append(normalized)
+            continue
+
+        if required:
+            missing_required.append(field_name)
+        else:
+            missing_optional.append(field_name)
+
+    return valid_fields, missing_required, missing_optional
+
+
+def _set_state_error(state: dict[str, object], error: str) -> None:
+    """仅在首次出错时写入状态，避免覆盖更早的根因。"""
+    if not state.get("error"):
+        state["error"] = error
+
+
 
 async def run_pipeline(
     list_url: str,
@@ -36,6 +86,7 @@ async def run_pipeline(
     validate_count: int | None = None,
     consumer_concurrency: int | None = None,
     max_pages: int | None = None,
+    target_url_count: int | None = None,
     pipeline_mode: str | None = None,
 ) -> dict:
     """并发运行列表采集和详情提取。
@@ -50,6 +101,7 @@ async def run_pipeline(
         validate_count: 用于验证规则的详情页数量。
         consumer_concurrency: 消费者并发数（每个 worker 使用独立页面）。
         max_pages: 列表页最大翻页次数（可覆盖配置）。
+        target_url_count: 目标采集 URL 数量（可覆盖配置）。
         pipeline_mode: 流水线模式（如 'local' 或 'redis'）。
 
     Returns:
@@ -57,6 +109,8 @@ async def run_pipeline(
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    started_at = datetime.now()
+    run_id = started_at.strftime("%Y%m%d_%H%M%S_%f")
 
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
@@ -74,19 +128,23 @@ async def run_pipeline(
         output_dir=output_dir,
     )
 
-    items_path = output_path / "pipeline_extracted_items.jsonl"
-    summary_path = output_path / "pipeline_summary.json"
+    items_path = output_path / f"pipeline_extracted_items_{run_id}.jsonl"
+    summary_path = output_path / f"pipeline_summary_{run_id}.json"
+    latest_summary_path = output_path / "pipeline_summary.json"
 
     summary = {
+        "run_id": run_id,
         "list_url": list_url,
         "task_description": task_description,
         "mode": (pipeline_mode or config.pipeline.mode),
         "total_urls": 0,
         "success_count": 0,
         "consumer_concurrency": consumer_workers,
-        "started_at": datetime.now().isoformat(),
+        "target_url_count": target_url_count,
+        "started_at": started_at.isoformat(),
         "finished_at": "",
         "items_file": str(items_path),
+        "summary_file": str(summary_path),
     }
 
     producer_done = asyncio.Event()
@@ -108,15 +166,16 @@ async def run_pipeline(
                 page=list_session.page,
                 list_url=list_url,
                 task_description=task_description,
-                explore_count=config.url_collector.explore_count,
+                explore_count=explore_count,
                 output_dir=output_dir,
                 url_channel=channel,
                 redis_manager=redis_manager,
+                target_url_count=target_url_count,
             )
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
         except Exception as exc:  # noqa: BLE001
-            state["error"] = f"producer_error: {exc}"
+            _set_state_error(state, f"producer_error: {exc}")
             logger.info(f"[Pipeline] Producer failed: {exc}")
         finally:
             producer_done.set()
@@ -134,7 +193,7 @@ async def run_pipeline(
         urls = [t.url for t in tasks if t.url]
 
         if not urls:
-            state["error"] = "no_urls_for_exploration"
+            _set_state_error(state, "no_urls_for_exploration")
             logger.info("[Pipeline] No URLs collected for exploration.")
             xpath_ready.set()
             return
@@ -149,10 +208,29 @@ async def run_pipeline(
         )
 
         result = await extractor.run(urls=urls)
-        fields_config = result.to_extraction_config().get("fields", [])
-        if not fields_config:
-            state["error"] = "no_fields_config"
-            logger.info("[Pipeline] No fields config generated from exploration.")
+        raw_fields_config = result.to_extraction_config().get("fields", [])
+        fields_config, missing_required, missing_optional = _prepare_fields_config(
+            raw_fields_config
+        )
+
+        if missing_optional:
+            logger.info(
+                f"[Pipeline] Optional fields missing XPath and will be skipped: {missing_optional}"
+            )
+
+        if missing_required:
+            _set_state_error(
+                state,
+                f"required_fields_xpath_missing: {', '.join(missing_required)}",
+            )
+            logger.info(f"[Pipeline] Required fields missing XPath: {missing_required}")
+            # 必填字段缺失时直接阻断消费阶段，避免输出“看似成功但关键字段为空”的结果
+            state["fields_config"] = []
+            xpath_ready.set()
+            return
+        elif not fields_config:
+            _set_state_error(state, "no_valid_fields_config")
+            logger.info("[Pipeline] No valid fields config generated from exploration.")
         state["fields_config"] = fields_config
         xpath_ready.set()
 
@@ -162,7 +240,8 @@ async def run_pipeline(
         fields_config = state.get("fields_config") or []
         if not fields_config:
             # 如果没有生成规则，直接标记所有已领取的任务失败
-            await _fail_tasks(explore_tasks, "xpath_config_missing")
+            fail_reason = str(state.get("error") or "xpath_config_missing")
+            await _fail_tasks(explore_tasks, fail_reason)
             return
 
         logger.info(f"[Pipeline] Consumer workers: {consumer_workers}")
@@ -238,6 +317,7 @@ async def run_pipeline(
         if state.get("error"):
             summary["error"] = state.get("error")
         _write_summary(summary_path, summary)
+        _write_summary(latest_summary_path, summary)
         await list_session.stop()
         await detail_session.stop()
         await shutdown_browser_engine()

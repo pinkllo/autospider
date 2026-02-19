@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,6 +39,10 @@ from .field_decider import FieldDecider
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+def _escape_markup(text: str) -> str:
+    return (text or "").replace("[", "[[").replace("]", "]]")
 
 
 class FieldExtractor:
@@ -304,13 +309,32 @@ class FieldExtractor:
             result.xpath = xpath_result.get("xpath")
             result.xpath_candidates = xpath_result.get("xpath_candidates", [])
 
+            candidate_xpaths = []
             if result.xpath:
-                verified = await self._verify_xpath(result.xpath, field_text)
-                if verified:
-                    result.confidence = max(result.confidence, 0.9)
-                    logger.info(f"[FieldExtractor] XPath 验证通过: {result.xpath}")
-                else:
-                    logger.info("[FieldExtractor] XPath 验证失败，使用 LLM 提取的值")
+                candidate_xpaths.append(result.xpath)
+            for candidate in result.xpath_candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                xpath = candidate.get("xpath")
+                if isinstance(xpath, str) and xpath.strip():
+                    candidate_xpaths.append(xpath.strip())
+
+            best_xpath = await self._select_best_verified_xpath(
+                candidates=candidate_xpaths,
+                field=field,
+                expected_value=field_text,
+            )
+            if best_xpath:
+                if result.xpath and best_xpath != result.xpath:
+                    logger.info(
+                        f"[FieldExtractor] XPath 候选重选: {_escape_markup(result.xpath)} -> {_escape_markup(best_xpath)}"
+                    )
+                result.xpath = best_xpath
+                result.confidence = max(result.confidence, 0.9)
+                logger.info(f"[FieldExtractor] XPath 验证通过: {_escape_markup(result.xpath)}")
+            else:
+                logger.info("[FieldExtractor] XPath 验证失败，使用 LLM 提取的值")
+                result.xpath = None
 
     async def _navigate_to_field(
         self,
@@ -528,6 +552,20 @@ class FieldExtractor:
         # 获取页面 HTML
         html_content = await self.page.content()
 
+        # URL 字段优先按 href/src 等属性匹配，避免把脚本中的链接误定位到价格等可视文本节点
+        if (field.data_type or "").lower() == "url":
+            url_matches = self.fuzzy_searcher.search_url_in_html(html_content, target_text)
+            if url_matches:
+                logger.info(f"[FieldExtractor] URL 属性匹配: 找到 {len(url_matches)} 个候选")
+                selected_match = self._select_best_url_match(url_matches, target_text)
+                if selected_match:
+                    all_candidates = self._merge_xpath_candidates(url_matches, selected_match)
+                    return {
+                        "xpath": selected_match.element_xpath,
+                        "xpath_candidates": all_candidates,
+                        "match": selected_match,
+                    }
+
         # 模糊搜索
         matches = self.fuzzy_searcher.search_in_html(html_content, target_text)
 
@@ -540,10 +578,13 @@ class FieldExtractor:
         if len(matches) == 1:
             # 唯一匹配，直接使用
             match = matches[0]
-            logger.info(f"[FieldExtractor] 唯一匹配: xpath={match.element_xpath}")
+            logger.info(
+                f"[FieldExtractor] 唯一匹配: xpath={_escape_markup(match.element_xpath)}"
+            )
+            all_candidates = self._merge_xpath_candidates([match], match)
             return {
                 "xpath": match.element_xpath,
-                "xpath_candidates": [{"xpath": match.element_xpath, "priority": 1}],
+                "xpath_candidates": all_candidates,
                 "match": match,
             }
 
@@ -552,20 +593,18 @@ class FieldExtractor:
         selected_match = await self._disambiguate_matches(field, matches)
 
         if selected_match:
+            all_candidates = self._merge_xpath_candidates(matches, selected_match)
             return {
                 "xpath": selected_match.element_xpath,
-                "xpath_candidates": [
-                    {"xpath": m.element_xpath, "priority": i + 1} for i, m in enumerate(matches)
-                ],
+                "xpath_candidates": all_candidates,
                 "match": selected_match,
             }
 
         # 消歧失败，使用第一个匹配
+        all_candidates = self._merge_xpath_candidates(matches, matches[0])
         return {
             "xpath": matches[0].element_xpath,
-            "xpath_candidates": [
-                {"xpath": m.element_xpath, "priority": i + 1} for i, m in enumerate(matches)
-            ],
+            "xpath_candidates": all_candidates,
         }
 
     async def _disambiguate_matches(
@@ -628,6 +667,184 @@ class FieldExtractor:
 
         return None
 
+    def _select_best_url_match(self, matches: list[TextMatch], target_url: str) -> TextMatch | None:
+        if not matches:
+            return None
+        ranked = sorted(
+            matches,
+            key=lambda m: self._score_url_match(m, target_url),
+            reverse=True,
+        )
+        return ranked[0]
+
+    def _score_url_match(self, match: TextMatch, target_url: str) -> float:
+        score = float(match.similarity)
+        tag = (match.element_tag or "").lower()
+        attr = (match.source_attr or "").lower()
+        text = (match.text or "").lower()
+        content = (match.element_text_content or "").lower()
+
+        if attr == "href":
+            score += 0.2
+        elif attr in {"src", "data-href"}:
+            score += 0.1
+        elif attr == "content":
+            score -= 0.1
+
+        if tag == "link":
+            score += 0.25
+        elif tag == "a":
+            score += 0.2
+        elif tag == "meta":
+            score += 0.05
+        else:
+            score -= 0.05
+
+        if "canonical" in content:
+            score += 0.2
+        if "detail.tmall.com/item.htm" in text:
+            score += 0.1
+        if target_url and target_url.lower() == text:
+            score += 0.2
+        if match.element_xpath.startswith("//*[@id="):
+            score += 0.05
+        return score
+
+    def _merge_xpath_candidates(
+        self,
+        matches: list,
+        selected_match,
+    ) -> list[dict]:
+        """合并多个 TextMatch 的 xpath_candidates
+
+        策略：
+        - 优先放选中匹配的多策略候选（id/class/data-* 锚点等）
+        - 然后放其他匹配的主 XPath
+        - 去重并限制总数
+        """
+        candidates: list[dict] = []
+        seen: set[str] = set()
+        priority_counter = 1
+
+        # 首先：选中匹配的多策略候选
+        if hasattr(selected_match, "xpath_candidates") and selected_match.xpath_candidates:
+            for c in selected_match.xpath_candidates:
+                xpath = c.get("xpath", "") if isinstance(c, dict) else ""
+                if xpath and xpath not in seen:
+                    seen.add(xpath)
+                    candidates.append({
+                        "xpath": xpath,
+                        "priority": priority_counter,
+                        "strategy": c.get("strategy", "unknown"),
+                    })
+                    priority_counter += 1
+        else:
+            # 兜底：如果没有多策略候选，至少加入主 XPath
+            main_xpath = getattr(selected_match, "element_xpath", None)
+            if main_xpath and main_xpath not in seen:
+                seen.add(main_xpath)
+                candidates.append({"xpath": main_xpath, "priority": priority_counter})
+                priority_counter += 1
+
+        # 然后：其他匹配的多策略候选
+        for match in matches:
+            if match is selected_match:
+                continue
+            if hasattr(match, "xpath_candidates") and match.xpath_candidates:
+                for c in match.xpath_candidates:
+                    xpath = c.get("xpath", "") if isinstance(c, dict) else ""
+                    if xpath and xpath not in seen:
+                        seen.add(xpath)
+                        candidates.append({
+                            "xpath": xpath,
+                            "priority": priority_counter,
+                            "strategy": c.get("strategy", "unknown"),
+                        })
+                        priority_counter += 1
+            else:
+                main_xpath = getattr(match, "element_xpath", None)
+                if main_xpath and main_xpath not in seen:
+                    seen.add(main_xpath)
+                    candidates.append({"xpath": main_xpath, "priority": priority_counter})
+                    priority_counter += 1
+
+            if len(candidates) >= 20:
+                break
+
+        return candidates[:20]
+
+    async def _select_best_verified_xpath(
+        self,
+        candidates: list[str],
+        field: FieldDefinition,
+        expected_value: str,
+    ) -> str | None:
+        """在候选 XPath 中选取“复查通过且更稳定”的表达式。"""
+        unique_candidates: list[str] = []
+        seen: set[str] = set()
+        for xpath in candidates:
+            value = (xpath or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            unique_candidates.append(value)
+
+        best_xpath: str | None = None
+        best_score = float("-inf")
+        for xpath in unique_candidates[:8]:
+            verified = await self._verify_xpath(
+                xpath=xpath,
+                field=field,
+                expected_value=expected_value,
+            )
+            if not verified:
+                continue
+            stability = self._xpath_stability_score(xpath)
+            if stability > best_score:
+                best_score = stability
+                best_xpath = xpath
+        return best_xpath
+
+    def _xpath_stability_score(self, xpath: str) -> float:
+        """
+        对 XPath 做稳定性评分。
+        越依赖锚点属性（如 @id）分越高；越依赖深层数字索引分越低。
+        对吸顶/浮层/弹窗等易波动节点做额外惩罚。
+        """
+        value = (xpath or "").strip()
+        if not value:
+            return -10.0
+
+        lower = value.lower()
+        score = 0.0
+        if "@id=" in lower:
+            score += 4.0
+        if "@data-" in lower:
+            score += 1.5
+        if "@class" in lower:
+            score += 0.8
+        if lower.startswith("//*[@id="):
+            score += 0.8
+
+        numeric_index_count = len(re.findall(r"\[\d+\]", value))
+        score -= numeric_index_count * 0.25
+
+        depth = value.count("/")
+        if depth > 10:
+            score -= (depth - 10) * 0.08
+
+        if "//" in value[2:] and "@id=" not in lower and "@class" not in lower:
+            score -= 0.8
+
+        volatile_tokens = ("fixed", "sticky", "float", "popup", "modal", "dialog", "mask")
+        if any(token in lower for token in volatile_tokens):
+            score -= 2.0
+
+        if re.search(r'@id\s*=\s*["\'][^"\']*\d{6,}[^"\']*["\']', lower):
+            score -= 0.6
+
+        return score
+
     async def _highlight_candidates(self, candidates: list[dict]) -> None:
         """高亮候选元素"""
         js_code = """
@@ -671,36 +888,205 @@ class FieldExtractor:
         except Exception:
             pass
 
-    async def _verify_xpath(self, xpath: str, expected_value: str) -> bool:
+    async def _verify_xpath(
+        self,
+        xpath: str,
+        field: FieldDefinition,
+        expected_value: str,
+    ) -> bool:
         """
-        验证 XPath 是否能提取到预期值
+        验证 XPath 是否能提取到预期值（含二次复查）
 
         Args:
             xpath: XPath 表达式
+            field: 字段定义
             expected_value: 预期值
 
         Returns:
             验证是否通过
         """
         try:
-            # 使用 XPath 提取值
-            element = self.page.locator(f"xpath={xpath}").first
-            actual_value = await element.inner_text(timeout=3000)
+            first_ok, first_value = await self._verify_xpath_once(
+                xpath=xpath,
+                field=field,
+                expected_value=expected_value,
+            )
+            if not first_ok:
+                return False
 
-            # 标准化比较
-            actual_normalized = actual_value.strip().lower()
-            expected_normalized = expected_value.strip().lower()
+            # 复查：短暂等待后再次验证，避免 SPA 异步渲染导致的“瞬时命中”
+            await asyncio.sleep(0.35)
+            second_ok, second_value = await self._verify_xpath_once(
+                xpath=xpath,
+                field=field,
+                expected_value=expected_value,
+            )
+            if not second_ok:
+                return False
 
-            # 检查是否包含或相似
-            if expected_normalized in actual_normalized:
-                return True
-            if actual_normalized in expected_normalized:
-                return True
+            if (
+                first_value
+                and second_value
+                and self._normalize_text_for_compare(first_value)
+                != self._normalize_text_for_compare(second_value)
+            ):
+                logger.info("[FieldExtractor] XPath 复查失败：两次提取值不一致")
+                return False
 
-            # 使用模糊匹配
-            similarity = self.fuzzy_searcher._calculate_similarity(actual_value, expected_value)
-            return similarity >= 0.8
+            return True
 
         except Exception as e:
             logger.info(f"[FieldExtractor] XPath 验证异常: {e}")
             return False
+
+    async def _verify_xpath_once(
+        self,
+        xpath: str,
+        field: FieldDefinition,
+        expected_value: str,
+    ) -> tuple[bool, str | None]:
+        """
+        单次 XPath 验证：
+        1) 存在性与范围检查
+        2) 候选值匹配检查
+        3) 数据类型语义检查
+        4) 元素语义检查（避免按钮/导航等误命中）
+        """
+        locator = self.page.locator(f"xpath={xpath}")
+        count = await locator.count()
+        if count <= 0:
+            return False, None
+
+        # 命中范围过大通常意味着 XPath 过宽
+        if count > 20:
+            return False, None
+
+        max_samples = min(count, 6)
+        expected_normalized = self._normalize_text_for_compare(expected_value)
+        dtype = (field.data_type or "text").lower()
+        prefer_url = dtype == "url"
+
+        matched_values: list[str] = []
+        matched_tags: list[str] = []
+        for idx in range(max_samples):
+            node = locator.nth(idx)
+            actual_value = await self._read_xpath_value(node, prefer_url=prefer_url)
+            actual_value = (actual_value or "").strip()
+            if not actual_value:
+                continue
+
+            actual_normalized = self._normalize_text_for_compare(actual_value)
+            if expected_normalized:
+                if (
+                    expected_normalized in actual_normalized
+                    or actual_normalized in expected_normalized
+                ):
+                    matched_values.append(actual_value)
+                else:
+                    similarity = self.fuzzy_searcher._calculate_similarity(
+                        actual_value, expected_value
+                    )
+                    if similarity >= 0.8:
+                        matched_values.append(actual_value)
+            else:
+                matched_values.append(actual_value)
+
+            tag_name = await self._read_xpath_tag_name(node)
+            if tag_name:
+                matched_tags.append(tag_name)
+
+        if not matched_values:
+            return False, None
+
+        normalized_matches = {
+            self._normalize_text_for_compare(value) for value in matched_values if value
+        }
+        # 如果同一 XPath 命中多个“不同但都像正确答案”的值，视为范围过宽
+        if len(normalized_matches) > 1:
+            return False, None
+
+        selected_value = matched_values[0]
+        if not self._is_value_semantically_valid(selected_value, dtype):
+            return False, None
+
+        if self._is_xpath_semantically_suspicious(xpath, field, matched_tags):
+            logger.info("[FieldExtractor] XPath 复查失败：元素语义可疑（按钮/导航）")
+            return False, None
+
+        return True, selected_value
+
+    async def _read_xpath_value(self, element_locator, prefer_url: bool) -> str | None:
+        try:
+            if prefer_url:
+                for attr in ("href", "src", "data-href"):
+                    attr_val = await element_locator.get_attribute(attr, timeout=3000)
+                    if attr_val and attr_val.strip():
+                        return attr_val.strip()
+            value = await element_locator.inner_text(timeout=3000)
+            value = (value or "").strip()
+            if value:
+                return value
+        except Exception:
+            return None
+        return None
+
+    async def _read_xpath_tag_name(self, element_locator) -> str:
+        try:
+            value = await element_locator.evaluate("el => (el.tagName || '').toLowerCase()")
+            return str(value or "").strip().lower()
+        except Exception:
+            return ""
+
+    def _normalize_text_for_compare(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value or "").strip().lower()
+
+    def _is_xpath_semantically_suspicious(
+        self,
+        xpath: str,
+        field: FieldDefinition,
+        matched_tags: list[str],
+    ) -> bool:
+        dtype = (field.data_type or "text").lower()
+        if dtype == "url":
+            return False
+
+        interactive_tags = {"a", "button", "input", "select", "option", "label"}
+        lower_xpath = (xpath or "").lower()
+        if "/button" in lower_xpath or "/nav" in lower_xpath or "/header" in lower_xpath:
+            return True
+
+        if matched_tags and all(tag in interactive_tags for tag in matched_tags):
+            return True
+        return False
+
+    def _is_value_semantically_valid(self, value: str, data_type: str) -> bool:
+        text = (value or "").strip()
+        if not text:
+            return False
+
+        if data_type == "url":
+            return self._looks_like_url(text)
+        if data_type == "number":
+            return self._looks_like_number(text)
+        if data_type == "date":
+            return self._looks_like_date(text)
+        return True
+
+    def _looks_like_url(self, value: str) -> bool:
+        text = (value or "").strip().lower()
+        return bool(
+            text.startswith("http://")
+            or text.startswith("https://")
+            or text.startswith("/")
+        )
+
+    def _looks_like_number(self, value: str) -> bool:
+        return bool(re.fullmatch(r"[^\d\-+]*[-+]?\d[\d,\.\s]*[^\d]*", (value or "").strip()))
+
+    def _looks_like_date(self, value: str) -> bool:
+        text = (value or "").strip()
+        patterns = [
+            r"\d{4}[-/年]\d{1,2}([-/月]\d{1,2}日?)?",
+            r"\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?",
+        ]
+        return any(re.search(p, text) for p in patterns)
