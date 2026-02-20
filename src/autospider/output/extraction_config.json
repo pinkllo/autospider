@@ -1,0 +1,21 @@
+{
+  "fields": [
+    {
+      "name": "相关统一交易标识码",
+      "description": "统一交易标识码",
+      "xpath": null,
+      "xpath_validated": false,
+      "required": true,
+      "data_type": "text"
+    },
+    {
+      "name": "project_name",
+      "description": "项目名称（用于辅助验证和记录）",
+      "xpath": null,
+      "xpath_validated": false,
+      "required": false,
+      "data_type": "text"
+    }
+  ],
+  "created_at": "2026-02-20T16:49:06.602087"
+}

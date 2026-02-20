@@ -13,7 +13,6 @@ from ...common.som import (
     inject_and_scan,
     capture_screenshot_with_marks,
     build_mark_id_to_xpath_map,
-    format_marks_for_llm,
     set_overlay_visibility,
 )
 from ...common.types import AgentState, RunInput, ActionType
@@ -95,7 +94,6 @@ class NavigationHandler:
 
                 # 构建 mark_id -> xpath 映射
                 mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
-                marks_text = format_marks_for_llm(snapshot)
 
                 logger.info("[Nav] 发现 %s 个可交互元素", len(snapshot.marks))
             except Exception as e:
@@ -123,7 +121,6 @@ class NavigationHandler:
                 action = await self.decider.decide(
                     agent_state,
                     screenshot_base64,
-                    marks_text,
                     target_found_in_page=False,
                     scroll_info=scroll_info,
                     page=self.page,

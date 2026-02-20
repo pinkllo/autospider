@@ -15,7 +15,7 @@ from rich.table import Table
 from .common.browser import create_browser_session
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
-from .common.llm import TaskClarifier, DialogueMessage
+from .common.llm import TaskClarifier, DialogueMessage, ClarifiedTask
 from .common.logger import get_logger
 from .field import FieldDefinition
 from .pipeline import run_pipeline
@@ -161,6 +161,49 @@ def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
         )
     return table
 
+
+def _clarify_until_ready(
+    clarifier: TaskClarifier,
+    history: list[DialogueMessage],
+    max_turns: int,
+    *,
+    panel_title_prefix: str = "AI 澄清问题",
+) -> tuple[str, ClarifiedTask | None]:
+    """在限定轮数内执行澄清，直到 ready/reject/超时。"""
+    for turn in range(1, max_turns + 1):
+        result = run_async_safely(clarifier.clarify(history))
+
+        if result.status == "reject":
+            console.print(
+                Panel(
+                    f"[red]{result.reason or '该任务暂不支持自动执行'}[/red]",
+                    title="任务拒绝",
+                    style="red",
+                )
+            )
+            return "reject", None
+
+        if result.status == "ready" and result.task is not None:
+            return "ready", result.task
+
+        question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
+        console.print(
+            Panel(
+                question,
+                title=f"{panel_title_prefix} ({turn}/{max_turns})",
+                style="yellow",
+            )
+        )
+        answer = typer.prompt("你的回答").strip()
+        if not answer:
+            answer = "请按常见默认方案继续，并明确你的默认假设。"
+
+        history.append(DialogueMessage(role="assistant", content=question))
+        history.append(DialogueMessage(role="user", content=answer))
+
+    return "incomplete", None
+
+
 def _load_urls(urls_file: str) -> list[str]:
     path = Path(urls_file)
     if not path.exists():
@@ -282,6 +325,11 @@ def batch_collect_command(
         "--max-pages",
         help="最大翻页次数（覆盖配置）",
     ),
+    target_url_count: int | None = typer.Option(
+        None,
+        "--target-url-count",
+        help="目标采集 URL 数量（覆盖配置）",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless/--no-headless",
@@ -320,6 +368,7 @@ def batch_collect_command(
         Panel(
             f"[bold]配置文件:[/bold] {config_path}\n"
             f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
+            f"[bold]目标 URL 数:[/bold] {target_url_count if target_url_count is not None else '默认'}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}",
             title="批量收集器",
@@ -333,6 +382,7 @@ def batch_collect_command(
             _run_batch_collector(
                 config_path=config_path,
                 max_pages=max_pages,
+                target_url_count=target_url_count,
                 headless=headless,
                 output_dir=output_dir,
             )
@@ -605,39 +655,15 @@ def chat_pipeline_command(
         raise typer.Exit(1)
 
     history: list[DialogueMessage] = [DialogueMessage(role="user", content=initial_request)]
-    final_task = None
+    status, final_task = _clarify_until_ready(
+        clarifier,
+        history,
+        max_turns,
+        panel_title_prefix="AI 澄清问题",
+    )
 
-    for turn in range(1, max_turns + 1):
-        result = run_async_safely(clarifier.clarify(history))
-
-        if result.status == "reject":
-            console.print(
-                Panel(
-                    f"[red]{result.reason or '该任务暂不支持自动执行'}[/red]",
-                    title="任务拒绝",
-                    style="red",
-                )
-            )
-            raise typer.Exit(1)
-
-        if result.status == "ready" and result.task is not None:
-            final_task = result.task
-            break
-
-        question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
-        console.print(
-            Panel(
-                question,
-                title=f"AI 澄清问题 ({turn}/{max_turns})",
-                style="yellow",
-            )
-        )
-        answer = typer.prompt("你的回答").strip()
-        if not answer:
-            answer = "请按常见默认方案继续，并明确你的默认假设。"
-
-        history.append(DialogueMessage(role="assistant", content=question))
-        history.append(DialogueMessage(role="user", content=answer))
+    if status == "reject":
+        raise typer.Exit(1)
 
     if final_task is None:
         console.print(
@@ -649,71 +675,172 @@ def chat_pipeline_command(
         )
         raise typer.Exit(1)
 
-    try:
-        list_url = validate_url(final_task.list_url)
-        task_description = validate_task_description(final_task.task_description)
-        fields = _load_generated_fields(final_task.fields)
-    except (URLValidationError, ValidationError, ValueError) as e:
+    list_url = ""
+    task_description = ""
+    fields: list[FieldDefinition] = []
+    use_max_pages: int | None = None
+    use_target_url_count: int | None = None
+    use_consumer_concurrency: int | None = None
+    use_field_explore_count: int | None = None
+    use_field_validate_count: int | None = None
+
+    while True:
+        try:
+            list_url = validate_url(final_task.list_url)
+            task_description = validate_task_description(final_task.task_description)
+            fields = _load_generated_fields(final_task.fields)
+        except (URLValidationError, ValidationError, ValueError) as e:
+            console.print(
+                Panel(
+                    f"[red]{str(e)}[/red]",
+                    title="AI 结果校验失败",
+                    style="red",
+                )
+            )
+            raise typer.Exit(1)
+
+        use_max_pages = max_pages if max_pages is not None else final_task.max_pages
+        use_target_url_count = (
+            target_url_count
+            if target_url_count is not None
+            else final_task.target_url_count
+        )
+        use_consumer_concurrency = (
+            consumer_concurrency
+            if consumer_concurrency is not None
+            else final_task.consumer_concurrency
+        )
+        use_field_explore_count = (
+            field_explore_count
+            if field_explore_count is not None
+            else final_task.field_explore_count
+        )
+        use_field_validate_count = (
+            field_validate_count
+            if field_validate_count is not None
+            else final_task.field_validate_count
+        )
+        mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
+        intent_text = final_task.intent or "未提供"
+
         console.print(
             Panel(
-                f"[red]{str(e)}[/red]",
-                title="AI 结果校验失败",
-                style="red",
+                f"[bold]识别意图:[/bold] {intent_text}\n"
+                f"[bold]列表页 URL:[/bold] {list_url}\n"
+                f"[bold]任务描述:[/bold] {task_description}\n"
+                f"[bold]字段数量:[/bold] {len(fields)}\n"
+                f"[bold]最大翻页:[/bold] {use_max_pages if use_max_pages is not None else '默认'}\n"
+                f"[bold]目标 URL 数:[/bold] "
+                f"{use_target_url_count if use_target_url_count is not None else '默认'}\n"
+                f"[bold]字段探索数:[/bold] "
+                f"{use_field_explore_count if use_field_explore_count is not None else '默认'}\n"
+                f"[bold]字段校验数:[/bold] "
+                f"{use_field_validate_count if use_field_validate_count is not None else '默认'}\n"
+                f"[bold]消费者并发:[/bold] "
+                f"{use_consumer_concurrency if use_consumer_concurrency is not None else '默认'}\n"
+                f"[bold]模式:[/bold] {mode_text}\n"
+                f"[bold]无头模式:[/bold] {headless}\n"
+                f"[bold]输出目录:[/bold] {output_dir}",
+                title="AI 生成任务配置",
+                style="cyan",
             )
         )
-        raise typer.Exit(1)
+        console.print(_build_generated_fields_table(fields))
 
-    use_max_pages = max_pages if max_pages is not None else final_task.max_pages
-    use_target_url_count = (
-        target_url_count
-        if target_url_count is not None
-        else final_task.target_url_count
-    )
-    use_consumer_concurrency = (
-        consumer_concurrency
-        if consumer_concurrency is not None
-        else final_task.consumer_concurrency
-    )
-    use_field_explore_count = (
-        field_explore_count
-        if field_explore_count is not None
-        else final_task.field_explore_count
-    )
-    use_field_validate_count = (
-        field_validate_count
-        if field_validate_count is not None
-        else final_task.field_validate_count
-    )
-    mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
-    intent_text = final_task.intent or "未提供"
+        action = typer.prompt(
+            "请选择下一步 [1=开始执行, 2=补充需求并重新生成, 3=手动修改字段, 4=取消]",
+            default="1",
+        ).strip()
 
-    console.print(
-        Panel(
-            f"[bold]识别意图:[/bold] {intent_text}\n"
-            f"[bold]列表页 URL:[/bold] {list_url}\n"
-            f"[bold]任务描述:[/bold] {task_description}\n"
-            f"[bold]字段数量:[/bold] {len(fields)}\n"
-            f"[bold]最大翻页:[/bold] {use_max_pages if use_max_pages is not None else '默认'}\n"
-            f"[bold]目标 URL 数:[/bold] "
-            f"{use_target_url_count if use_target_url_count is not None else '默认'}\n"
-            f"[bold]字段探索数:[/bold] "
-            f"{use_field_explore_count if use_field_explore_count is not None else '默认'}\n"
-            f"[bold]字段校验数:[/bold] "
-            f"{use_field_validate_count if use_field_validate_count is not None else '默认'}\n"
-            f"[bold]消费者并发:[/bold] "
-            f"{use_consumer_concurrency if use_consumer_concurrency is not None else '默认'}\n"
-            f"[bold]模式:[/bold] {mode_text}\n"
-            f"[bold]无头模式:[/bold] {headless}\n"
-            f"[bold]输出目录:[/bold] {output_dir}",
-            title="AI 生成任务配置",
-            style="cyan",
+        if action == "1":
+            break
+
+        if action == "4":
+            logger.info("[yellow]已取消执行[/yellow]")
+            return
+
+        if action == "3":
+            if not fields:
+                console.print("[yellow]当前没有可编辑字段。[/yellow]")
+                continue
+
+            index_text = typer.prompt(
+                f"请输入要修改的字段序号（1-{len(fields)}）",
+                default="1",
+            ).strip()
+            try:
+                index = int(index_text)
+            except ValueError:
+                console.print("[yellow]序号必须是数字。[/yellow]")
+                continue
+            if index < 1 or index > len(fields):
+                console.print("[yellow]序号超出范围。[/yellow]")
+                continue
+
+            selected = fields[index - 1]
+            new_name = typer.prompt("字段 name", default=selected.name).strip() or selected.name
+            new_desc = (
+                typer.prompt("字段 description", default=selected.description).strip()
+                or selected.description
+            )
+            new_type = (
+                typer.prompt(
+                    "字段 type（text/number/date/url）",
+                    default=selected.data_type,
+                )
+                .strip()
+                .lower()
+            )
+            if new_type not in {"text", "number", "date", "url"}:
+                console.print("[yellow]字段 type 非法，已保留原值。[/yellow]")
+                new_type = selected.data_type
+            new_required = typer.confirm("是否必填（required）", default=selected.required)
+            new_example = typer.prompt("字段 example（可空）", default=selected.example or "").strip()
+            if not new_name or not new_desc:
+                console.print("[yellow]name/description 不能为空。[/yellow]")
+                continue
+
+            fields[index - 1] = FieldDefinition(
+                name=new_name,
+                description=new_desc,
+                required=new_required,
+                data_type=new_type,
+                example=new_example or None,
+            )
+            final_task.fields = fields
+            console.print("[green]字段已更新。[/green]")
+            continue
+
+        if action != "2":
+            console.print("[yellow]无效选项，请输入 1 / 2 / 3 / 4。[/yellow]")
+            continue
+
+        supplement = typer.prompt(
+            "请输入补充要求（示例：字段描述必须保留“相关统一交易标识码”）"
+        ).strip()
+        if not supplement:
+            console.print("[yellow]补充要求为空，保持当前配置。[/yellow]")
+            continue
+
+        history.append(DialogueMessage(role="user", content=supplement))
+        regen_status, regen_task = _clarify_until_ready(
+            clarifier,
+            history,
+            max_turns,
+            panel_title_prefix="AI 追问",
         )
-    )
-    console.print(_build_generated_fields_table(fields))
-
-    if not typer.confirm("是否确认并开始执行流水线？", default=True):
-        logger.info("[yellow]已取消执行[/yellow]")
-        return
+        if regen_status == "reject":
+            raise typer.Exit(1)
+        if regen_task is None:
+            console.print(
+                Panel(
+                    "[red]在限定轮数内仍未完成修正，请补充更明确的要求。[/red]",
+                    title="修正未完成",
+                    style="red",
+                )
+            )
+            raise typer.Exit(1)
+        final_task = regen_task
 
     try:
         run_result = run_async_safely(
@@ -893,6 +1020,11 @@ def collect_urls_command(
         "--max-pages",
         help="最大翻页次数（覆盖配置）",
     ),
+    target_url_count: int | None = typer.Option(
+        None,
+        "--target-url-count",
+        help="目标采集 URL 数量（覆盖配置）",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless/--no-headless",
@@ -943,6 +1075,7 @@ def collect_urls_command(
             f"[bold]任务描述:[/bold] {task}\n"
             f"[bold]探索数量:[/bold] {explore_count} 个详情页\n"
             f"[bold]最大翻页:[/bold] {max_pages if max_pages is not None else '默认'}\n"
+            f"[bold]目标 URL 数:[/bold] {target_url_count if target_url_count is not None else '默认'}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}"
             + (
@@ -981,6 +1114,7 @@ def collect_urls_command(
                     task=task,
                     explore_count=explore_count,
                     max_pages=max_pages,
+                    target_url_count=target_url_count,
                     headless=headless,
                     output_dir=output_dir,
                 )
@@ -1094,6 +1228,7 @@ async def _run_config_generator(
 async def _run_batch_collector(
     config_path: str,
     max_pages: int | None,
+    target_url_count: int | None,
     headless: bool,
     output_dir: str,
 ):
@@ -1111,6 +1246,7 @@ async def _run_batch_collector(
             return await batch_collect_urls(
                 page=session.page,
                 config_path=config_path,
+                target_url_count=target_url_count,
                 output_dir=output_dir,
             )
     finally:
@@ -1123,6 +1259,7 @@ async def _run_collector(
     task: str,
     explore_count: int,
     max_pages: int | None,
+    target_url_count: int | None,
     headless: bool,
     output_dir: str,
 ):
@@ -1142,6 +1279,7 @@ async def _run_collector(
                 list_url=list_url,
                 task_description=task,
                 explore_count=explore_count,
+                target_url_count=target_url_count,
                 output_dir=output_dir,
             )
     finally:

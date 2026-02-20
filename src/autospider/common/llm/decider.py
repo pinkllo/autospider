@@ -92,7 +92,6 @@ class LLMDecider:
         self,
         state: "AgentState",
         screenshot_base64: str,
-        marks_text: str,
         target_found_in_page: bool = False,
         scroll_info: ScrollInfo | None = None,
         page: "Page" | None = None,
@@ -104,7 +103,6 @@ class LLMDecider:
         Args:
             state: Agent 状态
             screenshot_base64: 带 SoM 标注的截图（Base64）
-            marks_text: 格式化的 marks 文本描述
             target_found_in_page: 页面中是否发现了目标文本
             scroll_info: 页面滚动状态信息
 
@@ -115,7 +113,6 @@ class LLMDecider:
         # 构建用户消息
         user_content = self._build_user_message(
             state,
-            marks_text,
             target_found_in_page,
             scroll_info,
             tab_context,
@@ -160,7 +157,6 @@ class LLMDecider:
                 "input": {
                     "system_prompt": system_prompt,
                     "user_content": user_content,
-                    "marks_text": marks_text,
                     "target_found_in_page": target_found_in_page,
                     "scroll_info": (
                         scroll_info.model_dump() if scroll_info is not None else None
@@ -360,7 +356,6 @@ class LLMDecider:
     def _build_user_message(
         self,
         state: "AgentState",
-        marks_text: str,
         target_found_in_page: bool = False,
         scroll_info: ScrollInfo | None = None,
         tab_context: dict[str, Any] | None = None,
@@ -478,9 +473,6 @@ class LLMDecider:
             if state.last_result.extracted_text:
                 last_info += f"- 提取内容: {state.last_result.extracted_text[:200]}\n"
             parts.append(last_info)
-
-        # 元素列表
-        parts.append(f"## 可交互元素列表\n{marks_text}")
 
         # 提示
         parts.append(

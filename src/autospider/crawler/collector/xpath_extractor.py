@@ -98,7 +98,7 @@ class XPathExtractor:
         segments = []
         
         # 匹配XPath节点段
-        pattern = r'(//?)([a-zA-Z*][\w-]*)(\[[^\]]+\])*'
+        pattern = r'(//?)([a-zA-Z*][\w-]*)((?:\[[^\]]+\])*)'
         
         for match in re.finditer(pattern, xpath):
             separator = match.group(1)

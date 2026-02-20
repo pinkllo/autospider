@@ -42,7 +42,8 @@ if TYPE_CHECKING:
 
 
 def _escape_markup(text: str) -> str:
-    return (text or "").replace("[", "[[").replace("]", "]]")
+    from rich.markup import escape
+    return escape(text or "")
 
 
 class FieldExtractor:

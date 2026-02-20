@@ -168,7 +168,6 @@ class PageGuard:
         # 启动轻量轮询，覆盖“无导航触发的风控弹窗（如滑块）”
         self._ensure_polling(page)
         
-        logger.debug("[PageGuard] 已挂载到当前页面（支持 iframe 检测）")
 
     def _ensure_polling(self, page: Page) -> None:
         """确保页面巡检轮询任务已启动。"""

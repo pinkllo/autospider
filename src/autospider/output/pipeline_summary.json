@@ -1,0 +1,16 @@
+{
+  "run_id": "20260220_164903_673687",
+  "list_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+  "task_description": "访问提供的 URL，识别列表页中的项目条目，提取前 10 个项目的详情链接或直接提取页面上的'统一交易标识码'字段。若标识码仅在详情页，则进入详情页提取；若在列表页直接可见，则直接采集。",
+  "mode": "redis",
+  "total_urls": 0,
+  "success_count": 0,
+  "consumer_concurrency": 3,
+  "target_url_count": 10,
+  "started_at": "2026-02-20T16:49:03.673687",
+  "finished_at": "2026-02-20T16:51:00.804453",
+  "items_file": "output\\pipeline_extracted_items_20260220_164903_673687.jsonl",
+  "summary_file": "output\\pipeline_summary_20260220_164903_673687.json",
+  "collected_urls": 10,
+  "error": "required_fields_xpath_missing: 相关统一交易标识码"
+}

@@ -233,7 +233,6 @@ class BrowserEngine:
                         await apply_stealth_async(new_page)
                     except Exception as e:
                         logger.debug(f"[Engine] 新页面应用 stealth_async 失败（可忽略）: {e}")
-                logger.debug(f"[Engine] 检测到新页面打开: {new_page.url}")
                 guard.attach_to_page(new_page)
                 # 新页面打开后立即执行一次巡检
                 asyncio.create_task(guard.run_inspection(new_page))

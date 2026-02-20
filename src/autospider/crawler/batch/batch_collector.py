@@ -41,6 +41,7 @@ class BatchCollector(BaseCollector):
         self,
         page: "Page",
         config_path: str | Path,
+        target_url_count: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
@@ -50,6 +51,7 @@ class BatchCollector(BaseCollector):
         Args:
             page: Playwright 页面对象
             config_path: 配置文件路径
+            target_url_count: 目标采集 URL 数量（可覆盖配置）
             output_dir: 输出目录
         """
         self.config_path = Path(config_path)
@@ -66,6 +68,7 @@ class BatchCollector(BaseCollector):
             output_dir=output_dir,
             url_channel=url_channel,
             redis_manager=redis_manager,
+            target_url_count=target_url_count,
         )
 
         # 配置持久化管理器
@@ -314,6 +317,7 @@ class BatchCollector(BaseCollector):
 async def batch_collect_urls(
     page: "Page",
     config_path: str | Path,
+    target_url_count: int | None = None,
     output_dir: str = "output",
 ) -> URLCollectorResult:
     """批量收集 URL 的便捷函数
@@ -321,6 +325,7 @@ async def batch_collect_urls(
     Args:
         page: Playwright 页面对象
         config_path: 配置文件路径
+        target_url_count: 目标采集 URL 数量（可覆盖配置）
         output_dir: 输出目录
 
     Returns:
@@ -329,6 +334,7 @@ async def batch_collect_urls(
     collector = BatchCollector(
         page=page,
         config_path=config_path,
+        target_url_count=target_url_count,
         output_dir=output_dir,
     )
     return await collector.collect_from_config()

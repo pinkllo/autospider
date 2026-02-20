@@ -1,0 +1,60 @@
+{
+  "list_page_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+  "task_description": "访问提供的 URL，识别列表页中的项目条目，提取前 10 个项目的详情链接或直接提取页面上的'统一交易标识码'字段。若标识码仅在详情页，则进入详情页提取；若在列表页直接可见，则直接采集。",
+  "collected_urls": [
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=3C61e9dc6b95002e4743b46444c1552d0246&projectCode=E4418002934a15115001&bizCode=3C61&siteCode=441800&publishDate=20260218100529&source=%E6%B8%85%E8%BF%9C%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E6%9C%8D%E5%8A%A1%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1992167822447534081",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=56cb7cef33884238a74dcc46c81c6a03&projectCode=X44020008320003fc3ew&bizCode=3C52&siteCode=440200&publishDate=20260220113000&source=%E9%9F%B6%E5%85%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A07",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=4faae639-a0d3-49be-bd0e-ceb5496ce442&projectCode=E4452002702001602677&bizCode=3C61&siteCode=445200&publishDate=20260217213200&source=%E6%8F%AD%E9%98%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E7%94%B5%E5%AD%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A02&nodeId=1942795796563861505",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=2c95348b9c285e83019c5a3cbed1003d&projectCode=E4408005351098112799&bizCode=3C14&siteCode=440800&publishDate=20260217111515&source=%E6%B9%9B%E6%B1%9F%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E7%B3%BB%E7%BB%9F&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1963510986625683478",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=3C61e6e9638225884b229369d44e83bff683&projectCode=E4451002744a12629001&bizCode=3C61&siteCode=445100&publishDate=20260219165334&source=%E6%BD%AE%E5%B7%9E%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=2018869123187179521",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=2c95348b9c285e83019c5a5d8dfd0083&projectCode=E4408005351098112799&bizCode=3C14&siteCode=440800&publishDate=20260217111515&source=%E6%B9%9B%E6%B1%9F%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E7%B3%BB%E7%BB%9F&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1963510986625683478",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=5c9da2c2a2bb4efa8398ff7e58fd14cd&projectCode=X44020008320003a239m&bizCode=3C52&siteCode=440200&publishDate=20260220110000&source=%E9%9F%B6%E5%85%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A07",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=3C6143c3753d1c7c46c58c3ae9eb6169d8c3&projectCode=E4418002934a15107001&bizCode=3C61&siteCode=441800&publishDate=20260217102529&source=%E6%B8%85%E8%BF%9C%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E6%9C%8D%E5%8A%A1%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1992167822447534081",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=3C6160a107c6a6f44f51addbf3f539c55f2b&projectCode=E4418002934a15109001&bizCode=3C61&siteCode=441800&publishDate=20260218144529&source=%E6%B8%85%E8%BF%9C%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E6%9C%8D%E5%8A%A1%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1992167822447534081",
+    "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=49e813508de246019ee48726c1847ea6&projectCode=X44020008320003fa3eu&bizCode=3C52&siteCode=440200&publishDate=20260220120000&source=%E9%9F%B6%E5%85%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A07&nodeId=2016338118513491972"
+  ],
+  "nav_steps": [],
+  "detail_visits": [
+    {
+      "list_page_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+      "detail_page_url": "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=56cb7cef33884238a74dcc46c81c6a03&projectCode=X44020008320003fc3ew&bizCode=3C52&siteCode=440200&publishDate=20260220113000&source=%E9%9F%B6%E5%85%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A07&nodeId=2016338118513491972",
+      "clicked_element_tag": "li",
+      "clicked_element_text": "新 乐昌市绿溪河内涝治理工程（第一期）施工 中标结果公示 工程建设 | 水利 结果公示 韶关市公共资",
+      "clicked_element_href": null,
+      "clicked_element_role": null,
+      "clicked_element_xpath_candidates": [
+        {
+          "xpath": "//*[@id='app']/article/main/section/ul/li[2]",
+          "priority": 5,
+          "strategy": "id-relative"
+        },
+        {
+          "xpath": "//body/div[1]/article/main/section/ul/li[2]",
+          "priority": 6,
+          "strategy": "relative"
+        }
+      ]
+    },
+    {
+      "list_page_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+      "detail_page_url": "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=5c9da2c2a2bb4efa8398ff7e58fd14cd&projectCode=X44020008320003a239m&bizCode=3C52&siteCode=440200&publishDate=20260220110000&source=%E9%9F%B6%E5%85%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A07&nodeId=2016338118513491972",
+      "clicked_element_tag": "li",
+      "clicked_element_text": "新 乐昌市绿溪河内涝治理工程（第一期）施工监理中标结果公示 工程建设 | 水利 结果公示 韶关市公共",
+      "clicked_element_href": null,
+      "clicked_element_role": null,
+      "clicked_element_xpath_candidates": [
+        {
+          "xpath": "//*[@id='app']/article/main/section/ul/li[3]",
+          "priority": 5,
+          "strategy": "id-relative"
+        },
+        {
+          "xpath": "//body/div[1]/article/main/section/ul/li[3]",
+          "priority": 6,
+          "strategy": "relative"
+        }
+      ]
+    }
+  ],
+  "created_at": "2026-02-20T16:51:00.792751"
+}

@@ -69,14 +69,15 @@ One-shot URL collection:
 autospider collect-urls \
   --list-url "https://example.com/list" \
   --task "Collect detail page URLs" \
-  --explore-count 3
+  --explore-count 3 \
+  --target-url-count 20
 ```
 
 Two-stage URL collection:
 
 ```bash
 autospider generate-config --list-url "https://example.com/list" --task "Collect detail URLs" --output output
-autospider batch-collect --config-path output/collection_config.json --output output
+autospider batch-collect --config-path output/collection_config.json --target-url-count 20 --output output
 ```
 
 Concurrent pipeline (URL collection + field extraction):
@@ -86,6 +87,7 @@ autospider pipeline-run \
   --list-url "https://example.com/list" \
   --task "Extract title and publish date from detail pages" \
   --fields-file fields.json \
+  --target-url-count 20 \
   --mode memory \
   --consumer-concurrency 3 \
   --output output
@@ -111,9 +113,3 @@ autospider field-extract \
 - `output/extracted_items.json`
 - `output/pipeline_extracted_items.jsonl`
 - `output/pipeline_summary.json`
-
-## Docs
-
-- `docs/README.md`
-- `docs/cli.py.md`
-- `docs/pipeline/runner.py.md`

@@ -1,8 +1,9 @@
-"""LLM 输入输出追踪日志（JSONL）。"""
+"""LLM 输入输出追踪日志（JSON 数组）。"""
 
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,10 +12,11 @@ from ..config import config
 from ..logger import get_logger
 
 logger = get_logger(__name__)
+_TRACE_WRITE_LOCK = threading.Lock()
 
 
 def append_llm_trace(component: str, payload: dict[str, Any]) -> None:
-    """追加一条 LLM 追踪记录到 JSONL 文件。"""
+    """追加一条 LLM 追踪记录到 JSON 文件。"""
     if not config.llm.trace_enabled:
         return
 
@@ -31,10 +33,52 @@ def append_llm_trace(component: str, payload: dict[str, Any]) -> None:
 
     try:
         trace_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(trace_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        with _TRACE_WRITE_LOCK:
+            records = _load_trace_records(trace_path)
+            records.append(record)
+            text = json.dumps(records, ensure_ascii=False, indent=2, default=str) + "\n"
+            trace_path.write_text(text, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"[LLMTrace] 写入失败（忽略）: {exc}")
+
+
+def _load_trace_records(path: Path) -> list[dict[str, Any]]:
+    """读取既有追踪记录，兼容 JSON 数组与历史 JSONL。"""
+    if not path.exists():
+        return []
+
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return _parse_jsonl_records(raw)
+
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, dict):
+        records = parsed.get("records")
+        if isinstance(records, list):
+            return [item for item in records if isinstance(item, dict)]
+    return []
+
+
+def _parse_jsonl_records(raw: str) -> list[dict[str, Any]]:
+    """解析历史 JSONL 文本。"""
+    records: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            records.append(item)
+    return records
 
 
 def _sanitize(value: Any, max_chars: int) -> Any:

@@ -1,0 +1,11 @@
+{
+  "status": "COMPLETED",
+  "pause_reason": null,
+  "list_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+  "task_description": "访问提供的 URL，识别列表页中的项目条目，提取前 10 个项目的详情链接或直接提取页面上的'统一交易标识码'字段。若标识码仅在详情页，则进入详情页提取；若在列表页直接可见，则直接采集。",
+  "current_page_num": 1,
+  "collected_count": 10,
+  "backoff_level": 0,
+  "consecutive_success_pages": 0,
+  "last_updated": "2026-02-20T16:51:00.801834"
+}

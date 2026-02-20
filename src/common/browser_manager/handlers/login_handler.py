@@ -425,18 +425,21 @@ class LoginHandler(BaseAnomalyHandler):
 
     async def _poll_user_confirmation(self, page: Page) -> None:
         """轮询所有页面检查用户是否点击了确认按钮"""
-        while not self._user_confirmed:
-            for p in page.context.pages:
-                if p.is_closed(): continue
-                try:
-                    confirmed = await p.evaluate("() => window.__guard_user_confirmed__ === true")
-                    if confirmed:
-                        self._user_confirmed = True
-                        logger.debug(f"用户点击了确认按钮 (在页面 {p.url})")
-                        return
-                except:
-                    pass
-            await asyncio.sleep(0.5)
+        try:
+            while not self._user_confirmed:
+                for p in page.context.pages:
+                    if p.is_closed(): continue
+                    try:
+                        confirmed = await p.evaluate("() => window.__guard_user_confirmed__ === true")
+                        if confirmed:
+                            self._user_confirmed = True
+                            logger.debug(f"用户点击了确认按钮 (在页面 {p.url})")
+                            return
+                    except:
+                        pass
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
 
     async def _update_banner_countdown(self, page: Page, remaining: int) -> None:
         """更新所有页面上的倒计时"""

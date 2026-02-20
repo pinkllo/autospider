@@ -1,0 +1,13 @@
+{
+  "nav_steps": [],
+  "common_detail_xpath": "//*[@id='app']/article/main/section/ul/li",
+  "pagination_xpath": "button:has(.icon-right):not([disabled])",
+  "jump_widget_xpath": {
+    "input": "[class*=\"pagination\"] input[type=\"number\"]",
+    "button": "button:has-text(\"跳转\")"
+  },
+  "list_url": "https://ygp.gdzwfw.gov.cn/#/44/jygg",
+  "task_description": "访问提供的 URL，识别列表页中的项目条目，提取前 10 个项目的详情链接或直接提取页面上的'统一交易标识码'字段。若标识码仅在详情页，则进入详情页提取；若在列表页直接可见，则直接采集。",
+  "created_at": "2026-02-20T16:50:58.524285",
+  "updated_at": "2026-02-20T16:50:58.524285"
+}

@@ -34,8 +34,8 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("xpath_pattern.yaml")
 
 
 def _escape_markup(text: str) -> str:
-    """避免日志渲染吞掉 XPath 中的 [..] 片段。"""
-    return (text or "").replace("[", "[[").replace("]", "]]")
+    from rich.markup import escape
+    return escape(text or "")
 
 
 class FieldXPathExtractor:
@@ -431,8 +431,9 @@ class FieldXPathExtractor:
                 strategy_groups.setdefault(strategy, []).append(xpaths)
 
         # 策略优先级顺序（稳定性从高到低）
+        # 注：id-class-relative 已被废弃，优先选用结构稳定且不含大量样式的 id-relative
         strategy_priority = [
-            "id", "testid", "id-class-relative", "class-anchor",
+            "id", "testid", "class-anchor",
             "id-relative", "data-attr",
         ]
 
@@ -609,7 +610,7 @@ class FieldXPathExtractor:
         
         # 匹配XPath节点段，支持 / 和 // 分隔
         # 模式：匹配 //tag[...] 或 /tag[...]
-        pattern = r'(//?)([a-zA-Z*][\w-]*)(\[[^\]]+\])*'
+        pattern = r'(//?)([a-zA-Z*][\w-]*)((?:\[[^\]]+\])*)'
         
         for match in re.finditer(pattern, xpath):
             separator = match.group(1)  # "/" 或 "//"

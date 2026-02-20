@@ -1,0 +1,98 @@
+{
+  "fields": [
+    {
+      "name": "相关统一交易标识码",
+      "description": "统一交易标识码",
+      "required": true,
+      "data_type": "text"
+    },
+    {
+      "name": "project_name",
+      "description": "项目名称（用于辅助验证和记录）",
+      "required": false,
+      "data_type": "text"
+    }
+  ],
+  "common_xpaths": [
+    {
+      "field_name": "相关统一交易标识码",
+      "xpath_pattern": "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+      "confidence": 1.0,
+      "validated": false,
+      "source_xpaths": [
+        "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span"
+      ]
+    },
+    {
+      "field_name": "project_name",
+      "xpath_pattern": "//*[@id=\"app\"]/main/div[3]/section[1]/div/div/div/table/tbody/tr[1]/td/span | //*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+      "confidence": 1.0,
+      "validated": false,
+      "source_xpaths": [
+        "//*[@id=\"app\"]/main/div[3]/section[1]/div/div/div/table/tbody/tr[1]/td/span",
+        "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+        "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span"
+      ]
+    }
+  ],
+  "exploration_records": [
+    {
+      "url": "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=3C61e9dc6b95002e4743b46444c1552d0246&projectCode=E4418002934a15115001&bizCode=3C61&siteCode=441800&publishDate=20260218100529&source=%E6%B8%85%E8%BF%9C%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E6%9C%8D%E5%8A%A1%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1992167822447534081",
+      "success": false,
+      "fields": [
+        {
+          "field_name": "相关统一交易标识码",
+          "value": null,
+          "xpath": null,
+          "confidence": 0.0
+        },
+        {
+          "field_name": "project_name",
+          "value": "清城区凤城街城市更新改造项目八期初步设计(清城区凤城街城市更新改造项目)",
+          "xpath": "//*[@id=\"app\"]/main/div[3]/section[1]/div/div/div/table/tbody/tr[1]/td/span",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "url": "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=4faae639-a0d3-49be-bd0e-ceb5496ce442&projectCode=E4452002702001602677&bizCode=3C61&siteCode=445200&publishDate=20260217213200&source=%E6%8F%AD%E9%98%B3%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E7%94%B5%E5%AD%90%E4%BA%A4%E6%98%93%E5%B9%B3%E5%8F%B0&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A02&nodeId=1942795796563861505",
+      "success": false,
+      "fields": [
+        {
+          "field_name": "相关统一交易标识码",
+          "value": null,
+          "xpath": null,
+          "confidence": 0.0
+        },
+        {
+          "field_name": "project_name",
+          "value": "揭阳市榕城区老旧小区改造提升工程项目（一期）设计施工总承包",
+          "xpath": "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "url": "https://ygp.gdzwfw.gov.cn/#/44/new/jygg/v3/A?noticeId=2c95348b9c285e83019c5a5d8dfd0083&projectCode=E4408005351098112799&bizCode=3C14&siteCode=440800&publishDate=20260217111515&source=%E6%B9%9B%E6%B1%9F%E5%B8%82%E5%85%AC%E5%85%B1%E8%B5%84%E6%BA%90%E4%BA%A4%E6%98%93%E7%B3%BB%E7%BB%9F&titleDetails=%E5%B7%A5%E7%A8%8B%E5%BB%BA%E8%AE%BE&classify=A01&nodeId=1963510986625683478",
+      "success": true,
+      "fields": [
+        {
+          "field_name": "相关统一交易标识码",
+          "value": "A01-12440800354771312A-20260212-000802-6",
+          "xpath": "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+          "confidence": 0.95
+        },
+        {
+          "field_name": "project_name",
+          "value": "湛江空港经济区起步区一期工程智慧物流产业园项目空港科创智慧中心（一期）工程暂估价材料(电梯)采购（第三次）",
+          "xpath": "//*[@id=\"app\"]/main[contains(@class, \"detail\")]/div[contains(@class, \"mb-10\")]/section[contains(@class, \"content-wrapper\")]/div[contains(@class, \"mt-2\")]/div[contains(@class, \"ant-descriptions\")]/div[contains(@class, \"ant-descriptions-view\")]/table/tbody/tr[contains(@class, \"ant-descriptions-row\")]/td[contains(@class, \"ant-descriptions-item-content\")]/span",
+          "confidence": 0.9
+        }
+      ]
+    }
+  ],
+  "validation_success": false,
+  "total_urls_explored": 3,
+  "total_urls_validated": 2,
+  "created_at": "2026-02-20T16:49:06.602087"
+}

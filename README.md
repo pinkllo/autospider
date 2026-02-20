@@ -1,17 +1,17 @@
 # AutoSpider
 
-AutoSpider 是一个基于 `LangGraph + Playwright + SoM(Set-of-Mark)` 的纯视觉网页采集 Agent。  
+AutoSpider 是一个基于 `LangGraph + Playwright + SoM(Set-of-Mark)` 的纯视觉网页采集 Agent。
 它可以自动完成列表页探索、详情页 URL 收集、字段规则归纳（XPath）以及批量抽取。
 
 ## 核心能力
 
-- 自动探索列表页，识别“目标详情链接”
-- 自动学习导航步骤与公共 XPath，减少手写规则
-- 支持两阶段采集：`generate-config` + `batch-collect`
-- 支持端到端并行流水线：`pipeline-run`
-- 字段抽取支持“探索 -> 验证 -> 批量提取”
-- 支持 `memory / file / redis` 三种 URL 通道模式
-- 支持断点续爬（本地进度 + Redis 队列）
+- **全自然语言对话交互**：支持 `chat-pipeline` 命令，通过多轮 AI 对话自动澄清需求、生成采集字段模型并一键运行流水线。
+- **自动登录与状态记忆**：内置异常检测与悬浮提示横幅，遇到需登录或验证码等情况实时等待用户人工接管处理，并自动持久化 Cookie 会话状态（`.auth/`）。
+- **智能目标分析系统**：自动识别列表页“目标详情链接”，自主学习全站导航步骤（含验证与提取强健稳定的多重属性 XPath），大大降低规则配置门槛。
+- **大规模并发流水线**：支持端到端并行生产者-消费者采集流水线 `pipeline-run`；内置支持 `memory / file / redis` 队列多通道及字段内省自动纠错恢复机制。
+- **核心组件分拆**：
+  - 各类流水线极解耦支持独立阶段模式：`generate-config` + `batch-collect`（两阶段超稳并支持原生进度/Redis断点续爬）。
+  - 给定 URL 直接解析抽取器 `field-extract` 支持完整的 "探索 -> 验证 -> 批量提取" 生命周期运行。
 
 ## 运行要求
 
@@ -87,13 +87,23 @@ REDIS_KEY_PREFIX=autospider:urls
 
 ## 快速开始
 
-### 1) 一键收集详情 URL（推荐先跑通）
+### 0) 全自然语言多轮交互执行（最新推荐）
+
+无需繁琐手写字段规则配置，通过对话直接引导程序自动完成爬虫开发及运行全过程：
+
+```bash
+# 可以 -r 带上核心需求，也可以不带参数由系统通过控制台发起追问
+autospider chat-pipeline -r "帮我采集 example 网站的公告列表，字段只需包含标题和发布时间"
+```
+
+### 1) 一键收集详情 URL（独立动作、推荐分析时使用）
 
 ```bash
 autospider collect-urls \
   --list-url "https://example.com/list" \
   --task "收集招标公告详情页 URL" \
-  --explore-count 3
+  --explore-count 3 \
+  --target-url-count 20
 ```
 
 ### 2) 两阶段模式（更稳）
@@ -108,6 +118,7 @@ autospider generate-config \
 # 阶段2：按配置批量采集
 autospider batch-collect \
   --config-path output/collection_config.json \
+  --target-url-count 20 \
   --output output
 ```
 
@@ -118,6 +129,7 @@ autospider pipeline-run \
   --list-url "https://example.com/list" \
   --task "采集详情页中的标题和发布时间" \
   --fields-file fields.json \
+  --target-url-count 20 \
   --mode memory \
   --consumer-concurrency 3 \
   --output output
@@ -134,6 +146,7 @@ autospider field-extract \
 
 ## 主要输出文件
 
+- `.auth/*`：框架在浏览器中全自动或人工辅助后记录的相关登录会话凭据记录。
 - `output/collection_config.json`：导航步骤、详情 XPath、分页 XPath 等配置
 - `output/collected_urls.json`：结构化 URL 收集结果
 - `output/urls.txt`：纯 URL 列表（一行一个）
@@ -162,9 +175,3 @@ src/autospider/
 pip install -e ".[dev]"
 pytest
 ```
-
-## 文档入口
-
-- 项目文档总览：`docs/README.md`
-- CLI 说明：`docs/cli.py.md`
-- 流水线说明：`docs/pipeline/runner.py.md`

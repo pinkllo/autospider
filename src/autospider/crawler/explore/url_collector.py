@@ -288,6 +288,7 @@ class URLCollector(BaseCollector):
         batch_collector = BatchCollector(
             page=self.page,
             config_path=self.output_dir / "collection_config.json",
+            target_url_count=self.target_url_count,
             output_dir=self.output_dir,
             url_channel=self.url_channel,
             redis_manager=self.redis_manager,

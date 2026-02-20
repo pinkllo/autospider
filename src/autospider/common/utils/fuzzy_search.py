@@ -334,10 +334,10 @@ class FuzzyTextSearcher:
                 relative_path = self._build_relative_path(anchor, element)
                 if relative_path:
                     _add(f"{anchor_expr}/{relative_path}", 3, "id-relative")
-                # 3b: class 增强的相对路径
-                class_relative = self._build_class_anchored_relative(anchor, element)
-                if class_relative:
-                    _add(f"{anchor_expr}/{class_relative}", 4, "id-class-relative")
+                # 3b: class 增强的相对路径 (已被废弃，不再使用，会产生极长且包含冗余外观样式的XPath)
+                # class_relative = self._build_class_anchored_relative(anchor, element)
+                # if class_relative:
+                #     _add(f"{anchor_expr}/{class_relative}", 4, "id-class-relative")
                 break
             anchor = anchor.getparent()
 
@@ -429,51 +429,61 @@ class FuzzyTextSearcher:
                 return f"//{tag}[@{attr_name}={self._to_xpath_literal(val)}]"
         return None
 
-    def _build_class_anchored_relative(
-        self, anchor: _Element, element: _Element
-    ) -> str | None:
-        """构建基于 class 增强的相对路径
-
-        在从 anchor 到 element 的路径中，如果中间某个节点有稳定 class，
-        用 class 断点替换数字索引，提升跨页面稳定性。
-        """
-        segments: list[str] = []
-        current = element
-
-        while current is not None and current is not anchor:
-            parent = current.getparent()
-            if parent is None:
-                return None
-
-            tag = str(current.tag)
-            stable_classes = self._get_stable_classes(current)
-
-            if stable_classes:
-                # 用 class 代替索引
-                cls = stable_classes[0]
-                segments.append(f"{tag}[contains(@class, {self._to_xpath_literal(cls)})]")
-            else:
-                siblings = [child for child in parent if child.tag == current.tag]
-                if len(siblings) > 1:
-                    index = siblings.index(current) + 1
-                    segments.append(f"{tag}[{index}]")
-                else:
-                    segments.append(tag)
-
-            current = parent
-
-        if current is not anchor:
-            return None
-
-        segments.reverse()
-        result = "/".join(segments)
-
-        # 如果和纯结构路径完全相同，说明没有 class 增强效果
-        plain = self._build_relative_path(anchor, element)
-        if result == plain:
-            return None
-
-        return result
+    # def _build_class_anchored_relative(
+    #     self, anchor: _Element, element: _Element
+    # ) -> str | None:
+    #     """构建基于 class 增强的相对路径
+    # 
+    #     在从 anchor 到 element 的路径中，如果中间某个节点有稳定 class，
+    #     用 class 断点替换数字索引，提升跨页面稳定性。
+    #     """
+    #     segments: list[str] = []
+    #     current = element
+    # 
+    #     while current is not None and current is not anchor:
+    #         parent = current.getparent()
+    #         if parent is None:
+    #             return None
+    # 
+    #         tag = str(current.tag)
+    #         stable_classes = self._get_stable_classes(current)
+    # 
+    #         if stable_classes:
+    #             cls = stable_classes[0]
+    #             same_class_siblings = []
+    #             for child in parent:
+    #                 if child.tag == current.tag:
+    #                     child_classes = self._get_stable_classes(child)
+    #                     if cls in child_classes:
+    #                         same_class_siblings.append(child)
+    #             
+    #             if len(same_class_siblings) > 1:
+    #                 index = same_class_siblings.index(current) + 1
+    #                 segments.append(f"{tag}[contains(@class, {self._to_xpath_literal(cls)})][{index}]")
+    #             else:
+    #                 segments.append(f"{tag}[contains(@class, {self._to_xpath_literal(cls)})]")
+    #         else:
+    #             siblings = [child for child in parent if child.tag == current.tag]
+    #             if len(siblings) > 1:
+    #                 index = siblings.index(current) + 1
+    #                 segments.append(f"{tag}[{index}]")
+    #             else:
+    #                 segments.append(tag)
+    # 
+    #         current = parent
+    # 
+    #     if current is not anchor:
+    #         return None
+    # 
+    #     segments.reverse()
+    #     result = "/".join(segments)
+    # 
+    #     # 如果和纯结构路径完全相同，说明没有 class 增强效果
+    #     plain = self._build_relative_path(anchor, element)
+    #     if result == plain:
+    #         return None
+    # 
+    #     return result
 
     def _is_searchable_element(self, element: _Element) -> bool:
         """过滤无效标签与噪声节点，减少误匹配。"""

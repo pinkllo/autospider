@@ -189,18 +189,21 @@ class ChallengeHandler(BaseAnomalyHandler):
                 pass
 
     async def _poll_user_confirmation(self, page: Page) -> None:
-        while not self._user_confirmed:
-            for p in page.context.pages:
-                if p.is_closed():
-                    continue
-                try:
-                    confirmed = await p.evaluate("() => window.__guard_challenge_confirmed__ === true")
-                    if confirmed:
-                        self._user_confirmed = True
-                        return
-                except Exception:
-                    pass
-            await asyncio.sleep(0.5)
+        try:
+            while not self._user_confirmed:
+                for p in page.context.pages:
+                    if p.is_closed():
+                        continue
+                    try:
+                        confirmed = await p.evaluate("() => window.__guard_challenge_confirmed__ === true")
+                        if confirmed:
+                            self._user_confirmed = True
+                            return
+                    except Exception:
+                        pass
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
 
     async def _remove_banner(self, page: Page) -> None:
         js = "() => document.getElementById('__guard_challenge_overlay__')?.remove()"
