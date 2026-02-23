@@ -11,6 +11,7 @@ from loguru import logger
 
 from .registry import get_handlers
 from .handlers.base import BaseAnomalyHandler
+from .task_utils import create_monitored_task
 
 
 class PageGuard:
@@ -155,14 +156,23 @@ class PageGuard:
             pass
 
         # 监听 frame 导航（主框架 + 登录相关 iframe）
-        page.on("framenavigated", lambda frame: 
-            asyncio.create_task(self.run_inspection(page)) 
-            if should_inspect(frame) else None
+        page.on(
+            "framenavigated",
+            lambda frame: create_monitored_task(
+                self.run_inspection(page),
+                task_name="PageGuard.framenavigated_inspection",
+            )
+            if should_inspect(frame)
+            else None,
         )
         
         # 监听 DOM 内容加载（捕获弹窗式登录）
-        page.on("domcontentloaded", lambda: 
-            asyncio.create_task(self.run_inspection(page))
+        page.on(
+            "domcontentloaded",
+            lambda: create_monitored_task(
+                self.run_inspection(page),
+                task_name="PageGuard.domcontentloaded_inspection",
+            ),
         )
 
         # 启动轻量轮询，覆盖“无导航触发的风控弹窗（如滑块）”
@@ -175,7 +185,10 @@ class PageGuard:
         task = self._poll_tasks.get(page_id)
         if task and not task.done():
             return
-        self._poll_tasks[page_id] = asyncio.create_task(self._poll_page(page))
+        self._poll_tasks[page_id] = create_monitored_task(
+            self._poll_page(page),
+            task_name="PageGuard.poll_page",
+        )
 
     async def _poll_page(self, page: Page) -> None:
         """页面巡检轮询：用于检测无导航触发的异常。"""

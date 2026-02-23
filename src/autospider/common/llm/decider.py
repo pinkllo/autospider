@@ -61,7 +61,7 @@ class LLMDecider:
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
             model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": False},
+            extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
         # 任务计划（由 planner 设置）

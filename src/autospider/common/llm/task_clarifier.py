@@ -110,7 +110,7 @@ class TaskClarifier:
             temperature=0.1,
             max_tokens=2048,
             model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": False},
+            extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
     async def clarify(self, history: list[DialogueMessage]) -> ClarificationResult:

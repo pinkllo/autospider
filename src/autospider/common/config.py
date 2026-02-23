@@ -39,6 +39,9 @@ class LLMConfig(BaseModel):
         default_factory=lambda: os.getenv("LLM_TRACE_FILE", "output/llm_trace.json")
     )
     trace_max_chars: int = Field(default_factory=lambda: int(os.getenv("LLM_TRACE_MAX_CHARS", "20000")))
+    enable_thinking: bool = Field(
+        default_factory=lambda: os.getenv("LLM_ENABLE_THINKING", "false").lower() == "true"
+    )
     temperature: float = 0.1
     max_tokens: int = 8192  # 增加 token 限制，避免 JSON 被截断
 
@@ -182,7 +185,7 @@ class FieldExtractorConfig(BaseModel):
     # 探索阶段的 URL 数量
     explore_count: int = Field(default_factory=lambda: int(os.getenv("FIELD_EXPLORE_COUNT", "3")))
     # 校验阶段的 URL 数量
-    validate_count: int = Field(default_factory=lambda: int(os.getenv("FIELD_VALIDATE_COUNT", "2")))
+    validate_count: int = Field(default_factory=lambda: int(os.getenv("FIELD_VALIDATE_COUNT", "4")))
     # 导航最大步数
     max_nav_steps: int = Field(default_factory=lambda: int(os.getenv("FIELD_MAX_NAV_STEPS", "20")))
     # 模糊匹配阈值
@@ -233,6 +236,31 @@ class PipelineConfig(BaseModel):
     )
 
 
+class PlannerConfig(BaseModel):
+    """任务规划器配置（多分类并行采集）"""
+
+    # 同时运行的子任务最大数量
+    max_concurrent_subtasks: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_MAX_CONCURRENT", "3"))
+    )
+    # 失败子任务的最大重试次数
+    max_subtask_retries: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_MAX_RETRIES", "2"))
+    )
+    # 全局进度文件名
+    progress_file: str = Field(
+        default_factory=lambda: os.getenv("PLANNER_PROGRESS_FILE", "task_progress.json")
+    )
+    # 单个子任务执行超时（分钟）
+    subtask_timeout_minutes: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_SUBTASK_TIMEOUT", "60"))
+    )
+    # 子任务内部详情抽取消费者并发数（默认 1，避免资源过载）
+    subtask_consumer_concurrency: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_SUBTASK_CONSUMER_CONCURRENCY", "1"))
+    )
+
+
 class Config(BaseModel):
     """全局配置"""
 
@@ -243,6 +271,7 @@ class Config(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    planner: PlannerConfig = Field(default_factory=PlannerConfig)
 
     @classmethod
     def load(cls) -> "Config":

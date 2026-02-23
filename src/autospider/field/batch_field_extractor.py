@@ -22,6 +22,7 @@ from .models import (
     FieldDefinition,
     BatchExtractionResult,
     PageExtractionRecord,
+    FieldExtractionResult,
 )
 from .field_extractor import FieldExtractor
 from .xpath_pattern import (
@@ -234,10 +235,11 @@ class BatchFieldExtractor:
             # 对每个公共 XPath 进行验证
             for xpath_info in result.common_xpaths:
                 field_def = field_def_map.get(xpath_info.field_name)
-                success, value = await validate_xpath_pattern(
+                success, value, trace = await validate_xpath_pattern(
                     page=self.page,
                     url=url,
                     xpath_pattern=xpath_info.xpath_pattern,
+                    fallback_xpaths=xpath_info.fallback_xpaths,
                     data_type=(field_def.data_type if field_def else None),
                     field_name=xpath_info.field_name,
                     field_description=(field_def.description if field_def else ""),
@@ -253,8 +255,32 @@ class BatchFieldExtractor:
                         f"    ✓ 字段 '{xpath_info.field_name}': {value[:50] if value else 'N/A'}..."
                     )
                     stats["success"] += 1
+                    record.fields.append(
+                        FieldExtractionResult(
+                            field_name=xpath_info.field_name,
+                            value=value,
+                            xpath=(trace.get("selected_xpath") or xpath_info.xpath_pattern),
+                            xpath_candidates=trace.get("attempts") or [],
+                            confidence=1.0,
+                            extraction_method="xpath",
+                        )
+                    )
                 else:
-                    logger.info(f"    ✗ 字段 '{xpath_info.field_name}': 验证失败")
+                    reason = trace.get("failure_reason") or "validation_failed"
+                    logger.info(
+                        f"    ✗ 字段 '{xpath_info.field_name}': 验证失败 ({reason})"
+                    )
+                    record.fields.append(
+                        FieldExtractionResult(
+                            field_name=xpath_info.field_name,
+                            value=value,
+                            xpath=xpath_info.xpath_pattern,
+                            xpath_candidates=trace.get("attempts") or [],
+                            confidence=0.0,
+                            extraction_method="xpath",
+                            error=reason,
+                        )
+                    )
                     if xpath_info.field_name in required_field_names:
                         all_required_fields_ok = False
 
@@ -300,6 +326,42 @@ class BatchFieldExtractor:
 
         # 保存详细结果
         detail_path = self.output_dir / "extraction_result.json"
+        validation_records = [
+            {
+                "url": r.url,
+                "success": r.success,
+                "fields": [
+                    {
+                        "field_name": f.field_name,
+                        "value": f.value,
+                        "xpath": f.xpath,
+                        "confidence": f.confidence,
+                        "error": f.error,
+                        "xpath_candidates": f.xpath_candidates,
+                    }
+                    for f in r.fields
+                ],
+            }
+            for r in result.validation_records
+        ]
+        validation_failures = [
+            {
+                "url": r["url"],
+                "fields": [
+                    {
+                        "field_name": f["field_name"],
+                        "xpath": f["xpath"],
+                        "error": f["error"],
+                        "xpath_candidates": f["xpath_candidates"],
+                    }
+                    for f in r["fields"]
+                    if f["error"]
+                ],
+            }
+            for r in validation_records
+            if any(f["error"] for f in r["fields"])
+        ]
+
         detail_data = {
             "fields": [
                 {
@@ -314,6 +376,7 @@ class BatchFieldExtractor:
                 {
                     "field_name": x.field_name,
                     "xpath_pattern": x.xpath_pattern,
+                    "fallback_xpaths": x.fallback_xpaths,
                     "confidence": x.confidence,
                     "validated": x.validated,
                     "source_xpaths": x.source_xpaths,
@@ -336,6 +399,8 @@ class BatchFieldExtractor:
                 }
                 for r in result.exploration_records
             ],
+            "validation_records": validation_records,
+            "validation_failures": validation_failures,
             "validation_success": result.validation_success,
             "total_urls_explored": result.total_urls_explored,
             "total_urls_validated": result.total_urls_validated,

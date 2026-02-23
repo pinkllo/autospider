@@ -125,6 +125,55 @@ class FuzzyTextSearcher:
 
         return matches
 
+    def search_strict_in_html(self, html_content: str, target_text: str) -> list[TextMatch]:
+        """
+        在 HTML 中进行严格文本匹配（全词/完整短语优先，不做相似度放宽）。
+
+        匹配策略：
+        1. 规范化后完全相等
+        2. 以“词边界”命中目标短语
+        3. 去空白后按完整短语包含（兼容中文被插入空格）
+        """
+        if not target_text or not html_content:
+            return []
+
+        try:
+            tree = lxml_html.fromstring(html_content)
+        except Exception:
+            try:
+                tree = lxml_html.fragment_fromstring(html_content, create_parent="div")
+            except Exception:
+                return []
+
+        matches: list[TextMatch] = []
+        position = 0
+
+        for element in tree.iter():
+            if not self._is_searchable_element(element):
+                continue
+
+            if element.text:
+                match = self._check_strict_text_match(
+                    element, element.text, target_text, position
+                )
+                if match:
+                    matches.append(match)
+                position += 1
+
+            if element.tail:
+                parent = element.getparent()
+                if parent is not None and self._is_searchable_element(parent):
+                    match = self._check_strict_text_match(
+                        parent, element.tail, target_text, position
+                    )
+                    if match:
+                        matches.append(match)
+                position += 1
+
+        # 严格匹配下通常相似度一致，优先按页面位置稳定排序
+        matches.sort(key=lambda m: (m.position, -len(m.text or "")))
+        return matches
+
     def search_url_in_html(self, html_content: str, target_url: str) -> list[TextMatch]:
         """
         在 HTML 中按 URL 属性（href/src/data-href/content）搜索目标链接。
@@ -217,6 +266,35 @@ class FuzzyTextSearcher:
 
         return None
 
+    def _check_strict_text_match(
+        self,
+        element: _Element,
+        text: str,
+        target_text: str,
+        position: int,
+    ) -> TextMatch | None:
+        """检查文本是否满足严格匹配（全词/短语匹配）。"""
+        text = text.strip()
+        if not text:
+            return None
+
+        if not self._is_strict_text_match(text, target_text):
+            return None
+
+        candidates = self._generate_xpath_candidates(element)
+        best_xpath = candidates[0]["xpath"] if candidates else self._generate_xpath(element)
+
+        return TextMatch(
+            text=text,
+            similarity=1.0,
+            element_xpath=best_xpath,
+            element_tag=element.tag,
+            element_text_content=self._get_full_text(element),
+            source_attr=None,
+            position=position,
+            xpath_candidates=candidates,
+        )
+
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """计算两个文本的相似度"""
         # 标准化文本：去除多余空白、转小写
@@ -241,6 +319,36 @@ class FuzzyTextSearcher:
         # 转小写
         text = text.lower()
         return text
+
+    def _normalize_text_no_ws(self, text: str) -> str:
+        """去空白归一化（用于修复中文被插入空格导致的匹配失败）。"""
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return ""
+        return re.sub(r"\s+", "", normalized)
+
+    def _is_strict_text_match(self, source_text: str, target_text: str) -> bool:
+        """严格文本匹配：全词/完整短语优先。"""
+        norm_source = self._normalize_text(source_text)
+        norm_target = self._normalize_text(target_text)
+        if not norm_source or not norm_target:
+            return False
+
+        if norm_source == norm_target:
+            return True
+
+        # ASCII 语境下按词边界匹配；避免把 abc 命中到 xabcx
+        escaped_target = re.escape(norm_target)
+        if re.search(rf"(?<![0-9a-z_]){escaped_target}(?![0-9a-z_])", norm_source):
+            return True
+
+        # 兼容中文/混排文本被插入空格：去空白后做短语包含
+        norm_source_no_ws = self._normalize_text_no_ws(source_text)
+        norm_target_no_ws = self._normalize_text_no_ws(target_text)
+        if norm_source_no_ws and norm_target_no_ws and norm_target_no_ws in norm_source_no_ws:
+            return True
+
+        return False
 
     def _generate_xpath(self, element: _Element) -> str:
         """

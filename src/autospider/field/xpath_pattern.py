@@ -58,7 +58,7 @@ class FieldXPathExtractor:
             temperature=0.0,
             max_tokens=1024,
             model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": False},
+            extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
     async def extract_common_pattern(
@@ -133,17 +133,6 @@ class FieldXPathExtractor:
                 )
                 common_pattern = candidate_pattern
 
-        union_pattern = self._build_union_pattern(xpaths)
-
-        # 仅在异构模板下且 union 明显提升覆盖时才使用 union，避免“范围过宽”
-        if union_pattern and self._should_prefer_union_pattern(
-            source_xpaths=xpaths,
-            current_pattern=common_pattern,
-            union_pattern=union_pattern,
-        ):
-            logger.info("[FieldXPathExtractor] 检测到异构模板，采用 union 模式")
-            common_pattern = union_pattern
-
         if not common_pattern or self._is_over_broad_pattern(common_pattern):
             common_pattern = await self._generate_common_pattern_with_llm(
                 field_name=field_name,
@@ -155,12 +144,12 @@ class FieldXPathExtractor:
             if candidate_pattern and not self._is_over_broad_pattern(candidate_pattern):
                 logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到多策略候选模式")
                 common_pattern = candidate_pattern
-            elif union_pattern and not self._is_over_broad_pattern(union_pattern):
-                logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到 union 模式")
-                common_pattern = union_pattern
             elif rule_pattern and not self._is_over_broad_pattern(rule_pattern):
                 logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到规则模式")
                 common_pattern = rule_pattern
+            elif dominant_pattern and not self._is_over_broad_pattern(dominant_pattern):
+                logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到主模板精确 XPath")
+                common_pattern = dominant_pattern
             else:
                 logger.info("[FieldXPathExtractor] ⚠ 公共 XPath 过宽，放弃该字段模式")
                 common_pattern = None
@@ -168,6 +157,23 @@ class FieldXPathExtractor:
         if not common_pattern:
             logger.info("[FieldXPathExtractor] ⚠ 未找到公共 XPath 模式")
             return None
+
+        common_pattern, inline_fallbacks = self._normalize_union_to_priority_chain(
+            xpath_pattern=common_pattern,
+            source_xpaths=xpaths,
+        )
+        fallback_xpaths = self._build_priority_fallback_xpaths(
+            source_xpaths=xpaths,
+            primary_xpath=common_pattern,
+        )
+        for xpath in inline_fallbacks:
+            if xpath not in fallback_xpaths:
+                fallback_xpaths.append(xpath)
+        if fallback_xpaths:
+            logger.info(
+                "[FieldXPathExtractor] 检测到异构模板，启用优先级回退: %s",
+                " -> ".join(_escape_markup(x) for x in fallback_xpaths),
+            )
 
         logger.info(
             f"[FieldXPathExtractor] ✓ 公共 XPath 模式: {_escape_markup(common_pattern)}"
@@ -179,6 +185,7 @@ class FieldXPathExtractor:
         return CommonFieldXPath(
             field_name=field_name,
             xpath_pattern=common_pattern,
+            fallback_xpaths=fallback_xpaths,
             source_xpaths=xpaths,
             confidence=confidence,
         )
@@ -278,6 +285,86 @@ class FieldXPathExtractor:
         candidates = [xpath for xpath, count in counter.items() if count == top_count]
         candidates.sort(key=self._xpath_stability_score, reverse=True)
         return candidates[0] if candidates else None
+
+    def _build_priority_fallback_xpaths(
+        self,
+        source_xpaths: list[str],
+        primary_xpath: str,
+    ) -> list[str]:
+        """构建“主 XPath 失败后再尝试”的回退链。"""
+        primary = (primary_xpath or "").strip()
+        if not primary:
+            return []
+
+        primary_norm = self._normalize_for_comparison(primary)
+        order_map: dict[str, int] = {}
+        counter: Counter[str] = Counter()
+
+        for idx, xpath in enumerate(source_xpaths):
+            value = (xpath or "").strip()
+            if not value:
+                continue
+            # 同构变体（仅索引不同）视为同一模板，不放入回退链
+            if self._normalize_for_comparison(value) == primary_norm:
+                continue
+            if value not in order_map:
+                order_map[value] = idx
+            counter[value] += 1
+
+        if not counter:
+            return []
+
+        ranked = sorted(
+            counter.keys(),
+            key=lambda xpath: (
+                -counter[xpath],
+                -self._xpath_stability_score(xpath),
+                order_map.get(xpath, 10**9),
+            ),
+        )
+        return ranked
+
+    def _normalize_union_to_priority_chain(
+        self,
+        xpath_pattern: str,
+        source_xpaths: list[str],
+    ) -> tuple[str, list[str]]:
+        """把 union XPath 规范为“主 XPath + fallback 列表”。
+
+        规则：按来源频次优先，其次稳定性分数。
+        """
+        pattern = (xpath_pattern or "").strip()
+        if " | " not in pattern:
+            return pattern, []
+
+        parts = [part.strip() for part in pattern.split(" | ") if part.strip()]
+        if not parts:
+            return "", []
+
+        unique_parts = list(dict.fromkeys(parts))
+        counter: Counter[str] = Counter((xpath or "").strip() for xpath in source_xpaths if xpath)
+        order_map: dict[str, int] = {}
+        for idx, xpath in enumerate(source_xpaths):
+            value = (xpath or "").strip()
+            if value and value not in order_map:
+                order_map[value] = idx
+
+        ranked = sorted(
+            unique_parts,
+            key=lambda xpath: (
+                -counter.get(xpath, 0),
+                -self._xpath_stability_score(xpath),
+                order_map.get(xpath, 10**9),
+            ),
+        )
+        primary = ranked[0]
+        fallbacks = ranked[1:]
+        logger.info(
+            "[FieldXPathExtractor] 检测到 union 表达式，规范为优先级回退链: %s -> %s",
+            _escape_markup(primary),
+            " -> ".join(_escape_markup(x) for x in fallbacks) if fallbacks else "(无)",
+        )
+        return primary, fallbacks
 
     def _should_prefer_union_pattern(
         self,
@@ -984,7 +1071,7 @@ class XPathValueLLMValidator:
             temperature=0.0,
             max_tokens=512,
             model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": False},
+            extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
     async def validate_value(
@@ -1068,16 +1155,46 @@ def _get_default_xpath_value_validator() -> XPathValueLLMValidator | None:
     return _DEFAULT_XPATH_VALUE_VALIDATOR
 
 
+def _build_xpath_fallback_chain(
+    xpath_pattern: str,
+    fallback_xpaths: list[str] | None = None,
+) -> list[str]:
+    """构建 XPath 优先级链：主 XPath 在前，fallback 依次在后。"""
+    primary = (xpath_pattern or "").strip()
+    if not primary:
+        return []
+
+    chain: list[str] = []
+    if " | " in primary:
+        # 兼容历史 union 配置：`a | b` -> `a -> b`
+        parts = [part.strip() for part in primary.split(" | ") if part.strip()]
+        chain.extend(parts)
+    else:
+        chain.append(primary)
+
+    raw_fallbacks = fallback_xpaths or []
+    for xpath in raw_fallbacks:
+        value = str(xpath or "").strip()
+        if not value:
+            continue
+        if value not in chain:
+            chain.append(value)
+
+    # 仅保留看起来合法的 XPath
+    return [xpath for xpath in chain if xpath.startswith("/")]
+
+
 async def validate_xpath_pattern(
     page: "Page",
     url: str,
     xpath_pattern: str,
+    fallback_xpaths: list[str] | None = None,
     expected_value: str | None = None,
     data_type: str | None = None,
     field_name: str | None = None,
     field_description: str | None = None,
     llm_validator: XPathValueLLMValidator | None = None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, dict]:
     """
     验证 XPath 模式是否能正确提取字段
 
@@ -1085,6 +1202,7 @@ async def validate_xpath_pattern(
         page: Playwright 页面对象
         url: 验证用的 URL
         xpath_pattern: XPath 模式
+        fallback_xpaths: 失败时按顺序尝试的回退 XPath 列表
         expected_value: 预期值（可选，用于对比）
         data_type: 字段类型（text/number/date/url）
         field_name: 字段名（用于 LLM 语义校验）
@@ -1092,98 +1210,141 @@ async def validate_xpath_pattern(
         llm_validator: 可复用的 LLM 校验器（可选）
 
     Returns:
-        (验证是否通过, 提取到的值)
+        (验证是否通过, 提取到的值, 校验轨迹信息)
     """
+    trace: dict = {
+        "url": url,
+        "xpath_pattern": xpath_pattern,
+        "fallback_xpaths": fallback_xpaths or [],
+        "xpath_chain": [],
+        "attempts": [],
+        "selected_xpath": None,
+        "failure_reason": "",
+    }
     try:
         # 导航到页面
         await page.goto(url, wait_until="domcontentloaded")
-
-        locator = page.locator(f"xpath={xpath_pattern}")
-        count = await locator.count()
-        if count <= 0:
-            return False, None
+        # 对 SPA 页面增加一次“稳定化等待”，降低首屏异步渲染导致的误判。
+        await _wait_for_page_settle(page)
+        xpath_chain = _build_xpath_fallback_chain(xpath_pattern, fallback_xpaths)
+        trace["xpath_chain"] = xpath_chain
+        if not xpath_chain:
+            trace["failure_reason"] = "invalid_xpath_chain"
+            return False, None, trace
 
         prefer_url = (data_type or "").lower() == "url"
-        max_candidates = min(count, 8)
-        candidates: list[str] = []
-        for idx in range(max_candidates):
-            value = await _read_candidate_value(locator.nth(idx), prefer_url=prefer_url)
-            if value:
-                candidates.append(value.strip())
-
-        # 去重与去空
-        uniq_values: list[str] = []
-        seen: set[str] = set()
-        for value in candidates:
-            if not value:
-                continue
-            if value in seen:
-                continue
-            seen.add(value)
-            uniq_values.append(value)
-
-        if not uniq_values:
-            return False, None
-
-        # 必须唯一：若匹配到多个不同候选值，直接判定 XPath 过宽
-        normalized_uniq_values = {_normalize_text(v) for v in uniq_values}
-        if len(normalized_uniq_values) != 1:
-            logger.info(
-                f"[validate_xpath_pattern] XPath 命中多个不同值，唯一性校验失败: {xpath_pattern}"
-            )
-            return False, None
-
-        selected_value = uniq_values[0]
-
-        # 如果有预期值，仅做相似度校验（唯一值前提下）
-        if expected_value:
-            expected_normalized = expected_value.strip().lower()
-            from difflib import SequenceMatcher
-
-            actual_normalized = selected_value.lower()
-            if (
-                expected_normalized in actual_normalized
-                or actual_normalized in expected_normalized
-            ):
-                pass
-            else:
-                similarity = SequenceMatcher(
-                    None, expected_normalized, actual_normalized
-                ).ratio()
-                if similarity < 0.7:
-                    return False, selected_value
-
-        # 先做通用类型校验，再做 LLM 语义校验
-        if not _is_semantically_valid(selected_value, data_type):
-            logger.info(
-                f"[validate_xpath_pattern] 值未通过类型语义校验: field={field_name or ''}, value={selected_value[:80]}"
-            )
-            return False, None
-
         validator = llm_validator or _get_default_xpath_value_validator()
         if validator is None:
             logger.info("[validate_xpath_pattern] LLM 校验器不可用，校验失败")
-            return False, None
+            trace["failure_reason"] = "llm_validator_unavailable"
+            return False, None, trace
 
-        llm_valid, normalized_value, llm_reason = await validator.validate_value(
-            field_name=field_name or "",
-            field_description=field_description or "",
-            field_data_type=(data_type or "text"),
-            page_url=url,
-            xpath_pattern=xpath_pattern,
-            extracted_value=selected_value,
-        )
-        if not llm_valid:
-            logger.info(
-                f"[validate_xpath_pattern] LLM 语义校验失败: field={field_name or ''}, reason={llm_reason or 'N/A'}"
+        last_value: str | None = None
+        for idx, xpath_candidate in enumerate(xpath_chain):
+            locator = page.locator(f"xpath={xpath_candidate}")
+            count = await _wait_for_locator_count(page, locator)
+            attempt: dict = {
+                "xpath": xpath_candidate,
+                "match_count": count,
+                "selected_value": None,
+                "status": "failed",
+                "reason": "",
+            }
+            if count <= 0:
+                attempt["reason"] = "no_match"
+                trace["attempts"].append(attempt)
+                continue
+
+            uniq_values = await _collect_unique_values_with_retry(
+                page=page,
+                locator=locator,
+                count=count,
+                prefer_url=prefer_url,
             )
-            return False, None
 
-        return True, normalized_value
+            if not uniq_values:
+                attempt["reason"] = "empty_value"
+                trace["attempts"].append(attempt)
+                continue
+
+            # 命中多个不同候选时，保留“使用第一个值继续语义验证”的策略
+            normalized_uniq_values = {_normalize_text(v) for v in uniq_values}
+            if len(normalized_uniq_values) != 1:
+                logger.info(
+                    "[validate_xpath_pattern] XPath 命中多个不同值，使用第一个候选继续校验: %s",
+                    xpath_candidate,
+                )
+
+            selected_value = uniq_values[0]
+            last_value = selected_value
+            attempt["selected_value"] = selected_value
+
+            # 如果有预期值，仅做相似度校验（未通过则尝试下一条 fallback）
+            if expected_value:
+                expected_normalized = expected_value.strip().lower()
+                from difflib import SequenceMatcher
+
+                actual_normalized = selected_value.lower()
+                if not (
+                    expected_normalized in actual_normalized
+                    or actual_normalized in expected_normalized
+                ):
+                    similarity = SequenceMatcher(
+                        None, expected_normalized, actual_normalized
+                    ).ratio()
+                    if similarity < 0.7:
+                        attempt["reason"] = "expected_value_mismatch"
+                        trace["attempts"].append(attempt)
+                        continue
+
+            # 先做通用类型校验，再做 LLM 语义校验（不通过则尝试下一条 fallback）
+            if not _is_semantically_valid(selected_value, data_type):
+                logger.info(
+                    "[validate_xpath_pattern] 值未通过类型语义校验: field=%s, value=%s",
+                    field_name or "",
+                    selected_value[:80],
+                )
+                attempt["reason"] = "type_semantic_invalid"
+                trace["attempts"].append(attempt)
+                continue
+
+            llm_valid, normalized_value, llm_reason = await validator.validate_value(
+                field_name=field_name or "",
+                field_description=field_description or "",
+                field_data_type=(data_type or "text"),
+                page_url=url,
+                xpath_pattern=xpath_candidate,
+                extracted_value=selected_value,
+            )
+            if not llm_valid:
+                logger.info(
+                    "[validate_xpath_pattern] LLM 语义校验失败: field=%s, reason=%s, xpath=%s",
+                    field_name or "",
+                    llm_reason or "N/A",
+                    xpath_candidate,
+                )
+                attempt["reason"] = f"llm_invalid: {llm_reason or 'N/A'}"
+                trace["attempts"].append(attempt)
+                continue
+
+            if idx > 0:
+                logger.info(
+                    "[validate_xpath_pattern] 主 XPath 未通过，回退 XPath 验证成功: %s",
+                    xpath_candidate,
+                )
+            attempt["status"] = "passed"
+            attempt["reason"] = "validated"
+            trace["attempts"].append(attempt)
+            trace["selected_xpath"] = xpath_candidate
+            return True, normalized_value, trace
+
+        trace["failure_reason"] = "all_candidates_failed"
+        return False, last_value, trace
 
     except Exception as e:
         logger.info(f"[validate_xpath_pattern] 验证失败: {e}")
-        return False, None
+        trace["failure_reason"] = f"exception: {e}"
+        return False, None, trace
 
 
 def _to_bool(value: object) -> bool:
@@ -1245,6 +1406,76 @@ def _is_semantically_valid(
         return _looks_like_date(text)
 
     return True
+
+
+async def _wait_for_page_settle(
+    page: "Page",
+    network_idle_timeout_ms: int = 8000,
+    settle_delay_ms: int = 300,
+) -> None:
+    """等待页面渲染趋于稳定（兼容 SPA 场景）。"""
+    try:
+        await page.wait_for_load_state("networkidle", timeout=network_idle_timeout_ms)
+    except Exception:
+        # 某些站点长连接会导致 networkidle 不可达，忽略并走兜底短等待。
+        pass
+    if settle_delay_ms > 0:
+        await page.wait_for_timeout(settle_delay_ms)
+
+
+async def _wait_for_locator_count(
+    page: "Page",
+    locator,
+    timeout_ms: int = 4000,
+    interval_ms: int = 250,
+) -> int:
+    """短轮询等待 locator 出现，降低异步渲染导致的 no_match。"""
+    elapsed = 0
+    count = await locator.count()
+    while count <= 0 and elapsed < timeout_ms:
+        await page.wait_for_timeout(interval_ms)
+        elapsed += interval_ms
+        count = await locator.count()
+    return count
+
+
+async def _collect_unique_values_with_retry(
+    page: "Page",
+    locator,
+    count: int,
+    prefer_url: bool,
+    retries: int = 3,
+    retry_interval_ms: int = 300,
+) -> list[str]:
+    """读取候选值并在短时间内重试，降低 empty_value 误判。"""
+    max_candidates = min(count, 8)
+    for attempt_idx in range(retries + 1):
+        candidates: list[str] = []
+        for candidate_idx in range(max_candidates):
+            value = await _read_candidate_value(
+                locator.nth(candidate_idx),
+                prefer_url=prefer_url,
+            )
+            if value:
+                candidates.append(value.strip())
+
+        uniq_values: list[str] = []
+        seen: set[str] = set()
+        for value in candidates:
+            if not value:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            uniq_values.append(value)
+
+        if uniq_values:
+            return uniq_values
+
+        if attempt_idx < retries:
+            await page.wait_for_timeout(retry_interval_ms)
+
+    return []
 
 
 async def _read_candidate_value(element_locator, prefer_url: bool) -> str | None:

@@ -151,6 +151,7 @@ async def run_pipeline(
     xpath_ready = asyncio.Event()
     state: dict[str, object] = {"fields_config": None, "error": None}
     explore_tasks: list[URLTask] = []
+    url_only_mode = len(fields) == 0
 
     # 初始化两个独立的浏览器会话，分别用于列表页和详情页，减少资源竞争
     list_session = BrowserSession(headless=headless)
@@ -183,6 +184,23 @@ async def run_pipeline(
 
     async def explorer() -> None:
         """探索者：首先获取适量的任务用于探索和验证 XPath 规则。"""
+        if url_only_mode:
+            # 兼容“仅收集 URL”场景：未提供字段定义时，自动回填 URL 字段，
+            # 避免因无 XPath 配置导致 consumer 被整体阻断。
+            logger.info("[Pipeline] 未提供字段定义，启用 URL-only 模式。")
+            state["fields_config"] = [
+                {
+                    "name": "url",
+                    "description": "详情页 URL",
+                    "xpath": None,
+                    "required": True,
+                    "data_type": "url",
+                    "extraction_source": "task_url",
+                }
+            ]
+            xpath_ready.set()
+            return
+
         needed = explore_count + validate_count
         tasks = await _collect_tasks(
             channel=channel,
@@ -320,7 +338,7 @@ async def run_pipeline(
         _write_summary(latest_summary_path, summary)
         await list_session.stop()
         await detail_session.stop()
-        await shutdown_browser_engine()
+# await shutdown_browser_engine()
 
     return summary
 

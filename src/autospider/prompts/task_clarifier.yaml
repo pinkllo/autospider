@@ -29,7 +29,7 @@ system_prompt: |
     "target_url_count": 10,
     "consumer_concurrency": 3,
     "field_explore_count": 3,
-    "field_validate_count": 2,
+    "field_validate_count": 4,
     "rejection_reason": "当 status=reject 时给出"
   }
 

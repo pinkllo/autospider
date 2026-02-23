@@ -69,6 +69,16 @@ def run_async_safely(coro):
         finally:
             if loop:
                 try:
+                    # 统一取消并回收残留后台任务，避免 loop.close() 后出现
+                    # "Future exception was never retrieved" 噪音。
+                    pending = list(asyncio.all_tasks(loop))
+                    if pending:
+                        for task in pending:
+                            task.cancel()
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except Exception:
+                    pass
+                try:
                     # 关闭所有异步生成器
                     loop.run_until_complete(loop.shutdown_asyncgens())
                     # 关闭所有异步 executor
@@ -1293,6 +1303,224 @@ def main():
     供 pyproject.toml 中 [project.scripts] 调用。
     """
     app()
+
+
+@app.command("multi-pipeline")
+def multi_pipeline_command(
+    site_url: str = typer.Option(
+        ...,
+        "--site-url",
+        "-u",
+        help="目标网站 URL（首页或列表页入口）",
+    ),
+    request: str = typer.Option(
+        "",
+        "--request",
+        "-r",
+        help="自然语言采集需求，如：爬取全站所有分类的数据",
+    ),
+    fields_json: str = typer.Option(
+        "",
+        "--fields-json",
+        help="字段定义 JSON（数组格式）",
+    ),
+    fields_file: str = typer.Option(
+        "",
+        "--fields-file",
+        help="字段定义 JSON 文件路径",
+    ),
+    max_concurrent: int | None = typer.Option(
+        None,
+        "--max-concurrent",
+        help="子任务最大并发数（默认取配置）",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--no-headless",
+        help="是否使用无头模式",
+    ),
+    output_dir: str = typer.Option(
+        "output",
+        "--output",
+        "-o",
+        help="输出目录",
+    ),
+):
+    """多分类并行采集流水线（Plan-Execute 架构）。
+
+    自动分析网站结构，将大任务拆分为多个子任务并行执行。
+
+    示例:
+        autospider multi-pipeline --site-url "https://example.com" --request "爬取全站所有分类的数据" --fields-file fields.json
+    """
+    if not request:
+        request = typer.prompt("请描述你的采集需求（如：爬取全站所有分类的数据）").strip()
+    if not request:
+        console.print(Panel("[red]需求不能为空[/red]", title="输入错误", style="red"))
+        raise typer.Exit(1)
+
+    try:
+        site_url = validate_url(site_url)
+    except (URLValidationError, ValidationError, ValueError) as e:
+        console.print(Panel(f"[red]{str(e)}[/red]", title="URL 验证错误", style="red"))
+        raise typer.Exit(1)
+
+    # 加载字段定义（可选）
+    import dataclasses
+    fields_dicts: list[dict] = []
+    if fields_json or fields_file:
+        try:
+            loaded = _load_fields(fields_json, fields_file)
+            fields_dicts = [dataclasses.asdict(f) for f in loaded]
+        except Exception as e:
+            console.print(Panel(f"[red]{str(e)}[/red]", title="字段加载错误", style="red"))
+            raise typer.Exit(1)
+
+    console.print(
+        Panel(
+            f"[bold]目标网站:[/bold] {site_url}\n"
+            f"[bold]采集需求:[/bold] {request}\n"
+            f"[bold]字段数量:[/bold] {len(fields_dicts) if fields_dicts else '待定'}\n"
+            f"[bold]最大并发:[/bold] {max_concurrent if max_concurrent else '默认'}\n"
+            f"[bold]无头模式:[/bold] {headless}\n"
+            f"[bold]输出目录:[/bold] {output_dir}",
+            title="多分类并行采集",
+            style="cyan",
+        )
+    )
+
+    try:
+        result = run_async_safely(
+            _run_multi_pipeline(
+                site_url=site_url,
+                request=request,
+                fields=fields_dicts,
+                max_concurrent=max_concurrent,
+                headless=headless,
+                output_dir=output_dir,
+            )
+        )
+
+        if result.get("error"):
+            console.print(
+                Panel(f"[red]{result['error']}[/red]", title="执行错误", style="red")
+            )
+            raise typer.Exit(1)
+
+        console.print(
+            Panel(
+                f"[green]多分类采集完成[/green]\n\n"
+                f"总子任务数: {result.get('total', 0)}\n"
+                f"成功: {result.get('completed', 0)}\n"
+                f"失败: {result.get('failed', 0)}\n"
+                f"总采集数: {result.get('total_collected', 0)}\n"
+                f"合并结果: {output_dir}/merged_results.jsonl\n"
+                f"进度文件: {output_dir}/task_progress.json",
+                title="执行完成",
+                style="green",
+            )
+        )
+
+    except KeyboardInterrupt:
+        logger.info("\n[yellow]用户中断[/yellow]")
+        raise typer.Exit(130)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(Panel(f"[red]{str(e)}[/red]", title="执行错误", style="red"))
+        raise typer.Exit(1)
+
+
+async def _run_multi_pipeline(
+    site_url: str,
+    request: str,
+    fields: list[dict],
+    max_concurrent: int | None,
+    headless: bool,
+    output_dir: str,
+) -> dict:
+    """多分类并行采集核心流程。"""
+    from .common.browser import BrowserSession, shutdown_browser_engine
+    from .crawler.planner import TaskPlanner
+    from .pipeline.dispatcher import TaskDispatcher
+    from .pipeline.aggregator import ResultAggregator
+
+    console = Console()
+
+    # Phase 1: 规划 — 分析网站结构
+    console.print("\n[bold cyan]📋 Phase 1: 分析网站结构...[/bold cyan]")
+
+    planner_session = BrowserSession(headless=headless)
+    await planner_session.start()
+
+    try:
+        planner = TaskPlanner(
+            page=planner_session.page,
+            site_url=site_url,
+            user_request=request,
+            output_dir=output_dir,
+        )
+        plan = await planner.plan()
+    finally:
+        await planner_session.stop()
+
+    if not plan.subtasks:
+        await shutdown_browser_engine()
+        return {"error": "未能识别出任何分类/子任务，请检查网站结构或手动指定"}
+
+    # 设置共享字段
+    plan.shared_fields = fields
+
+    # 展示分析结果
+    table = Table(title=f"识别到 {len(plan.subtasks)} 个子任务")
+    table.add_column("#", justify="right", width=4)
+    table.add_column("名称", min_width=15)
+    table.add_column("列表页 URL", min_width=40)
+    table.add_column("描述", min_width=20)
+
+    for i, st in enumerate(plan.subtasks, 1):
+        table.add_row(str(i), st.name, st.list_url[:60] + "...", st.task_description[:30])
+
+    console.print(table)
+
+    # 用户确认
+    action = typer.prompt(
+        "请确认 [1=开始执行, 2=取消]", default="1"
+    ).strip()
+
+    if action != "1":
+        await shutdown_browser_engine()
+        console.print("[yellow]已取消[/yellow]")
+        return {"error": "用户取消"}
+
+    # Phase 2: 调度执行
+    console.print("\n[bold cyan]🚀 Phase 2: 并行执行子任务...[/bold cyan]")
+
+    try:
+        dispatcher = TaskDispatcher(
+            plan=plan,
+            fields=fields,
+            output_dir=output_dir,
+            headless=headless,
+            max_concurrent=max_concurrent,
+        )
+        dispatch_result = await dispatcher.run()
+    finally:
+        await shutdown_browser_engine()
+
+    # Phase 3: 结果聚合
+    console.print("\n[bold cyan]📊 Phase 3: 聚合结果...[/bold cyan]")
+
+    aggregator = ResultAggregator()
+    aggregate_result = aggregator.aggregate(plan=plan, output_dir=output_dir)
+
+    # 合并结果
+    dispatch_result.update({
+        "merged_items": aggregate_result.get("total_items", 0),
+        "unique_urls": aggregate_result.get("unique_urls", 0),
+    })
+
+    return dispatch_result
 
 
 if __name__ == "__main__":

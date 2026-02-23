@@ -65,6 +65,7 @@ class CommonFieldXPath:
 
     field_name: str  # 字段名称
     xpath_pattern: str  # 公共 XPath 模式
+    fallback_xpaths: list[str] = field(default_factory=list)  # 失败时按顺序回退的 XPath
     source_xpaths: list[str] = field(default_factory=list)  # 来源 XPath 列表
     confidence: float = 0.0  # 置信度
     validated: bool = False  # 是否已验证
@@ -111,6 +112,12 @@ class BatchExtractionResult:
                         if f.name in xpath_map
                         and (not validation_available or xpath_map[f.name].validated)
                         else None
+                    ),
+                    "xpath_fallbacks": (
+                        xpath_map[f.name].fallback_xpaths
+                        if f.name in xpath_map
+                        and (not validation_available or xpath_map[f.name].validated)
+                        else []
                     ),
                     "xpath_validated": (
                         xpath_map[f.name].validated if f.name in xpath_map else False

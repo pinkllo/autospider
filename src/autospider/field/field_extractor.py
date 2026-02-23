@@ -567,14 +567,19 @@ class FieldExtractor:
                         "match": selected_match,
                     }
 
-        # 模糊搜索
-        matches = self.fuzzy_searcher.search_in_html(html_content, target_text)
+        # 目标字段消歧策略：先严格全词匹配，未命中再允许模糊匹配
+        match_mode = "strict"
+        matches = self.fuzzy_searcher.search_strict_in_html(html_content, target_text)
+        if not matches:
+            logger.info("[FieldExtractor] 全词匹配未命中，回退到模糊匹配")
+            matches = self.fuzzy_searcher.search_in_html(html_content, target_text)
+            match_mode = "fuzzy"
 
         if not matches:
             logger.info("[FieldExtractor] HTML 中未找到匹配")
             return None
 
-        logger.info(f"[FieldExtractor] 找到 {len(matches)} 个匹配")
+        logger.info(f"[FieldExtractor] {match_mode} 匹配找到 {len(matches)} 个候选")
 
         if len(matches) == 1:
             # 唯一匹配，直接使用
@@ -590,7 +595,7 @@ class FieldExtractor:
             }
 
         # 多个匹配，需要消歧
-        logger.info("[FieldExtractor] 多个匹配，启动消歧流程")
+        logger.info(f"[FieldExtractor] {match_mode} 多候选，启动消歧流程")
         selected_match = await self._disambiguate_matches(field, matches)
 
         if selected_match:
@@ -976,12 +981,8 @@ class FieldExtractor:
             if not actual_value:
                 continue
 
-            actual_normalized = self._normalize_text_for_compare(actual_value)
             if expected_normalized:
-                if (
-                    expected_normalized in actual_normalized
-                    or actual_normalized in expected_normalized
-                ):
+                if self._is_strict_value_match(actual_value, expected_value):
                     matched_values.append(actual_value)
                 else:
                     similarity = self.fuzzy_searcher._calculate_similarity(
@@ -1040,6 +1041,33 @@ class FieldExtractor:
 
     def _normalize_text_for_compare(self, value: str) -> str:
         return re.sub(r"\s+", " ", value or "").strip().lower()
+
+    def _normalize_text_no_ws_for_compare(self, value: str) -> str:
+        normalized = self._normalize_text_for_compare(value)
+        if not normalized:
+            return ""
+        return re.sub(r"\s+", "", normalized)
+
+    def _is_strict_value_match(self, actual_value: str, expected_value: str) -> bool:
+        """严格值匹配：先全词/短语，失败后才允许模糊。"""
+        actual = self._normalize_text_for_compare(actual_value)
+        expected = self._normalize_text_for_compare(expected_value)
+        if not actual or not expected:
+            return False
+
+        if actual == expected:
+            return True
+
+        escaped_expected = re.escape(expected)
+        if re.search(rf"(?<![0-9a-z_]){escaped_expected}(?![0-9a-z_])", actual):
+            return True
+
+        actual_no_ws = self._normalize_text_no_ws_for_compare(actual_value)
+        expected_no_ws = self._normalize_text_no_ws_for_compare(expected_value)
+        if actual_no_ws and expected_no_ws and expected_no_ws in actual_no_ws:
+            return True
+
+        return False
 
     def _is_xpath_semantically_suspicious(
         self,

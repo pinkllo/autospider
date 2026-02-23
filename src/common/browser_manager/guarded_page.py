@@ -21,6 +21,8 @@ from loguru import logger
 if TYPE_CHECKING:
     from .guard import PageGuard
 
+from .task_utils import create_monitored_task
+
 
 class GuardedPage:
     """
@@ -187,7 +189,10 @@ class GuardedContext:
              # 兜底挂载：防止 engine 层遗漏
              guard.attach_to_page(page)
              # 立即在后台触发一次检查
-             asyncio.create_task(guard.run_inspection(page))
+             create_monitored_task(
+                 guard.run_inspection(page),
+                 task_name="GuardedContext.wrap_page_inspection",
+             )
         
         return GuardedPage(page, guard)
 
@@ -234,15 +239,41 @@ class GuardedEventContextManager:
     def __init__(self, raw_manager: Any, wrap_fn: Any):
         self._raw_manager = raw_manager
         self._wrap_fn = wrap_fn
+        self._event_info = None
+        self._raw_value_future = None
+        self._value_consumed = False
 
     async def __aenter__(self):
         # 进入上下文管理器，获取原生 EventInfo
         # 这里返回的是 self，以便我们拦截 value 属性
         self._event_info = await self._raw_manager.__aenter__()
+        try:
+            self._raw_value_future = self._event_info.value
+        except Exception:
+            self._raw_value_future = None
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        return await self._raw_manager.__aexit__(exc_type, exc_val, exc_tb)
+        try:
+            return await self._raw_manager.__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            # 如果调用方没有消费 value，兜底回收 Future 异常，
+            # 避免关闭页面/上下文后出现 "Future exception was never retrieved"。
+            if not self._value_consumed and self._raw_value_future is not None:
+                raw_future = self._raw_value_future
+
+                def _consume_exception(done_future):
+                    try:
+                        done_future.exception()
+                    except BaseException:
+                        pass
+
+                try:
+                    raw_future.add_done_callback(_consume_exception)
+                    if raw_future.done():
+                        _consume_exception(raw_future)
+                except Exception:
+                    pass
 
     @property
     def value(self):
@@ -251,7 +282,8 @@ class GuardedEventContextManager:
         原生 implementation 返回的是一个 Awaitable[Page]。
         我们需要包装这个 Awaitable，在它 resolve 后 wrap 结果。
         """
-        raw_future = self._event_info.value
+        self._value_consumed = True
+        raw_future = self._raw_value_future or self._event_info.value
         
         async def wrapped_future():
             try:

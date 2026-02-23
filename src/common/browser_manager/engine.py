@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright, Browser, Playwright, Page
 from loguru import logger
 
 from .guard import PageGuard
+from .task_utils import create_monitored_task
 # 导入 handlers 包触发所有内置处理器的自动注册
 from . import handlers
 
@@ -223,7 +224,10 @@ class BrowserEngine:
             guard = PageGuard()
             guard.attach_to_page(page)
             # 在初始导航前运行一次检查
-            asyncio.create_task(guard.run_inspection(page))
+            create_monitored_task(
+                guard.run_inspection(page),
+                task_name="PageGuard.initial_inspection",
+            )
             
             # 监听新页面事件，自动为新页面挂载 Guard
             # 这确保了通过 window.open, target="_blank" 或中间键打开的新标签页也能被监控
@@ -235,10 +239,16 @@ class BrowserEngine:
                         logger.debug(f"[Engine] 新页面应用 stealth_async 失败（可忽略）: {e}")
                 guard.attach_to_page(new_page)
                 # 新页面打开后立即执行一次巡检
-                asyncio.create_task(guard.run_inspection(new_page))
+                create_monitored_task(
+                    guard.run_inspection(new_page),
+                    task_name="PageGuard.new_page_inspection",
+                )
 
             def _on_new_page(new_page: Page):
-                asyncio.create_task(_setup_new_page(new_page))
+                create_monitored_task(
+                    _setup_new_page(new_page),
+                    task_name="BrowserEngine.setup_new_page",
+                )
 
             context.on("page", _on_new_page)
 
@@ -250,8 +260,11 @@ class BrowserEngine:
             else:
                 yield page
         finally:
-            await page.close()
-            await context.close()
+            try:
+                await page.close()
+                await context.close()
+            except Exception:
+                pass
 
     async def close(self):
         """彻底关闭引擎"""

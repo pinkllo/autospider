@@ -138,14 +138,15 @@ class BatchXPathExtractor:
         # 依次提取配置中的每个字段
         for field in self.fields_config:
             name = field.get("name", "")
-            xpath = field.get("xpath")
+            xpath_chain = self._build_xpath_chain(field)
+            xpath = xpath_chain[0] if xpath_chain else None
             result = FieldExtractionResult(
                 field_name=name,
                 xpath=xpath,
                 extraction_method="xpath",
             )
 
-            if not xpath:
+            if not xpath_chain:
                 if self._should_fill_with_task_url(field):
                     result.value = url
                     result.confidence = 1.0
@@ -156,33 +157,55 @@ class BatchXPathExtractor:
                 record.fields.append(result)
                 continue
 
-            try:
-                # 检查页面状态并尝试提取
-                await self._ensure_page()
-                locator = self.page.locator(f"xpath={xpath}")
-                value, error = await self._extract_field_value(locator, field)
-                if value is not None:
-                    result.value = value
-                    result.confidence = 0.9
-                else:
-                    result.error = error or "XPath 未返回内容"
-            except Exception as e:
-                # 针对“页面已关闭”错误进行容错处理
-                if self._is_closed_error(e):
-                    try:
-                        logger.info(f"[BatchXPathExtractor] 页面关闭，尝试恢复并重新提取: {name}")
-                        await self._recover_and_reload(url)
-                        locator = self.page.locator(f"xpath={xpath}")
-                        value, error = await self._extract_field_value(locator, field)
-                        if value is not None:
-                            result.value = value
-                            result.confidence = 0.9
-                        else:
-                            result.error = error or "XPath 未返回内容"
-                    except Exception as retry_error:
-                        result.error = f"XPath 提取失败: {retry_error}"
-                else:
-                    result.error = f"XPath 提取失败: {e}"
+            last_error: str | None = None
+            for idx, xpath_candidate in enumerate(xpath_chain):
+                try:
+                    # 检查页面状态并尝试提取
+                    await self._ensure_page()
+                    locator = self.page.locator(f"xpath={xpath_candidate}")
+                    value, error = await self._extract_field_value(locator, field)
+                    if value is not None:
+                        result.value = value
+                        result.xpath = xpath_candidate
+                        result.confidence = 0.9
+                        if idx > 0:
+                            logger.info(
+                                "[BatchXPathExtractor] 字段 '%s' 主 XPath 未命中，回退成功: %s",
+                                name,
+                                xpath_candidate,
+                            )
+                        break
+                    last_error = error or "XPath 未返回内容"
+                except Exception as e:
+                    # 针对“页面已关闭”错误进行容错处理
+                    if self._is_closed_error(e):
+                        try:
+                            logger.info(
+                                "[BatchXPathExtractor] 页面关闭，尝试恢复并重新提取: %s",
+                                name,
+                            )
+                            await self._recover_and_reload(url)
+                            locator = self.page.locator(f"xpath={xpath_candidate}")
+                            value, error = await self._extract_field_value(locator, field)
+                            if value is not None:
+                                result.value = value
+                                result.xpath = xpath_candidate
+                                result.confidence = 0.9
+                                if idx > 0:
+                                    logger.info(
+                                        "[BatchXPathExtractor] 字段 '%s' 回退 XPath 重试成功: %s",
+                                        name,
+                                        xpath_candidate,
+                                    )
+                                break
+                            last_error = error or "XPath 未返回内容"
+                        except Exception as retry_error:
+                            last_error = f"XPath 提取失败: {retry_error}"
+                    else:
+                        last_error = f"XPath 提取失败: {e}"
+
+            if result.value is None:
+                result.error = last_error or "所有 XPath 候选均未命中"
 
             record.fields.append(result)
 
@@ -326,6 +349,29 @@ class BatchXPathExtractor:
 
     def _is_url_type(self, data_type: str) -> bool:
         return data_type == "url"
+
+    def _build_xpath_chain(self, field: dict) -> list[str]:
+        """构建字段 XPath 优先级链：主 XPath 在前，fallback 在后。"""
+        primary = str(field.get("xpath") or "").strip()
+        if not primary:
+            return []
+
+        chain: list[str] = []
+        if " | " in primary:
+            # 兼容历史 union 配置：`a | b` -> `a -> b`
+            parts = [part.strip() for part in primary.split(" | ") if part.strip()]
+            chain.extend(parts)
+        else:
+            chain.append(primary)
+
+        fallbacks_raw = field.get("xpath_fallbacks")
+        if isinstance(fallbacks_raw, list):
+            for xpath in fallbacks_raw:
+                value = str(xpath or "").strip()
+                if value and value not in chain:
+                    chain.append(value)
+
+        return [xpath for xpath in chain if xpath.startswith("/")]
 
     def _should_fill_with_task_url(self, field: dict) -> bool:
         source = str(field.get("extraction_source") or "").strip().lower()

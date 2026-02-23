@@ -117,5 +117,12 @@ class RedisURLChannel(URLChannel):
 
     async def close(self) -> None:
         if self._recover_task is not None:
-            self._recover_task.cancel()
+            task = self._recover_task
             self._recover_task = None
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass

@@ -13,6 +13,7 @@ from typing import Optional, List, Set
 from playwright.async_api import Page
 from loguru import logger
 from .base import BaseAnomalyHandler
+from ..task_utils import create_monitored_task
 
 # UI 样式配置
 _OVERLAY_STYLE = "position:fixed;top:0;left:0;width:100%;z-index:2147483647;font-family:sans-serif;text-align:center;padding:15px;box-shadow:0 4px 12px rgba(0,0,0,0.15);box-sizing:border-box;"
@@ -421,7 +422,10 @@ class LoginHandler(BaseAnomalyHandler):
             logger.error(f"[横幅] 遍历页面出错: {e}")
         
         # 监听用户点击确认按钮
-        asyncio.create_task(self._poll_user_confirmation(page))
+        create_monitored_task(
+            self._poll_user_confirmation(page),
+            task_name="LoginHandler.poll_user_confirmation",
+        )
 
     async def _poll_user_confirmation(self, page: Page) -> None:
         """轮询所有页面检查用户是否点击了确认按钮"""

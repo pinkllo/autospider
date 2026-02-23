@@ -14,6 +14,7 @@ from loguru import logger
 from playwright.async_api import Page
 
 from .base import BaseAnomalyHandler
+from ..task_utils import create_monitored_task
 
 
 CHALLENGE_SELECTORS = [
@@ -87,13 +88,18 @@ class ChallengeHandler(BaseAnomalyHandler):
         confirm_task = None
         try:
             await self._inject_banner(page)
-            confirm_task = asyncio.create_task(self._poll_user_confirmation(page))
+            confirm_task = create_monitored_task(
+                self._poll_user_confirmation(page),
+                task_name="ChallengeHandler.poll_user_confirmation",
+            )
             await self._wait_until_cleared(page)
         finally:
             if confirm_task and not confirm_task.done():
                 confirm_task.cancel()
                 try:
                     await confirm_task
+                except asyncio.CancelledError:
+                    pass
                 except Exception:
                     pass
             await self._remove_banner(page)

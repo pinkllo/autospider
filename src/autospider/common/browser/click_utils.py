@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
-
-from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -26,8 +25,8 @@ async def click_and_capture_new_page(
     """点击定位器并捕获新打开的页面（如果有）。
 
     说明：
-    - 优先使用 context.expect_page 监听新页面事件。
-    - 如果 expect_page 超时但页面数量增加，则回退到最后一个页面，作为延迟打开检测的兜底方案。
+    - 点击后短时间轮询 context.pages，检测是否出现新页面。
+    - 不使用 expect_page，避免事件 future 在关闭阶段残留未消费异常。
     - 此助手函数仅返回新页面；它不会切换或关闭页面。
     """
     # 获取当前上下文和页面数量，用于后续对比
@@ -35,21 +34,19 @@ async def click_and_capture_new_page(
     pages_before = len(context.pages)
 
     new_page: "Page | None" = None
-    try:
-        # 使用 context.expect_page 开启异步监听
-        # 这种方式比先点击再检查更可靠，因为它可以捕获点击瞬间触发的新页面事件
-        async with context.expect_page(timeout=expect_page_timeout_ms) as new_page_info:
-            await locator.click(timeout=click_timeout_ms)
-        # 获取新页面的对象
-        new_page = await new_page_info.value
-    except PlaywrightTimeout:
-        # 如果在 expect_page_timeout_ms 内没有捕获到新页面事件，则忽略超时异常
-        pass
+    await locator.click(timeout=click_timeout_ms)
 
-    # 兜底逻辑：如果 expect_page 没捕获到（可能是事件触发太晚或浏览器行为特殊），
-    # 但此时页面总数确实增加了，我们假设最后一个页面就是点击产生的新页面。
-    if new_page is None and len(context.pages) > pages_before:
-        new_page = context.pages[-1]
+    # 通过轮询页面数量检测新标签页，避免 expect_page 在关闭阶段残留未消费 Future。
+    wait_seconds = max(0.0, expect_page_timeout_ms / 1000)
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            if len(context.pages) > pages_before:
+                new_page = context.pages[-1]
+                break
+        except Exception:
+            break
+        await asyncio.sleep(0.05)
 
     if new_page is not None:
         try:
@@ -76,7 +73,7 @@ async def press_and_capture_new_page(
 
     说明：
     - 优先使用 locator.press；失败时回退到 page.keyboard.press。
-    - 如果 expect_page 超时但页面数量增加，则回退到最后一个页面。
+    - 通过轮询 context.pages 检测新页面，避免 expect_page 相关 future 噪音。
     - 此助手函数仅返回新页面；它不会切换或关闭页面。
     """
     context = page.context
@@ -84,25 +81,24 @@ async def press_and_capture_new_page(
 
     new_page: "Page | None" = None
     try:
-        async with context.expect_page(timeout=expect_page_timeout_ms) as new_page_info:
-            await locator.press(key, timeout=press_timeout_ms)
-        new_page = await new_page_info.value
-    except PlaywrightTimeout:
-        pass
+        await locator.press(key, timeout=press_timeout_ms)
     except Exception:
         # 如果元素无法直接接收按键，尝试使用全局键盘模拟
         try:
-            async with context.expect_page(timeout=expect_page_timeout_ms) as new_page_info:
-                await page.keyboard.press(key)
-            new_page = await new_page_info.value
-        except PlaywrightTimeout:
-            pass
+            await page.keyboard.press(key)
         except Exception:
             pass
 
-    # 兜底：按键触发新标签页但 expect_page 未捕获
-    if new_page is None and len(context.pages) > pages_before:
-        new_page = context.pages[-1]
+    wait_seconds = max(0.0, expect_page_timeout_ms / 1000)
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            if len(context.pages) > pages_before:
+                new_page = context.pages[-1]
+                break
+        except Exception:
+            break
+        await asyncio.sleep(0.05)
 
     if new_page is not None:
         try:
