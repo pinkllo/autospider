@@ -31,6 +31,9 @@ class FieldExtractionResult:
     confidence: float = 0.0  # 置信度 (0-1)
     extraction_method: str = "llm"  # 提取方法: llm, xpath, fuzzy_search
     error: str | None = None  # 错误信息（如果提取失败）
+    salvaged: bool = False  # 是否通过批处理挽救机制修复
+    salvage_reason: str | None = None  # 挽救阶段的结果原因（成功/失败）
+    salvage_trace: dict = field(default_factory=dict)  # 挽救过程轨迹
 
 
 @dataclass

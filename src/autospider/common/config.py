@@ -192,6 +192,18 @@ class FieldExtractorConfig(BaseModel):
     fuzzy_match_threshold: float = Field(
         default_factory=lambda: float(os.getenv("FIELD_FUZZY_THRESHOLD", "0.8"))
     )
+    # 批处理必填字段失败后是否启用 LLM 挽救
+    batch_salvage_enabled: bool = Field(
+        default_factory=lambda: os.getenv("FIELD_BATCH_SALVAGE_ENABLED", "true").lower() == "true"
+    )
+    # 单个页面最多尝试挽救的必填字段数量
+    batch_salvage_max_fields_per_page: int = Field(
+        default_factory=lambda: int(os.getenv("FIELD_BATCH_SALVAGE_MAX_FIELDS", "2"))
+    )
+    # 挽救时 LLM 返回值的最小置信度阈值
+    batch_salvage_min_confidence: float = Field(
+        default_factory=lambda: float(os.getenv("FIELD_BATCH_SALVAGE_MIN_CONFIDENCE", "0.6"))
+    )
 
 
 class PipelineConfig(BaseModel):

@@ -1,8 +1,8 @@
 """
 基于公共 XPath 的批量字段提取器
 
-该模块实现了一个高效的批量提取器，它不依赖 LLM 进行实时决策，
-而是直接使用预先生成的公共 XPath 模式在多个 URL 上执行抓取。
+该模块实现了一个高效的批量提取器，默认直接使用预先生成的公共 XPath 模式
+在多个 URL 上执行抓取；当必填字段在页面中整体失效时，可原地触发 LLM 挽救流程。
 主要特点：
 1. 性能高：直接使用 XPath 定位，无需视觉分析。
 2. 健壮性：内置页面关闭恢复机制和安全加载逻辑。
@@ -20,8 +20,13 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ..common.config import config
+from ..common.llm import LLMDecider
+from ..common.protocol import coerce_bool
+from ..common.som import capture_screenshot_with_marks
+from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
+from .field_decider import FieldDecider
 
-from .models import FieldExtractionResult, PageExtractionRecord
+from .models import FieldDefinition, FieldExtractionResult, PageExtractionRecord
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -64,6 +69,36 @@ class BatchXPathExtractor:
 
         # 记录每个字段是否为必填，用于判断页面提取是否成功
         self.required_fields = {f.get("name"): f.get("required", True) for f in fields_config}
+        self.fuzzy_searcher = FuzzyTextSearcher(
+            threshold=config.url_collector.mark_id_match_threshold
+        )
+
+        # 批处理兜底：必填字段失败后可原地唤起 LLM 挽救
+        self.batch_salvage_enabled = bool(config.field_extractor.batch_salvage_enabled)
+        self.batch_salvage_max_fields = max(
+            1, int(config.field_extractor.batch_salvage_max_fields_per_page)
+        )
+        self.batch_salvage_min_confidence = max(
+            0.0, min(1.0, float(config.field_extractor.batch_salvage_min_confidence))
+        )
+
+        self.salvage_llm_decider: LLMDecider | None = None
+        self.salvage_field_decider: FieldDecider | None = None
+        if self.batch_salvage_enabled:
+            try:
+                self.salvage_llm_decider = LLMDecider(
+                    api_key=config.llm.api_key,
+                    api_base=config.llm.api_base,
+                    model=config.llm.model,
+                )
+                self.salvage_field_decider = FieldDecider(
+                    page=self.page,
+                    decider=self.salvage_llm_decider,
+                )
+            except Exception as e:
+                # 若模型不可用，自动降级为纯 XPath 模式，避免阻塞批处理
+                self.batch_salvage_enabled = False
+                logger.info(f"[BatchXPathExtractor] 挽救模式初始化失败，已自动降级: {e}")
 
     async def run(self, urls: list[str]) -> dict:
         """
@@ -209,15 +244,266 @@ class BatchXPathExtractor:
 
             record.fields.append(result)
 
-        # 检查是否所有必填字段都成功提取
-        required_fields_ok = all(
+        required_fields_ok = self._required_fields_ok(record)
+        if not required_fields_ok:
+            await self._salvage_required_fields(record)
+            required_fields_ok = self._required_fields_ok(record)
+        record.success = required_fields_ok
+
+        return record
+
+    def _required_fields_ok(self, record: PageExtractionRecord) -> bool:
+        """判断当前页面是否已满足全部必填字段。"""
+        return all(
             record.get_field_value(name) is not None
             for name, required in self.required_fields.items()
             if required
         )
-        record.success = required_fields_ok
 
-        return record
+    def _collect_missing_required_fields(
+        self,
+        record: PageExtractionRecord,
+    ) -> list[tuple[dict, FieldExtractionResult]]:
+        """收集当前页面缺失值的必填字段。"""
+        missing: list[tuple[dict, FieldExtractionResult]] = []
+        for field in self.fields_config:
+            if not isinstance(field, dict):
+                continue
+            name = str(field.get("name") or "").strip()
+            if not name:
+                continue
+            if not bool(field.get("required", True)):
+                continue
+            result = record.get_field(name)
+            if result is None:
+                continue
+            if result.value is None:
+                missing.append((field, result))
+        return missing
+
+    def _to_field_definition(self, field: dict) -> FieldDefinition:
+        """将批处理字段配置转换为 FieldDecider 可消费的字段定义。"""
+        return FieldDefinition(
+            name=str(field.get("name") or "").strip(),
+            description=str(field.get("description") or "").strip(),
+            required=bool(field.get("required", True)),
+            data_type=str(field.get("data_type") or "text").strip().lower() or "text",
+            example=(str(field.get("example")) if field.get("example") is not None else None),
+        )
+
+    async def _salvage_required_fields(self, record: PageExtractionRecord) -> None:
+        """必填字段兜底：XPath 失败后原地唤起 LLM 提取并尝试动态重定位 XPath。"""
+        if not self.batch_salvage_enabled or not self.salvage_field_decider:
+            return
+
+        missing = self._collect_missing_required_fields(record)
+        if not missing:
+            return
+
+        await self._ensure_page()
+        # 页面对象在恢复后可能变化，保证 decider 始终绑定最新 page。
+        self.salvage_field_decider.page = self.page
+
+        try:
+            html_content = await self.page.content()
+        except Exception:
+            html_content = ""
+
+        logger.info(
+            "[BatchXPathExtractor] 必填字段触发挽救: missing=%s",
+            [str(field.get("name") or "") for field, _ in missing],
+        )
+
+        salvaged_count = 0
+        for field, result in missing:
+            if salvaged_count >= self.batch_salvage_max_fields:
+                break
+            ok = await self._salvage_single_required_field(
+                field=field,
+                result=result,
+                html_content=html_content,
+            )
+            if ok:
+                salvaged_count += 1
+
+    async def _salvage_single_required_field(
+        self,
+        field: dict,
+        result: FieldExtractionResult,
+        html_content: str,
+    ) -> bool:
+        """对单个必填字段执行挽救。"""
+        if not self.salvage_field_decider:
+            return False
+
+        field_def = self._to_field_definition(field)
+        value, confidence, reason, trace = await self._extract_value_by_agent(
+            field=field_def,
+            html_content=html_content,
+        )
+        result.salvage_trace = trace
+
+        if not value:
+            result.salvage_reason = reason
+            if not result.error:
+                result.error = f"salvage_failed: {reason}"
+            logger.info(
+                "[BatchXPathExtractor] 字段 '%s' 挽救失败: %s",
+                field_def.name,
+                reason,
+            )
+            return False
+
+        relocated_xpath, xpath_candidates = self._relocate_xpath_from_value(
+            html_content=html_content,
+            field=field,
+            value=value,
+        )
+        if relocated_xpath:
+            result.xpath = relocated_xpath
+            result.xpath_candidates = xpath_candidates
+        result.value = value
+        result.confidence = max(result.confidence, confidence)
+        result.extraction_method = "agent_salvage"
+        result.error = None
+        result.salvaged = True
+        result.salvage_reason = "salvage_succeeded"
+
+        logger.info(
+            "[BatchXPathExtractor] 字段 '%s' 挽救成功%s",
+            field_def.name,
+            f"，动态重定位 XPath: {relocated_xpath}" if relocated_xpath else "",
+        )
+        return True
+
+    async def _extract_value_by_agent(
+        self,
+        field: FieldDefinition,
+        html_content: str,
+    ) -> tuple[str | None, float, str, dict]:
+        """用 LLM 对当前页面进行字段补救提取。"""
+        if not self.salvage_field_decider:
+            return None, 0.0, "salvage_not_initialized", {}
+
+        trace: dict = {"field_name": field.name, "page_text_hit": None}
+
+        page_text_hit: bool | None = None
+        if html_content:
+            try:
+                page_text_hit = await self.salvage_field_decider.check_field_in_page_text(
+                    html_content, field
+                )
+            except Exception as e:
+                trace["page_text_check_error"] = str(e)
+        trace["page_text_hit"] = page_text_hit
+
+        try:
+            _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
+            extract_result = await self.salvage_field_decider.extract_field_text(
+                screenshot_base64=screenshot_base64,
+                field=field,
+            )
+        except Exception as e:
+            trace["extract_error"] = str(e)
+            return None, 0.0, "llm_extract_exception", trace
+
+        if not extract_result or extract_result.get("action") != "extract":
+            trace["raw_result"] = extract_result or {}
+            return None, 0.0, "llm_no_extract_action", trace
+
+        args = extract_result.get("args") if isinstance(extract_result.get("args"), dict) else {}
+        found = coerce_bool(args.get("found"))
+        if found is None:
+            found = bool(args.get("field_value") or args.get("field_text"))
+        if not found:
+            trace["raw_result"] = args
+            return None, 0.0, "llm_marked_not_found", trace
+
+        value = str(args.get("field_value") or args.get("field_text") or "").strip()
+        if not value:
+            trace["raw_result"] = args
+            return None, 0.0, "llm_empty_value", trace
+
+        confidence = self._coerce_confidence(args.get("confidence"), default=0.7)
+        trace["confidence"] = confidence
+
+        if confidence < self.batch_salvage_min_confidence:
+            return None, confidence, "llm_confidence_too_low", trace
+
+        data_type = (field.data_type or "text").strip().lower()
+        if not self._is_value_semantically_valid(value, data_type):
+            return None, confidence, "llm_value_semantic_invalid", trace
+
+        return value, confidence, "ok", trace
+
+    def _coerce_confidence(self, value: object, default: float = 0.7) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            confidence = default
+        return max(0.0, min(1.0, confidence))
+
+    def _is_value_semantically_valid(self, value: str, data_type: str) -> bool:
+        """按字段类型做轻量语义校验，避免挽救阶段写入明显错误值。"""
+        text = (value or "").strip()
+        if not text:
+            return False
+
+        if self._is_url_type(data_type):
+            return self._looks_like_url(text)
+        if data_type == "number":
+            return self._looks_like_number(text)
+        if data_type == "date":
+            return self._looks_like_date(text)
+
+        # text 类型放宽，仅限制超长噪声文本
+        return len(text) <= 300
+
+    def _relocate_xpath_from_value(
+        self,
+        html_content: str,
+        field: dict,
+        value: str,
+    ) -> tuple[str | None, list[dict]]:
+        """根据挽救得到的值反查 HTML，动态生成更贴近当前页面的 XPath。"""
+        if not html_content or not value:
+            return None, []
+
+        data_type = str(field.get("data_type") or "text").strip().lower()
+        matches: list[TextMatch]
+
+        if self._is_url_type(data_type):
+            matches = self.fuzzy_searcher.search_url_in_html(html_content, value)
+        else:
+            matches = self.fuzzy_searcher.search_strict_in_html(html_content, value)
+            if not matches:
+                threshold = max(0.72, self.fuzzy_searcher.threshold - 0.08)
+                matches = self.fuzzy_searcher.search_in_html(
+                    html_content,
+                    value,
+                    threshold=threshold,
+                )
+
+        if not matches:
+            return None, []
+
+        best_match = self._pick_best_text_match(matches, data_type=data_type)
+        if best_match is None:
+            return None, []
+        return best_match.element_xpath, best_match.xpath_candidates or []
+
+    def _pick_best_text_match(self, matches: list[TextMatch], data_type: str) -> TextMatch | None:
+        if not matches:
+            return None
+
+        scored: list[tuple[float, TextMatch]] = []
+        for match in matches[:10]:
+            semantic_score = self._score_candidate(match.text, data_type)
+            score = semantic_score + match.similarity
+            scored.append((score, match))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return scored[0][1] if scored else None
 
     async def _extract_field_value(self, locator, field: dict) -> tuple[str | None, str | None]:
         """按字段语义提取单个字段值，避免 XPath 过宽时误取 `.first`。"""
@@ -490,6 +776,9 @@ class BatchXPathExtractor:
                             "xpath": f.xpath,
                             "confidence": f.confidence,
                             "error": f.error,
+                            "salvaged": f.salvaged,
+                            "salvage_reason": f.salvage_reason,
+                            "salvage_trace": f.salvage_trace,
                         }
                         for f in r.fields
                     ],
@@ -528,7 +817,10 @@ class BatchXPathExtractor:
         logger.info(f"[BatchXPathExtractor] {status} - {record.url[:60]}...")
         for field_result in record.fields:
             if field_result.value:
-                logger.info(f"    • {field_result.field_name}: {field_result.value[:40]}...")
+                extra = " (salvaged)" if field_result.salvaged else ""
+                logger.info(
+                    f"    • {field_result.field_name}{extra}: {field_result.value[:40]}..."
+                )
             else:
                 logger.info(f"    • {field_result.field_name}: (未提取) {field_result.error or ''}")
 
