@@ -27,7 +27,6 @@ from .models import (
 from .field_extractor import FieldExtractor
 from .xpath_pattern import (
     FieldXPathExtractor,
-    XPathValueLLMValidator,
     validate_xpath_pattern,
 )
 
@@ -82,7 +81,8 @@ class BatchFieldExtractor:
             output_dir=output_dir,
         )
         self.xpath_extractor = FieldXPathExtractor()
-        self.xpath_value_validator = XPathValueLLMValidator()
+        # 语义校验已禁用：此处保持 None，validate_xpath_pattern 不再依赖 LLM。
+        self.xpath_value_validator = None
 
         # 任务映射：URL -> (stream_id, data_id)
         self.task_mapping: dict[str, tuple[str, str]] = {}

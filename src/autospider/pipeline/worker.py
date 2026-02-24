@@ -3,7 +3,7 @@
 每个 SubTaskWorker 为一个子任务提供独立的执行环境：
 - 独立输出目录
 - 复用现有 run_pipeline() 作为执行引擎
-- 强制 memory 模式（避免子任务间资源冲突）
+- 根据配置选择 memory/redis，并在 redis 下做子任务队列隔离
 """
 
 from __future__ import annotations
@@ -60,6 +60,14 @@ class SubTaskWorker:
 
         return fields
 
+    def _resolve_pipeline_transport(self) -> tuple[str, str | None]:
+        """解析子任务的通道模式与 redis key 前缀。"""
+        if config.redis.enabled:
+            base_prefix = (config.redis.key_prefix or "autospider:urls").strip()
+            redis_key_prefix = f"{base_prefix}:subtask:{self.subtask.id}"
+            return "redis", redis_key_prefix
+        return "memory", None
+
     async def execute(self) -> dict:
         """执行子任务，返回 run_pipeline 的汇总结果。"""
         # 延迟导入避免循环依赖
@@ -73,6 +81,13 @@ class SubTaskWorker:
             self.subtask.name,
             self.subtask.list_url[:80],
         )
+        pipeline_mode, redis_key_prefix = self._resolve_pipeline_transport()
+        logger.info(
+            "[Worker:%s] pipeline_mode=%s, redis_key_prefix=%s",
+            self.subtask.id,
+            pipeline_mode,
+            redis_key_prefix or "(N/A)",
+        )
 
         result = await run_pipeline(
             list_url=self.subtask.list_url,
@@ -83,7 +98,8 @@ class SubTaskWorker:
             max_pages=self.subtask.max_pages,
             target_url_count=self.subtask.target_url_count,
             consumer_concurrency=config.planner.subtask_consumer_concurrency,
-            pipeline_mode="memory",  # 子任务级别统一使用内存队列
+            pipeline_mode=pipeline_mode,
+            redis_key_prefix=redis_key_prefix,
         )
 
         logger.info(

@@ -88,6 +88,7 @@ async def run_pipeline(
     max_pages: int | None = None,
     target_url_count: int | None = None,
     pipeline_mode: str | None = None,
+    redis_key_prefix: str | None = None,
 ) -> dict:
     """并发运行列表采集和详情提取。
 
@@ -103,6 +104,7 @@ async def run_pipeline(
         max_pages: 列表页最大翻页次数（可覆盖配置）。
         target_url_count: 目标采集 URL 数量（可覆盖配置）。
         pipeline_mode: 流水线模式（如 'local' 或 'redis'）。
+        redis_key_prefix: redis 模式下的 key 前缀（可选，用于队列隔离）。
 
     Returns:
         包含执行摘要信息的字典。
@@ -126,6 +128,7 @@ async def run_pipeline(
     channel, redis_manager = create_url_channel(
         mode=pipeline_mode,
         output_dir=output_dir,
+        redis_key_prefix=redis_key_prefix,
     )
 
     items_path = output_path / f"pipeline_extracted_items_{run_id}.jsonl"

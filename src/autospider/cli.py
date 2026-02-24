@@ -226,6 +226,26 @@ def _load_urls(urls_file: str) -> list[str]:
     return urls
 
 
+def _resolve_chat_execution_mode(
+    mode: str,
+    *,
+    initial_request: str,
+    task_description: str,
+) -> str:
+    """解析 chat-pipeline 的执行引擎。
+
+    设计约定：chat-pipeline 是统一入口，auto 默认走 multi。
+    """
+    normalized = (mode or "auto").strip().lower()
+    if normalized in {"single", "multi"}:
+        return normalized
+
+    # auto: 默认使用 multi 作为统一入口（可覆盖为 single）
+    _ = initial_request
+    _ = task_description
+    return "multi"
+
+
 @app.command("generate-config")
 def generate_config_command(
     list_url: str = typer.Option(
@@ -615,6 +635,16 @@ def chat_pipeline_command(
         "--mode",
         help="通道模式: memory/file/redis",
     ),
+    execution_mode: str = typer.Option(
+        "auto",
+        "--execution-mode",
+        help="执行引擎: auto/single/multi",
+    ),
+    max_concurrent: int | None = typer.Option(
+        None,
+        "--max-concurrent",
+        help="多分类子任务最大并发数（用于 multi）",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless/--no-headless",
@@ -632,6 +662,17 @@ def chat_pipeline_command(
         console.print(
             Panel(
                 "[red]max-turns 必须 >= 1[/red]",
+                title="参数错误",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    normalized_execution_mode = execution_mode.strip().lower() if execution_mode else "auto"
+    if normalized_execution_mode not in {"auto", "single", "multi"}:
+        console.print(
+            Panel(
+                "[red]execution-mode 仅支持 auto / single / multi[/red]",
                 title="参数错误",
                 style="red",
             )
@@ -693,6 +734,8 @@ def chat_pipeline_command(
     use_consumer_concurrency: int | None = None
     use_field_explore_count: int | None = None
     use_field_validate_count: int | None = None
+    use_max_concurrent: int | None = None
+    resolved_execution_mode = "multi"
 
     while True:
         try:
@@ -731,7 +774,22 @@ def chat_pipeline_command(
             else final_task.field_validate_count
         )
         mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
+        resolved_execution_mode = _resolve_chat_execution_mode(
+            normalized_execution_mode,
+            initial_request=initial_request,
+            task_description=task_description,
+        )
+        execution_mode_text = (
+            f"{resolved_execution_mode} (auto)"
+            if normalized_execution_mode == "auto"
+            else resolved_execution_mode
+        )
         intent_text = final_task.intent or "未提供"
+        use_max_concurrent = (
+            max_concurrent
+            if max_concurrent is not None
+            else use_consumer_concurrency
+        )
 
         console.print(
             Panel(
@@ -749,6 +807,9 @@ def chat_pipeline_command(
                 f"[bold]消费者并发:[/bold] "
                 f"{use_consumer_concurrency if use_consumer_concurrency is not None else '默认'}\n"
                 f"[bold]模式:[/bold] {mode_text}\n"
+                f"[bold]执行引擎:[/bold] {execution_mode_text}\n"
+                f"[bold]多任务并发:[/bold] "
+                f"{use_max_concurrent if use_max_concurrent is not None else '默认'}\n"
                 f"[bold]无头模式:[/bold] {headless}\n"
                 f"[bold]输出目录:[/bold] {output_dir}",
                 title="AI 生成任务配置",
@@ -853,33 +914,67 @@ def chat_pipeline_command(
         final_task = regen_task
 
     try:
-        run_result = run_async_safely(
-            run_pipeline(
-                list_url=list_url,
-                task_description=task_description,
-                fields=fields,
-                output_dir=output_dir,
-                headless=headless,
-                explore_count=use_field_explore_count,
-                validate_count=use_field_validate_count,
-                consumer_concurrency=use_consumer_concurrency,
-                max_pages=use_max_pages,
-                target_url_count=use_target_url_count,
-                pipeline_mode=pipeline_mode.strip() or None,
+        if resolved_execution_mode == "single":
+            run_result = run_async_safely(
+                run_pipeline(
+                    list_url=list_url,
+                    task_description=task_description,
+                    fields=fields,
+                    output_dir=output_dir,
+                    headless=headless,
+                    explore_count=use_field_explore_count,
+                    validate_count=use_field_validate_count,
+                    consumer_concurrency=use_consumer_concurrency,
+                    max_pages=use_max_pages,
+                    target_url_count=use_target_url_count,
+                    pipeline_mode=pipeline_mode.strip() or None,
+                )
             )
-        )
 
-        console.print(
-            Panel(
-                f"[green]流水线完成[/green]\n\n"
-                f"总处理 URL: {run_result.get('total_urls', 0)}\n"
-                f"成功数量: {run_result.get('success_count', 0)}\n"
-                f"明细输出: {run_result.get('items_file', '')}\n"
-                f"汇总输出: {output_dir}/pipeline_summary.json",
-                title="执行完成",
-                style="green",
+            console.print(
+                Panel(
+                    f"[green]流水线完成（single）[/green]\n\n"
+                    f"总处理 URL: {run_result.get('total_urls', 0)}\n"
+                    f"成功数量: {run_result.get('success_count', 0)}\n"
+                    f"明细输出: {run_result.get('items_file', '')}\n"
+                    f"汇总输出: {output_dir}/pipeline_summary.json",
+                    title="执行完成",
+                    style="green",
+                )
             )
-        )
+        else:
+            if pipeline_mode.strip():
+                logger.info("[chat-pipeline] multi 模式下忽略 --mode 参数。")
+            import dataclasses
+
+            fields_dicts = [dataclasses.asdict(f) for f in fields]
+            multi_request = (initial_request or task_description).strip()
+            multi_result = run_async_safely(
+                _run_multi_pipeline(
+                    site_url=list_url,
+                    request=multi_request,
+                    fields=fields_dicts,
+                    max_concurrent=use_max_concurrent,
+                    headless=headless,
+                    output_dir=output_dir,
+                )
+            )
+            if multi_result.get("error"):
+                raise RuntimeError(str(multi_result.get("error")))
+
+            console.print(
+                Panel(
+                    f"[green]流水线完成（multi）[/green]\n\n"
+                    f"总子任务数: {multi_result.get('total', 0)}\n"
+                    f"成功: {multi_result.get('completed', 0)}\n"
+                    f"失败: {multi_result.get('failed', 0)}\n"
+                    f"总采集数: {multi_result.get('total_collected', 0)}\n"
+                    f"合并结果: {output_dir}/merged_results.jsonl\n"
+                    f"进度文件: {output_dir}/task_progress.json",
+                    title="执行完成",
+                    style="green",
+                )
+            )
     except KeyboardInterrupt:
         logger.info("\n[yellow]用户中断[/yellow]")
         raise typer.Exit(130)

@@ -1233,11 +1233,6 @@ async def validate_xpath_pattern(
             return False, None, trace
 
         prefer_url = (data_type or "").lower() == "url"
-        validator = llm_validator or _get_default_xpath_value_validator()
-        if validator is None:
-            logger.info("[validate_xpath_pattern] LLM 校验器不可用，校验失败")
-            trace["failure_reason"] = "llm_validator_unavailable"
-            return False, None, trace
 
         last_value: str | None = None
         for idx, xpath_candidate in enumerate(xpath_chain):
@@ -1297,7 +1292,7 @@ async def validate_xpath_pattern(
                         trace["attempts"].append(attempt)
                         continue
 
-            # 先做通用类型校验，再做 LLM 语义校验（不通过则尝试下一条 fallback）
+            # 仅做通用类型校验（不通过则尝试下一条 fallback）
             if not _is_semantically_valid(selected_value, data_type):
                 logger.info(
                     "[validate_xpath_pattern] 值未通过类型语义校验: field=%s, value=%s",
@@ -1305,25 +1300,6 @@ async def validate_xpath_pattern(
                     selected_value[:80],
                 )
                 attempt["reason"] = "type_semantic_invalid"
-                trace["attempts"].append(attempt)
-                continue
-
-            llm_valid, normalized_value, llm_reason = await validator.validate_value(
-                field_name=field_name or "",
-                field_description=field_description or "",
-                field_data_type=(data_type or "text"),
-                page_url=url,
-                xpath_pattern=xpath_candidate,
-                extracted_value=selected_value,
-            )
-            if not llm_valid:
-                logger.info(
-                    "[validate_xpath_pattern] LLM 语义校验失败: field=%s, reason=%s, xpath=%s",
-                    field_name or "",
-                    llm_reason or "N/A",
-                    xpath_candidate,
-                )
-                attempt["reason"] = f"llm_invalid: {llm_reason or 'N/A'}"
                 trace["attempts"].append(attempt)
                 continue
 
@@ -1336,7 +1312,7 @@ async def validate_xpath_pattern(
             attempt["reason"] = "validated"
             trace["attempts"].append(attempt)
             trace["selected_xpath"] = xpath_candidate
-            return True, normalized_value, trace
+            return True, selected_value, trace
 
         trace["failure_reason"] = "all_candidates_failed"
         return False, last_value, trace

@@ -16,6 +16,7 @@ def create_url_channel(
     mode: str | None = None,
     output_dir: str = "output",
     redis_manager: RedisQueueManager | None = None,
+    redis_key_prefix: str | None = None,
 ) -> tuple[URLChannel, RedisQueueManager | None]:
     """根据配置或指定模式创建 URL 通道。
 
@@ -28,6 +29,7 @@ def create_url_channel(
         mode: 通道模式 ('memory', 'file', 'redis')。如果为 None，则从全局配置中读取。
         output_dir: 文件模式下保存 URL 和进度文件的目录。
         redis_manager: 可选的 Redis 管理器实例。如果为 None 且模式为 'redis'，将自动创建。
+        redis_key_prefix: Redis 模式下覆盖默认 key_prefix（用于队列隔离）。
 
     Returns:
         包含 (URLChannel 实例, RedisQueueManager 实例或 None) 的元组。
@@ -58,12 +60,13 @@ def create_url_channel(
     if selected == "redis":
         # Redis 模式：生产级分布式模式，核心特性是基于 Stream 的可靠消息处理
         # 如果调用者没有提供 manager，则根据全局配置创建一个新的
+        key_prefix = (redis_key_prefix or config.redis.key_prefix).strip() or config.redis.key_prefix
         manager = redis_manager or RedisQueueManager(
             host=config.redis.host,
             port=config.redis.port,
             password=config.redis.password,
             db=config.redis.db,
-            key_prefix=config.redis.key_prefix,
+            key_prefix=key_prefix,
         )
         channel = RedisURLChannel(
             manager=manager,
