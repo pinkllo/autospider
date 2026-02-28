@@ -1,7 +1,8 @@
-"""任务规划器 — 分析网站结构并将大任务拆分为多个子任务。
+"""任务规划器 (Task Planner) — 负责分析网站结构并将复杂的采集任务拆分为多个子任务。
 
-通过 LLM + 视觉分析网站导航结构（分类菜单、频道列表等），
-自动生成多个独立的子任务，每个子任务对应一个分类/频道的列表页。
+该模块的核心逻辑是通过 LLM (语言模型) 结合视觉分析 (结合 SoM 标注的截图)，识别目标网站的导航结构
+（如菜单、分类列表、频道入口等），并自动生成一系列独立的子任务。
+每个子任务通常对应一个特定的分类或频道的列表页。
 """
 
 from __future__ import annotations
@@ -32,13 +33,14 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("planner.yaml")
 
 
 class TaskPlanner:
-    """任务规划器：分析网站结构，将大任务拆分为子任务。
+    """任务规划器：负责将用户的采集请求转化为具体的执行计划。
 
-    工作流程:
-        1. 打开目标网站
-        2. SoM 截图 + LLM 视觉分析导航结构
-        3. 识别各分类/频道入口，获取对应 URL
-        4. 生成 TaskPlan 并持久化
+    主要功能包括：
+    1. 导航至目标站点。
+    2. 利用 SoM (Set-of-Mark) 技术对页面元素进行标注并截图。
+    3. 调用具备视觉能力的 LLM 分析页面结构，识别出符合用户需求的分类入口。
+    4. 针对不同类型的网页（静态/SPA），采用多种策略提取分类的实际跳转 URL。
+    5. 构建并持久化任务计划 (TaskPlan)，供后续 Worker Agent 执行。
     """
 
     def __init__(
@@ -48,16 +50,25 @@ class TaskPlanner:
         user_request: str,
         output_dir: str = "output",
     ):
+        """初始化任务规划器。
+
+        Args:
+            page: Playwright 页面实例，用于浏览器交互。
+            site_url: 目标网站的根地址或起始 URL。
+            user_request: 用户的原始采集需求描述。
+            output_dir: 规划结果（TaskPlan）的保存目录，默认为 "output"。
+        """
         self.page = page
         self.site_url = site_url
         self.user_request = user_request
         self.output_dir = output_dir
 
-        # 初始化 LLM（优先使用 planner 专用模型，否则用主模型）
+        # 获取 LLM 配置：优先使用 planner 专用配置，若无则回退到主配置
         api_key = config.llm.planner_api_key or config.llm.api_key
         api_base = config.llm.planner_api_base or config.llm.api_base
         model = config.llm.planner_model or config.llm.model
 
+        # 初始化 ChatOpenAI 实例
         self.llm = ChatOpenAI(
             api_key=api_key,
             base_url=api_base,
@@ -69,49 +80,54 @@ class TaskPlanner:
         )
 
     async def plan(self) -> TaskPlan:
-        """执行规划流程，返回任务计划。
+        """执行完整的规划流程。
+
+        该方法驱动整个分析过程，最终返回一个包含多个子任务的 TaskPlan。
 
         Returns:
-            包含子任务列表的 TaskPlan 对象。
+            TaskPlan: 包含子任务列表和元数据的任务计划对象。
         """
         logger.info("[Planner] 开始分析网站结构: %s", self.site_url)
 
-        # Step 1: 打开网站
+        # 步骤 1: 访问目标网站，等待 DOM 内容加载完成
         await self.page.goto(self.site_url, wait_until="domcontentloaded", timeout=30000)
+        # 等待额外的时间以确保动态内容（如异步加载的菜单）渲染出来
         await self.page.wait_for_timeout(2000)
         logger.info("[Planner] 页面已加载: %s", self.page.url)
 
-        # Step 2: 注入 SoM 并截图
+        # 步骤 2: 注入 SoM 脚本并扫描页面元素，获取标注截图
         snapshot = await inject_and_scan(self.page)
         _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
+        # 清除页面上的标注图层，以免干扰后续操作
         await clear_overlay(self.page)
 
-        # Step 3: LLM 分析网站结构
+        # 步骤 3: 将截图发送给 LLM 进行视觉分析，识别导航分类
         analysis = await self._analyze_site_structure(screenshot_base64)
 
         if not analysis:
-            logger.warning("[Planner] LLM 分析失败，生成空计划")
+            logger.warning("[Planner] LLM 分析失败或未识别到有效结构，将生成空计划")
             return self._create_empty_plan()
 
-        # Step 4: 提取各分类的 URL
+        # 步骤 4: 结合 SoM 快照和 LLM 的解析结果，提取每个子任务的真实 URL
         subtasks = await self._extract_subtask_urls(analysis, snapshot)
 
-        # Step 5: 生成计划
+        # 步骤 5: 构建 TaskPlan 对象并将其保存到本地文件系统
         plan = self._build_plan(subtasks)
         self._save_plan(plan)
 
-        logger.info("[Planner] 规划完成，共 %d 个子任务", len(plan.subtasks))
+        logger.info("[Planner] 规划完成，识别并生成了 %d 个子任务", len(plan.subtasks))
         return plan
 
     async def _analyze_site_structure(self, screenshot_base64: str) -> dict | None:
-        """使用 LLM 视觉分析网站导航结构。
+        """调用 LLM 视觉接口，分析带 SoM 标注的页面截图。
 
         Args:
-            screenshot_base64: 带 SoM 标注的截图。
+            screenshot_base64: Base64 编码的页面截图（包含 mark_id 标注）。
 
         Returns:
-            LLM 返回的分析结果字典，失败时返回 None。
+            dict | None: 解析后的 JSON 对象，包含 subtasks 列表；如果失败则返回 None。
         """
+        # 渲染系统提示词和用户提示词
         system_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
             section="analyze_site_system_prompt",
@@ -126,6 +142,7 @@ class TaskPlanner:
             },
         )
 
+        # 构建多模态消息列表
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(
@@ -140,36 +157,40 @@ class TaskPlanner:
         ]
 
         try:
-            logger.info("[Planner] 调用 LLM 分析网站结构...")
+            logger.info("[Planner] 调用 LLM 进行多模态视觉分析...")
             response = await self.llm.ainvoke(messages)
             response_text = response.content
 
+            # 从 LLM 响应中解析 JSON 字典
             result = parse_json_dict_from_llm(response_text)
             if result:
                 subtask_count = len(result.get("subtasks", []))
-                logger.info("[Planner] LLM 识别到 %d 个分类", subtask_count)
+                logger.info("[Planner] LLM 识别到 %d 个候选分类", subtask_count)
                 return result
 
-            logger.warning("[Planner] LLM 响应无法解析: %s", str(response_text)[:200])
+            logger.warning("[Planner] LLM 响应内容不符合预期的 JSON 格式: %s", str(response_text)[:200])
         except Exception as e:
-            logger.error("[Planner] LLM 分析失败: %s", e)
+            logger.error("[Planner] 调用 LLM 分析网站结构时发生异常: %s", e)
 
         return None
 
     async def _extract_subtask_urls(
         self, analysis: dict, snapshot: object
     ) -> list[SubTask]:
-        """从 LLM 分析结果中提取子任务列表，并解析各分类的实际 URL。
+        """根据 LLM 的分析结果，为每个识别出的分类提取真实的列表页 URL。
 
-        对于传统网站，从元素的 href 属性获取 URL。
-        对于 SPA 网站（无 href），实际点击元素后记录导航目标 URL。
+        此方法采用了多重兜底策略来应对不同架构的网站：
+        1. 优先从 SoM 快照的静态属性中查找 href。
+        2. 其次通过执行 JavaScript 获取元素的 href 或最近祖先 A 标签的 href。
+        3. 针对 SPA（单页应用），采用模拟点击并监控 URL 变化的方式获取。
+        4. 如果以上都失效，回退到当前页 URL。
 
         Args:
-            analysis: LLM 分析结果。
-            snapshot: SoM 快照对象。
+            analysis: LLM 返回的分类分析字典。
+            snapshot: SoM 扫描产生的页面快照对象。
 
         Returns:
-            子任务列表。
+            list[SubTask]: 最终生成的子任务列表。
         """
         raw_subtasks = analysis.get("subtasks", [])
         if not raw_subtasks:
@@ -184,29 +205,35 @@ class TaskPlanner:
             mark_id = raw.get("mark_id")
             task_desc = raw.get("task_description", f"采集 {name} 分类的数据")
 
-            # 策略 1: 从 snapshot marks 的 href 属性获取 URL
             list_url = ""
+            
+            # 策略 1: 直接从 SoM 快照 (snapshot.marks) 的 href 属性获取
             if mark_id is not None and hasattr(snapshot, "marks"):
                 for mark in snapshot.marks:
                     if mark.mark_id == mark_id and mark.href:
                         list_url = urljoin(base_url, mark.href)
-                        logger.info("[Planner]   从 mark href 获取 URL: %s", list_url[:80])
+                        logger.info("[Planner] [%s] 策略1：从 mark href 获取 URL: %s", name, list_url[:80])
                         break
 
-            # 策略 2: 通过 JS 读取元素的 href（使用正确的 data-som-id 选择器）
+            # 策略 2: 注入 JavaScript 读取元素的 href（处理一些 mark 注入后可能动态变化的属性）
             if not list_url and mark_id is not None:
                 list_url = await self._get_href_by_js(mark_id, base_url)
+                if list_url:
+                    logger.info("[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, list_url[:80])
 
-            # 策略 3: SPA 兜底 — 实际点击元素，等待导航，记录新 URL
+            # 策略 3: SPA 兜底 — 实际模拟点击该元素，观察浏览器 URL 是否发生跳转
             if not list_url and mark_id is not None:
                 list_url = await self._get_url_by_navigation(mark_id, original_url)
+                if list_url:
+                    logger.info("[Planner] [%s] 策略3：通过 SPA 模拟点击获取 URL: %s", name, list_url[:80])
 
-            # 策略 4: 最终兜底 — 有的 SPA 点击 Tab 后根本不改变 url，直接使用当前 URL 作为入口。
-            # 依赖后续的 Worker Agent 根据 task_description 自行点击该 Tab。
+            # 策略 4: 最终兜底 — 部分 SPA 点击后内部状态改变但 URL 不变。
+            # 这种情况下，我们将当前页设为入口，依靠 Worker Agent 在执行时重新执行点击逻辑。
             if not list_url:
                 list_url = base_url
-                logger.info("[Planner]   无法提取到新 URL，使用当前页面作为入口: %s", list_url[:80])
+                logger.info("[Planner] [%s] 策略4：无法提取到新 URL，回退至当前页面: %s", name, list_url[:80])
 
+            # 创建子任务实体
             subtask = SubTask(
                 id=f"category_{idx + 1:02d}",
                 name=name,
@@ -216,18 +243,28 @@ class TaskPlanner:
                 max_pages=raw.get("estimated_pages"),
             )
             subtasks.append(subtask)
-            logger.info("[Planner]   子任务 #%d: %s -> %s", idx + 1, name, list_url[:80])
 
         return subtasks
 
     async def _get_href_by_js(self, mark_id: int, base_url: str) -> str:
-        """通过 JS 从 data-som-id 对应元素读取 href 属性。"""
+        """通过执行 JavaScript 直接从页面 DOM 元素获取 href 属性。
+
+        Args:
+            mark_id: 元素的 SoM 标识。
+            base_url: 当前页面 URL，用于拼接相对路径。
+
+        Returns:
+            str: 绝对地址 URL，如果未找到则返回空字符串。
+        """
         try:
             href = await self.page.evaluate(
                 """(markId) => {
+                    // 使用 data-som-id 属性定位元素
                     const el = document.querySelector(`[data-som-id="${markId}"]`);
                     if (!el) return null;
+                    // 如果元素本身就是 A 标签或有 href 属性
                     if (el.href) return el.href;
+                    // 否则查找其最近的父级 A 标签
                     const anchor = el.closest('a');
                     if (anchor && anchor.href) return anchor.href;
                     return null;
@@ -235,66 +272,77 @@ class TaskPlanner:
                 mark_id,
             )
             if href:
-                url = urljoin(base_url, href)
-                logger.info("[Planner]   从 JS href 获取 URL: %s", url[:80])
-                return url
+                return urljoin(base_url, href)
         except Exception as e:
-            logger.debug("[Planner] JS 获取 mark_id=%d href 失败: %s", mark_id, e)
+            logger.debug("[Planner] JS 执行获取 mark_id=%d 的 href 失败: %s", mark_id, e)
         return ""
 
     async def _get_url_by_navigation(self, mark_id: int, original_url: str) -> str:
-        """SPA 兜底：点击元素后等待页面 URL 变化，然后返回原页面。
+        """针对 SPA 网站的兜底策略：模拟点击元素并获取目标跳转 URL。
+
+        该过程会：
+        1. 记录当前 URL。
+        2. 点击目标元素并等待浏览器 URL 状态更新。
+        3. 记录跳转后的新 URL。
+        4. 为了不破坏规划过程中的页面一致性，会重新导航回原始 URL 并重置 SoM。
 
         Args:
             mark_id: SoM 标注的 mark_id。
-            original_url: 点击前的原始 URL（用于返回）。
+            original_url: 点击前的原始 URL (用于恢复页面)。
 
         Returns:
-            导航后的 URL，失败时返回空字符串。
+            str: 点击跳转后的新 URL；若 URL 未发生变化，则返回空字符串。
         """
         try:
-            logger.info("[Planner]   尝试点击 mark_id=%d 获取 SPA 导航 URL...", mark_id)
+            logger.info("[Planner]   触发模拟点击 mark_id=%d 以识别 SPA 路由跳转...", mark_id)
 
-            # 记录点击前的 URL
             url_before = self.page.url
-
-            # 点击元素
             locator = self.page.locator(f'[data-som-id="{mark_id}"]')
+            
             if await locator.count() == 0:
-                logger.debug("[Planner]   mark_id=%d 元素不存在", mark_id)
+                logger.debug("[Planner]   未找到对应 mark_id=%d 的元素", mark_id)
                 return ""
 
+            # 执行点击
             await locator.first.click(timeout=5000)
-            # 给 SPA 路由切换一点时间
+            # 等待前端路由或服务端渲染完成跳转
             await self.page.wait_for_timeout(2000)
 
             url_after = self.page.url
 
             if url_after and url_after != url_before:
-                logger.info("[Planner]   SPA 导航成功: %s", url_after[:80])
-                # 返回原页面
+                logger.info("[Planner]   SPA 路由跳转成功: %s", url_after[:80])
+                # 回退到原页面，保证对下一个分类的识别环境依然是首页
                 await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
                 await self.page.wait_for_timeout(1500)
-                # 重新注入 SoM（因为页面 DOM 已重建）
+                # 因为 DOM 发生了重载，必须重新注入 SoM 标注
                 await inject_and_scan(self.page)
                 await clear_overlay(self.page)
                 return url_after
             else:
-                logger.debug("[Planner]   点击后 URL 未变化")
+                logger.debug("[Planner]   模拟点击后 URL 未发生显著变化")
 
         except Exception as e:
-            logger.debug("[Planner]   点击导航 mark_id=%d 失败: %s", mark_id, e)
-            # 尝试返回原页面
+            logger.debug("[Planner]   模拟点击导航 mark_id=%d 失败: %s", mark_id, e)
+            # 异常时尝试恢复至原页面
             try:
-                await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
-                await self.page.wait_for_timeout(1500)
+                if self.page.url != original_url:
+                    await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
+                    await self.page.wait_for_timeout(1500)
             except Exception:
                 pass
 
         return ""
 
     def _build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
-        """构建 TaskPlan 对象。"""
+        """构造 TaskPlan 响应对象。
+
+        Args:
+            subtasks: 提取出的子任务列表。
+
+        Returns:
+            TaskPlan: 封装后的计划对象，包含唯一标识符和时间戳。
+        """
         now = datetime.now().isoformat()
         plan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -309,16 +357,21 @@ class TaskPlanner:
         )
 
     def _create_empty_plan(self) -> TaskPlan:
-        """创建空计划（分析失败时使用）。"""
+        """当分析失败或 LLM 未产生结果时，返回一个没有任何子任务的空计划。"""
         return self._build_plan([])
 
     def _save_plan(self, plan: TaskPlan) -> None:
-        """将计划持久化到 JSON 文件。"""
+        """将生成的任务计划序列化为 JSON 文件，存储在指定的输出目录中。
+
+        Args:
+            plan: 待保存的 TaskPlan 对象。
+        """
         output_path = Path(self.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         plan_file = output_path / "task_plan.json"
 
+        # 使用 Pydantic 的 model_dump 导出数据并写入文件
         with open(plan_file, "w", encoding="utf-8") as f:
             json.dump(plan.model_dump(), f, ensure_ascii=False, indent=2)
 
-        logger.info("[Planner] 计划已保存: %s", plan_file)
+        logger.info("[Planner] 任务计划已成功持久化至: %s", plan_file)

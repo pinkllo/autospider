@@ -77,9 +77,9 @@ class RedisQueueManager:
         """生成 item 的稳定 hash ID
 
         使用 SHA256 的前 16 位作为 ID，确保：
-        1. 相同 item 总是生成相同 ID
-        2. ID 足够短，节省内存
-        3. 碰撞概率极低
+        1. 相同 item 总是生成相同 ID（天然去重键）
+        2. ID 足够短，节省 Redis Hash 存储内存
+        3. 16位哈希空间对当前规模的碰撞概率极低
 
         Args:
             item: 数据项（如 URL）
@@ -199,13 +199,17 @@ class RedisQueueManager:
             data_json = json.dumps(data, ensure_ascii=False)
 
             # 1. 存入 Hash（HSETNX 去重）
+            # 利用 Redis 的 HSETNX 指令实现不可变单例写入：
+            # 若 identical(去重后) hash_id 已存在，直接返回 0。这是避免重复下发任务的第一道屏障。
             is_new = await self.client.hsetnx(self.data_key, hash_id, data_json)
 
             if not is_new:
                 self.logger.debug(f"数据项已存在（去重）: {item[:60]}...")
                 return False
 
-            # 2. 发布任务到 Stream
+            # 2. 发布任务到 Stream 任务管道
+            # Stream 中只传递极度轻量级的 data_id（不包含庞大的完整网页元数据）。
+            # 消费者凭此 ID 回源 Hash 表读取明细，既保障了吞吐量又切断了消息体膨胀隐患。
             await self.client.xadd(self.stream_key, {"data_id": hash_id})
 
             self.logger.debug(f"已推入任务: {item[:60]}...")
@@ -269,12 +273,16 @@ class RedisQueueManager:
     async def fetch_task(
         self, consumer_name: str, block_ms: int = 5000, count: int = 1
     ) -> list[tuple[str, str, dict]]:
-        """从消费者组中获取任务。获取到的消息会进入该消费者的 PEL。
+        """从消费者组中获取任务。获取到的消息会自动进入该消费者的专属 PEL (Pending Entries List)。
+
+        在分布式爬虫架构下，Consumer Group 是保障任务派发不重叠的核心基础级机制。
+        在此模式下，任何被 Consumer 获取的消息绝不会立刻出列，这充当了分布式爬虫极佳的“扣留期保护伞”。
+        即使进程异常僵死，依靠下面提供的故障转移与捞取机制，系统也能坚不可摧。
 
         Args:
-            consumer_name: 当前消费者的唯一名称。
+            consumer_name: 当前消费者的唯一名称（应用层应传入如: "节点IP-进程PID"，以识别认领方）。
             block_ms: 如果队列为空，阻塞等待的毫秒数。0 表示立即返回。
-            count: 单词获取的任务上限。
+            count: 单次获取的任务上限。
 
         Returns:
             任务列表 [(StreamID, HashID, DataDict), ...]。
@@ -346,25 +354,24 @@ class RedisQueueManager:
     ) -> bool:
         """标记任务失败并实现重试机制
 
-        工作流程：
-        1. 读取当前重试次数
-        2. 如果未超过最大重试次数：
-           - 增加重试计数
-           - **不 ACK**，让任务留在 PEL 中
-           - 其他消费者可以通过 recover_stale_tasks() 捞回重试
-        3. 如果超过最大重试次数：
-           - ACK 任务（从 PEL 移除）
-           - 移入死信队列（可选）
-           - 记录失败信息
+        核心工作流分流：
+        1. 读取当前数据中的 `retry_count`。
+        2. 如果尚具重试资格：
+           - 让失败计数加1并落盘持久化至 Hash表。
+           - **战略性不 ACK此消息！** 故意让该故障消息滞留其专属的 PEL 里。
+           - 背景静默跑的 `recover_stale_tasks()` 监工协程最终定会通过 XAUTOCLAIM 机制将其捞出强制改派。
+        3. 如果已穷尽重试大限：
+           - ACK 任务，让该毒药节点从活跃的消费者 PEL 中物理蒸发、正式入殓。
+           - 投递封存至 XADD 死信队列 (Dead Letter Queue)，以便于研发追溯日志。
 
         Args:
-            stream_id: 任务的 Stream ID
-            data_id: 数据 Hash ID
-            error_msg: 错误信息
-            max_retries: 最大重试次数（默认 3 次）
+            stream_id: 任务的 Redis Stream ID
+            data_id: 数据 Hash ID (即指纹键)
+            error_msg: 追踪报错信息
+            max_retries: 设定的最大重试阈值（默认 3 次）
 
         Returns:
-            是否成功处理
+            bool: 标记动作是否执行成功
         """
         if not self.client:
             return False
@@ -449,17 +456,21 @@ class RedisQueueManager:
     async def recover_stale_tasks(
         self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10
     ) -> list[tuple[str, str, dict]]:
-        """捞回超时未 ACK 的任务（故障转移机制）。
+        """捞回超时僵尸未 ACK 的遗留任务（实现全系统故障转移重派发生命线）。
         
-        该方法使用 XAUTOCLAIM 查找那些已经在其他消费者 PEL 中停滞过久的任务，并将它们转移给当前消费者。
+        防范场景：当集群架构中的一个爬虫机器在取走了消息之后瞬间机器宕机或断网失联，
+        这些消息会无限滞留在该坠毁实例身上的 PEL 集合里（无任何心跳并成为幽灵死信）。
+        
+        该方法利用 Redis 内置的 XAUTOCLAIM 巡检其他消费者身下潜水/过期过久的任务，
+        生生暴力抢夺它们的归属权，转移改派（Claim）到自己（当前的活跃消费者）名下来消化重爬。
 
         Args:
-            consumer_name: 接管任务的消费者名称。
-            max_idle_ms: 最大空闲毫秒数。超过此时间未 ACK 的任务将被判定为停滞。
-            count: 单词捞回的任务数上限。
+            consumer_name: 即将强制接管此残局的当前消费者名称。
+            max_idle_ms: 判定僵尸进程的最大时间阈值界线。
+            count: 单次尝试夺取任务的数量极限。
 
         Returns:
-            捞回的任务列表 [(StreamID, HashID, DataDict), ...]。
+            list[tuple[str, str, dict]]: 所捕获接手的任务详单。
         """
         if not self.client:
             return []
