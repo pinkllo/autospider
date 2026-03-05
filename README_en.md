@@ -37,7 +37,7 @@ graph LR
   G --> H["🔴 End"]
 ```
 
-> 📊 For a detailed node-level flowchart with feature descriptions, see [`output/graph/main_graph.mmd`](output/graph/main_graph.mmd)
+> 📊 For a detailed node-level flowchart with feature descriptions, see [`output/graph/main_graph.mmd`](main_graph.mmd)
 
 ### Execution Routes
 

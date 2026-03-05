@@ -1,5 +1,4 @@
-<a href="https://deepwiki.com/pinkllo/autospider"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
-
+`<a href="https://deepwiki.com/pinkllo/autospider"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">``</a>`
 
 # AutoSpider
 
@@ -38,19 +37,19 @@ graph LR
   G --> H["🔴 结束"]
 ```
 
-> 📊 完整的带功能描述的节点级流程图请参见 [`output/graph/main_graph.mmd`](output/graph/main_graph.mmd)
+> 📊 完整的带功能描述的节点级流程图请参见 [`main_graph.mmd`](main_graph.mmd)
 
 ### 分支路线说明
 
-| 入口模式 | 执行路线 | 功能说明 |
-|:---|:---|:---|
-| `chat_pipeline` | chat_clarify → chat_route_execution → execute_single_or_multi | 💬 自然语言多轮交互后自动执行 |
-| `pipeline_run` | normalize_pipeline_params → run_pipeline_node | 🔧 生产者-消费者并行流水线 |
-| `collect_urls` | collect_urls_node | 🔗 独立 URL 收集 |
-| `generate_config` | generate_config_node | ⚙️ 探索站点并生成抓取配置 |
-| `batch_collect` | batch_collect_node | 📦 按配置批量翻页收集 |
-| `field_extract` | field_extract_node | 🔍 XPath 归纳与结构化提取 |
-| `multi_pipeline` | plan_node → dispatch_node → aggregate_node | 🧠 智能规划 + 并发分发 + 结果聚合 |
+| 入口模式            | 执行路线                                                        | 功能说明                          |
+| :------------------ | :-------------------------------------------------------------- | :-------------------------------- |
+| `chat_pipeline`   | chat_clarify → chat_route_execution → execute_single_or_multi | 💬 自然语言多轮交互后自动执行     |
+| `pipeline_run`    | normalize_pipeline_params → run_pipeline_node                  | 🔧 生产者-消费者并行流水线        |
+| `collect_urls`    | collect_urls_node                                               | 🔗 独立 URL 收集                  |
+| `generate_config` | generate_config_node                                            | ⚙️ 探索站点并生成抓取配置       |
+| `batch_collect`   | batch_collect_node                                              | 📦 按配置批量翻页收集             |
+| `field_extract`   | field_extract_node                                              | 🔍 XPath 归纳与结构化提取         |
+| `multi_pipeline`  | plan_node → dispatch_node → aggregate_node                    | 🧠 智能规划 + 并发分发 + 结果聚合 |
 
 ## ⚙️ 运行要求
 
@@ -65,6 +64,7 @@ playwright install chromium
 ```
 
 可选依赖：
+
 ```bash
 pip install -e ".[redis]"   # Redis 队列能力
 pip install -e ".[db]"      # 数据库相关能力

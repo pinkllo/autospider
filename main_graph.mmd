@@ -1,0 +1,138 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#4A90D9",
+    "primaryTextColor": "#fff",
+    "primaryBorderColor": "#2C5F8A",
+    "lineColor": "#555",
+    "secondaryColor": "#F5A623",
+    "tertiaryColor": "#f0f0f0",
+    "fontSize": "14px"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "htmlLabels": true,
+    "padding": 16,
+    "nodeSpacing": 40,
+    "rankSpacing": 50
+  }
+}}%%
+
+graph TD
+
+  %% ============================
+  %% 入口与路由
+  %% ============================
+  START(["🚀 __start__"]):::startNode
+  route_entry["🔀 route_entry<br/><i>入口路由：根据 entry_mode<br/>分发至不同的处理分支</i>"]:::routeNode
+
+  START --> route_entry
+
+  %% ============================
+  %% 聊天交互路线
+  %% ============================
+  subgraph chat_branch ["💬 聊天交互路线 (chat_pipeline)"]
+    direction TB
+    chat_clarify["🗣️ chat_clarify<br/><i>AI 多轮对话澄清<br/>自动推断目标与字段</i>"]:::chatNode
+    chat_route_execution["🧭 chat_route_execution<br/><i>执行策略路由<br/>选择 single / multi 模式</i>"]:::chatNode
+    execute_single_or_multi["⚡ execute_single_or_multi<br/><i>执行单任务或<br/>启动多任务规划引擎</i>"]:::chatNode
+
+    chat_clarify -- "✅ ok" --> chat_route_execution
+    chat_route_execution -- "✅ ok" --> execute_single_or_multi
+  end
+
+  %% ============================
+  %% 单流管道路线
+  %% ============================
+  subgraph pipeline_branch ["🔧 单流管道路线 (pipeline_run)"]
+    direction TB
+    normalize_pipeline_params["📋 normalize_pipeline_params<br/><i>CLI 参数归一化<br/>校验与标准化配置</i>"]:::pipelineNode
+    run_pipeline_node["🏭 run_pipeline_node<br/><i>生产者-消费者并行流水线<br/>列表采集 + 字段提取</i>"]:::pipelineNode
+
+    normalize_pipeline_params -- "✅ ok" --> run_pipeline_node
+  end
+
+  %% ============================
+  %% 基础能力节点
+  %% ============================
+  subgraph capability_branch ["🛠️ 基础能力节点（独立调用）"]
+    direction TB
+    collect_urls_node["🔗 collect_urls_node<br/><i>URL 收集引擎<br/>自主探索列表页收集链接</i>"]:::capNode
+    generate_config_node["⚙️ generate_config_node<br/><i>配置生成器<br/>探索站点生成抓取规则</i>"]:::capNode
+    batch_collect_node["📦 batch_collect_node<br/><i>批量收集器<br/>按规则批量翻页获取</i>"]:::capNode
+    field_extract_node["🔍 field_extract_node<br/><i>字段提取器<br/>XPath 归纳与结构化提取</i>"]:::capNode
+  end
+
+  %% ============================
+  %% 多任务规划路线
+  %% ============================
+  subgraph multi_branch ["🧠 多任务规划路线 (multi_pipeline)"]
+    direction TB
+    plan_node["📐 plan_node<br/><i>TaskPlanner 智能规划<br/>SoM 视觉分析拆解子任务</i>"]:::planNode
+    dispatch_node["📡 dispatch_node<br/><i>TaskDispatcher 任务分发<br/>并发调度子任务执行</i>"]:::planNode
+    aggregate_node["📊 aggregate_node<br/><i>ResultAggregator 结果聚合<br/>汇总所有子任务产出</i>"]:::planNode
+
+    plan_node -- "✅ ok" --> dispatch_node
+    dispatch_node -- "✅ ok" --> aggregate_node
+  end
+
+  %% ============================
+  %% 收尾阶段
+  %% ============================
+  subgraph finalize_branch ["📤 收尾整理阶段"]
+    direction TB
+    build_artifact_index["📁 build_artifact_index<br/><i>聚合所有节点产物<br/>构建工件索引</i>"]:::finalNode
+    build_summary["📝 build_summary<br/><i>构建全局运行摘要<br/>统计成功/失败数据</i>"]:::finalNode
+    finalize_result["🏁 finalize_result<br/><i>写入最终状态<br/>输出执行结果</i>"]:::finalNode
+
+    build_artifact_index --> build_summary
+    build_summary --> finalize_result
+  end
+
+  ENDNODE(["🔴 __end__"]):::endNode
+
+  %% ============================
+  %% 入口路由 → 各分支
+  %% ============================
+  route_entry -. "chat_pipeline" .-> chat_clarify
+  route_entry -. "pipeline_run" .-> normalize_pipeline_params
+  route_entry -. "collect_urls" .-> collect_urls_node
+  route_entry -. "generate_config" .-> generate_config_node
+  route_entry -. "batch_collect" .-> batch_collect_node
+  route_entry -. "field_extract" .-> field_extract_node
+  route_entry -. "multi_pipeline" .-> plan_node
+  route_entry -. "未知模式" .-> finalize_result
+
+  %% ============================
+  %% 各分支 → 收尾
+  %% ============================
+  execute_single_or_multi --> build_artifact_index
+  run_pipeline_node --> build_artifact_index
+  collect_urls_node --> build_artifact_index
+  generate_config_node --> build_artifact_index
+  batch_collect_node --> build_artifact_index
+  field_extract_node --> build_artifact_index
+  aggregate_node --> build_artifact_index
+
+  %% ============================
+  %% 错误路径 → 收尾
+  %% ============================
+  chat_clarify -. "❌ error" .-> build_artifact_index
+  chat_route_execution -. "❌ error" .-> build_artifact_index
+  normalize_pipeline_params -. "❌ error" .-> build_artifact_index
+  plan_node -. "❌ error" .-> build_artifact_index
+  dispatch_node -. "❌ error" .-> build_artifact_index
+
+  finalize_result --> ENDNODE
+
+  %% ============================
+  %% 样式定义
+  %% ============================
+  classDef startNode fill:#4CAF50,stroke:#2E7D32,color:#fff,stroke-width:2px
+  classDef endNode fill:#F44336,stroke:#C62828,color:#fff,stroke-width:2px
+  classDef routeNode fill:#2196F3,stroke:#1565C0,color:#fff,stroke-width:2px
+  classDef chatNode fill:#9C27B0,stroke:#6A1B9A,color:#fff,stroke-width:1px
+  classDef pipelineNode fill:#FF9800,stroke:#E65100,color:#fff,stroke-width:1px
+  classDef capNode fill:#009688,stroke:#00695C,color:#fff,stroke-width:1px
+  classDef planNode fill:#E91E63,stroke:#AD1457,color:#fff,stroke-width:1px
+  classDef finalNode fill:#607D8B,stroke:#37474F,color:#fff,stroke-width:1px
