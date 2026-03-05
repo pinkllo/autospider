@@ -34,11 +34,13 @@ navigate_to_field_system_prompt: |
 
   2. **click** - 点击元素
      - 返回示例：
-       {"action":"click","args":{"mark_id":12,"target_text":"你在截图中看到的文字/aria-label/placeholder","reasoning":"为什么点击它可能展示目标字段"}}
+       {"action":"click","args":{"target_text":"你在截图中看到的文字/aria-label/placeholder","mark_id":12,"reasoning":"为什么点击它可能展示目标字段"}}
+       {"action":"click","args":{"target_text":"你在截图中看到的文字/aria-label/placeholder","reasoning":"为什么点击它可能展示目标字段"}}
 
   3. **type** - 在输入框输入文本
      - 返回示例：
-       {"action":"type","args":{"mark_id":12,"target_text":"输入框提示/标签（placeholder/aria-label）","text":"要输入的文本","reasoning":"为什么需要输入"}}
+       {"action":"type","args":{"target_text":"输入框提示/标签（placeholder/aria-label）","text":"要输入的文本","mark_id":12,"reasoning":"为什么需要输入"}}
+       {"action":"type","args":{"target_text":"输入框提示/标签（placeholder/aria-label）","text":"要输入的文本","reasoning":"为什么需要输入"}}
 
   4. **scroll** - 向下滚动查看更多
      - 返回示例：
@@ -46,8 +48,9 @@ navigate_to_field_system_prompt: |
 
   ## 重要提示
 
-  - **mark_id** 是截图中红色边框右上角的白色数字编号
-  - 只要你在 args 里返回了 mark_id，就必须同时返回 target_text（该元素在截图里对应的文字/提示），系统会以 target_text 为准纠正 mark_id，提升鲁棒性
+  - 默认是文本优先定位：click/type 至少要给 target_text；mark_id 是可选辅助信息
+  - 如果你返回了 mark_id，必须同时返回 target_text（系统会以 target_text 为准纠正 mark_id）
+  - 截图可能不显示红色框号；若有“候选列表”，优先按候选列表中的 `[mark_id] 文本` 选择
   - 如果需要输入，使用 **type** 填写（输入后会自动回车）
   - 仔细观察页面内容，优先尝试点击可点击元素而不是滚动，不要遗漏折叠区域或选项卡
   - 如果提供了“可点击候选列表”，优先从列表中选择最可能展示目标字段的元素执行 click，并返回其 mark_id
@@ -145,12 +148,12 @@ select_match_system_prompt: |
 
   ## 任务说明
 
-  页面中有多个文本与目标字段匹配。你需要根据截图中红色边框标注的元素，
+  页面中有多个文本与目标字段匹配。你需要结合截图上下文与候选列表，
   选择最可能是目标字段的那个。
 
   ## 候选元素说明
 
-  截图中用红色边框标注了多个候选元素，每个元素右上角有白色数字编号（mark_id）。
+  候选列表里每个元素都带有编号（mark_id）与文本。
   这些元素的文本都与目标字段相似，你需要根据：
   1. 元素的位置（标题区域、正文中、侧边栏等）
   2. 元素的样式（字体大小、加粗等）
@@ -167,7 +170,7 @@ select_match_system_prompt: |
 
   ## 重要提示
 
-  - mark_id 是红色边框右上角的白色数字编号
+  - mark_id 以候选列表中的编号为准
   - 如果多个候选都可能是目标字段，选择最符合字段语义的那个
   - 例如：提取"标题"时，应选择看起来像标题的元素（通常较大、加粗、位于顶部）
 

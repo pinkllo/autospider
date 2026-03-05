@@ -174,7 +174,6 @@ class LLMDecider:
         if (
             snapshot_to_use
             and page is not None
-            and action.mark_id is not None
             and action.target_text
             and action.action
             in {
@@ -192,8 +191,11 @@ class LLMDecider:
                     target_text=action.target_text,
                     max_retries=config.url_collector.max_validation_retries,
                 )
-                if corrected_mark_id is not None and corrected_mark_id != action.mark_id:
-                    action.mark_id = corrected_mark_id
+                if corrected_mark_id is not None:
+                    if corrected_mark_id != action.mark_id:
+                        action.mark_id = corrected_mark_id
+                    elif action.mark_id is None:
+                        action.mark_id = corrected_mark_id
                     if action.thinking:
                         action.thinking = f"{action.thinking} | mark_id 已按文本纠正"
                     else:
@@ -631,7 +633,9 @@ class LLMDecider:
         # 为避免被误判为 retry 并陷入循环，这里对缺失/非法 action 做自动推断。
         inferred = False
         if action_type is None:
-            if args.get("text") and args.get("mark_id") is not None:
+            if args.get("text") and (
+                args.get("mark_id") is not None or args.get("target_text")
+            ):
                 action_type = ActionType.TYPE
                 inferred = True
             elif args.get("scroll_delta") is not None:
@@ -640,7 +644,7 @@ class LLMDecider:
             elif args.get("url"):
                 action_type = ActionType.NAVIGATE
                 inferred = True
-            elif args.get("mark_id") is not None:
+            elif args.get("mark_id") is not None or args.get("target_text"):
                 action_type = ActionType.CLICK
                 inferred = True
             else:
@@ -673,5 +677,6 @@ class LLMDecider:
             scroll_delta=scroll_delta,
             timeout_ms=args.get("timeout_ms") or 5000,
             thinking=thinking,
-            expectation=args.get("expectation"),
+            expectation=args.get("expectation") or args.get("summary"),
+            summary=args.get("summary"),
         )

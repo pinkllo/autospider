@@ -91,7 +91,10 @@ class LLMDecisionMaker:
 
         # 如果有验证反馈，追加到用户消息中
         if validation_feedback:
-            user_message += f"\n\n## ⚠️ 上一次选择的 mark_id 验证失败\n{validation_feedback}\n\n请仔细核对截图中红色边框右上角的白色数字编号，重新选择正确的 mark_id。"
+            user_message += (
+                f"\n\n## ⚠️ 上一次元素选择验证失败\n{validation_feedback}"
+                "\n\n请优先依据元素文本重新选择；若文本在页面中有多个匹配，请结合页面位置与上下文做区分。"
+            )
 
         messages = [
             SystemMessage(content=system_prompt),

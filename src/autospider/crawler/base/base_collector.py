@@ -512,25 +512,39 @@ class BaseCollector(ABC):
                     purpose = (args.get("purpose") or "").lower()
                     if purpose in {"detail_links", "detail_link", "detail"}:
                         items = args.get("items") or []
-                        mark_id_text_map = {
-                            str(it.get("mark_id")): str(it.get("text") or it.get("target_text") or "")
-                            for it in items
-                            if isinstance(it, dict) and it.get("mark_id") is not None
-                        }
+                        mark_id_text_map: dict[str, str] = {}
+                        for idx, it in enumerate(items):
+                            if not isinstance(it, dict):
+                                continue
+                            text_value = str(it.get("text") or it.get("target_text") or "").strip()
+                            if not text_value:
+                                continue
+                            raw_mark_id = it.get("mark_id")
+                            key = str(raw_mark_id) if raw_mark_id is not None else f"text_only_{idx}"
+                            mark_id_text_map[key] = text_value
                         if not mark_id_text_map:
                             mark_id_text_map = args.get("mark_id_text_map", {}) or {}
 
                         mark_ids: list[int] = []
                         if mark_id_text_map:
-                            if config.url_collector.validate_mark_id:
-                                # 文本优先验证逻辑：防止 LLM 识别的 Mark ID 漂移或失效
-                                mark_ids = await resolve_mark_ids_from_map(
-                                    page=self.page,
-                                    llm=self.llm_decision_maker.decider.llm,
-                                    snapshot=snapshot,
-                                    mark_id_text_map=mark_id_text_map,
-                                    max_retries=config.url_collector.max_validation_retries,
-                                )
+                            # 文本优先：当启用验证，或存在 text-only 项时，都按文本解析。
+                            should_resolve_by_text = config.url_collector.validate_mark_id or any(
+                                not str(k).isdigit() for k in mark_id_text_map.keys()
+                            )
+                            if should_resolve_by_text:
+                                try:
+                                    mark_ids = await resolve_mark_ids_from_map(
+                                        page=self.page,
+                                        llm=self.llm_decision_maker.decider.llm,
+                                        snapshot=snapshot,
+                                        mark_id_text_map=mark_id_text_map,
+                                        max_retries=config.url_collector.max_validation_retries,
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"文本解析 mark_id 失败，回退数字 id: {e}")
+                                    mark_ids = [
+                                        int(k) for k in mark_id_text_map.keys() if str(k).isdigit()
+                                    ]
                             else:
                                 mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
 

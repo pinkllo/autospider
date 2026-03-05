@@ -2,7 +2,8 @@
 基于公共 XPath 的批量字段提取器
 
 该模块实现了一个高效的批量提取器，默认直接使用预先生成的公共 XPath 模式
-在多个 URL 上执行抓取；当必填字段在页面中整体失效时，可原地触发 LLM 挽救流程。
+在多个 URL 上执行抓取；当必填字段在页面中整体失效时，可原地触发 LLM 挽救流程，
+若挽救后仍失败则自动升级到单页探索提取。
 主要特点：
 1. 性能高：直接使用 XPath 定位，无需视觉分析。
 2. 健壮性：内置页面关闭恢复机制和安全加载逻辑。
@@ -25,6 +26,7 @@ from ..common.protocol import coerce_bool
 from ..common.som import capture_screenshot_with_marks
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from .field_decider import FieldDecider
+from .field_extractor import FieldExtractor
 
 from .models import FieldDefinition, FieldExtractionResult, PageExtractionRecord
 
@@ -99,6 +101,9 @@ class BatchXPathExtractor:
                 # 若模型不可用，自动降级为纯 XPath 模式，避免阻塞批处理
                 self.batch_salvage_enabled = False
                 logger.info(f"[BatchXPathExtractor] 挽救模式初始化失败，已自动降级: {e}")
+
+        # 挽救失败后的升级兜底：自动切换到单页探索提取
+        self.explore_upgrade_extractor: FieldExtractor | None = None
 
     async def run(self, urls: list[str]) -> dict:
         """
@@ -182,10 +187,11 @@ class BatchXPathExtractor:
             )
 
             if not xpath_chain:
-                if self._should_fill_with_task_url(field):
-                    result.value = url
+                fill_value, fill_method = self._resolve_non_xpath_field_value(field, url=url)
+                if fill_method:
+                    result.value = fill_value
                     result.confidence = 1.0
-                    result.extraction_method = "task_url"
+                    result.extraction_method = fill_method
                     record.fields.append(result)
                     continue
                 result.error = "未提供 XPath"
@@ -248,6 +254,9 @@ class BatchXPathExtractor:
         if not required_fields_ok:
             await self._salvage_required_fields(record)
             required_fields_ok = self._required_fields_ok(record)
+        if not required_fields_ok:
+            await self._upgrade_to_exploration(record, url=url)
+            required_fields_ok = self._required_fields_ok(record)
         record.success = required_fields_ok
 
         return record
@@ -289,6 +298,16 @@ class BatchXPathExtractor:
             required=bool(field.get("required", True)),
             data_type=str(field.get("data_type") or "text").strip().lower() or "text",
             example=(str(field.get("example")) if field.get("example") is not None else None),
+            extraction_source=(
+                str(field.get("extraction_source")).strip()
+                if field.get("extraction_source") is not None
+                else None
+            ),
+            fixed_value=(
+                str(field.get("fixed_value")).strip()
+                if field.get("fixed_value") is not None
+                else None
+            ),
         )
 
     async def _salvage_required_fields(self, record: PageExtractionRecord) -> None:
@@ -325,6 +344,69 @@ class BatchXPathExtractor:
             )
             if ok:
                 salvaged_count += 1
+
+    async def _upgrade_to_exploration(self, record: PageExtractionRecord, url: str) -> None:
+        """当 XPath + 挽救仍失败时，自动升级到单页探索提取。"""
+        missing = self._collect_missing_required_fields(record)
+        if not missing:
+            return
+
+        field_defs: list[FieldDefinition] = [self._to_field_definition(field) for field, _ in missing]
+        if not field_defs:
+            return
+
+        logger.info(
+            "[BatchXPathExtractor] 挽救后仍缺失必填字段，自动升级探索: missing=%s",
+            [f.name for f in field_defs],
+        )
+
+        try:
+            await self._ensure_page()
+            if self.explore_upgrade_extractor is None:
+                self.explore_upgrade_extractor = FieldExtractor(
+                    page=self.page,
+                    fields=field_defs,
+                    output_dir=str(self.output_dir),
+                    max_nav_steps=config.field_extractor.max_nav_steps,
+                )
+            else:
+                self.explore_upgrade_extractor.page = self.page
+                self.explore_upgrade_extractor.fields = field_defs
+                self.explore_upgrade_extractor.field_decider.page = self.page
+                self.explore_upgrade_extractor.action_executor.page = self.page
+
+            explore_record = await self.explore_upgrade_extractor.extract_from_url(url)
+        except Exception as e:
+            logger.info("[BatchXPathExtractor] 自动升级探索失败: %s", e)
+            for _, result in missing:
+                if result.error:
+                    result.error = f"{result.error}; explore_upgrade_failed: {e}"[:500]
+                else:
+                    result.error = f"explore_upgrade_failed: {e}"[:500]
+            return
+
+        explore_result_map = {field.field_name: field for field in explore_record.fields}
+        for field, result in missing:
+            name = str(field.get("name") or "").strip()
+            upgraded = explore_result_map.get(name)
+            if not upgraded:
+                continue
+            if upgraded.value is not None:
+                result.value = upgraded.value
+                result.confidence = max(result.confidence, upgraded.confidence)
+                if upgraded.xpath:
+                    result.xpath = upgraded.xpath
+                if upgraded.xpath_candidates:
+                    result.xpath_candidates = list(upgraded.xpath_candidates)
+                result.extraction_method = "explore_upgrade"
+                result.error = None
+                result.salvage_reason = "explore_upgrade_succeeded"
+            else:
+                upgrade_error = upgraded.error or "explore_upgrade_no_value"
+                if result.error:
+                    result.error = f"{result.error}; {upgrade_error}"[:500]
+                else:
+                    result.error = upgrade_error[:500]
 
     async def _salvage_single_required_field(
         self,
@@ -659,16 +741,29 @@ class BatchXPathExtractor:
 
         return [xpath for xpath in chain if xpath.startswith("/")]
 
-    def _should_fill_with_task_url(self, field: dict) -> bool:
+    def _resolve_non_xpath_field_value(
+        self,
+        field: dict,
+        *,
+        url: str,
+    ) -> tuple[str | None, str | None]:
         source = str(field.get("extraction_source") or "").strip().lower()
+        fixed_value = field.get("fixed_value")
+
+        if source in {"constant", "subtask_context"}:
+            if fixed_value is None:
+                return None, None
+            value = str(fixed_value).strip()
+            return (value if value else None), source
+
         if source == "task_url":
-            return True
+            return url, "task_url"
 
         data_type = str(field.get("data_type") or "").strip().lower()
         name = str(field.get("name") or "").strip().lower()
         if data_type == "url" and name in {"detail_url", "url", "source_url", "page_url"}:
-            return True
-        return False
+            return url, "task_url"
+        return None, None
 
     def _looks_like_url(self, value: str) -> bool:
         text = (value or "").strip()

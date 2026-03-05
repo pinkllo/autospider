@@ -18,6 +18,8 @@ class FieldDefinition:
     required: bool = True  # 是否必填
     data_type: str = "text"  # 数据类型: text, number, date, url
     example: str | None = None  # 示例值（帮助 LLM 理解格式）
+    extraction_source: str | None = None  # 提取来源: xpath/task_url/subtask_context/constant
+    fixed_value: str | None = None  # 固定值（用于 constant/subtask_context）
 
 
 @dataclass
@@ -127,6 +129,8 @@ class BatchExtractionResult:
                     ),
                     "required": f.required,
                     "data_type": f.data_type,
+                    "extraction_source": f.extraction_source,
+                    "fixed_value": f.fixed_value,
                 }
                 for f in self.fields
             ],

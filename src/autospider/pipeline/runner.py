@@ -46,12 +46,24 @@ def _prepare_fields_config(
         xpath = field.get("xpath")
         required = bool(field.get("required", True))
         data_type = str(field.get("data_type") or "").strip().lower()
+        source = str(field.get("extraction_source") or "").strip().lower()
+        fixed_value = field.get("fixed_value")
 
         if _is_valid_xpath(xpath):
             normalized = dict(field)
             normalized["xpath"] = str(xpath).strip()
             valid_fields.append(normalized)
             continue
+
+        if source in {"constant", "subtask_context"}:
+            value = "" if fixed_value is None else str(fixed_value).strip()
+            if value:
+                normalized = dict(field)
+                normalized["xpath"] = None
+                normalized["extraction_source"] = source
+                normalized["fixed_value"] = value
+                valid_fields.append(normalized)
+                continue
 
         # URL 字段可直接从任务 URL 回填，避免“必填但无 XPath”阻断整条流水线
         if data_type == "url":
@@ -152,7 +164,7 @@ async def run_pipeline(
 
     producer_done = asyncio.Event()
     xpath_ready = asyncio.Event()
-    state: dict[str, object] = {"fields_config": None, "error": None}
+    state: dict[str, object] = {"fields_config": None, "error": None, "plan_upgrade_request": None}
     explore_tasks: list[URLTask] = []
     url_only_mode = len(fields) == 0
 
@@ -178,6 +190,15 @@ async def run_pipeline(
             )
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
+            if getattr(result, "plan_upgrade_requested", False):
+                request = {
+                    "requested": True,
+                    "reason": str(getattr(result, "plan_upgrade_reason", "") or "").strip(),
+                    "site_url": str(getattr(result, "plan_upgrade_site_url", "") or "").strip(),
+                }
+                state["plan_upgrade_request"] = request
+                _set_state_error(state, "plan_upgrade_requested")
+                summary["plan_upgrade_request"] = request
         except Exception as exc:  # noqa: BLE001
             _set_state_error(state, f"producer_error: {exc}")
             logger.info(f"[Pipeline] Producer failed: {exc}")
@@ -335,6 +356,8 @@ async def run_pipeline(
         if previous_max_pages is not None:
             config.url_collector.max_pages = previous_max_pages
         summary["finished_at"] = datetime.now().isoformat()
+        if state.get("plan_upgrade_request"):
+            summary["plan_upgrade_request"] = state.get("plan_upgrade_request")
         if state.get("error"):
             summary["error"] = state.get("error")
         _write_summary(summary_path, summary)

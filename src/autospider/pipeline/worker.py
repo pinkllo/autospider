@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..common.config import config
@@ -41,11 +42,23 @@ class SubTaskWorker:
         """将字段定义字典转换为 FieldDefinition 列表。"""
         fields: list[FieldDefinition] = []
         source = self.subtask.fields if self.subtask.fields else self.raw_fields
+        subtask_context_value = self._infer_subtask_context_value()
 
         for f in source:
             if not isinstance(f, dict):
                 continue
             try:
+                extraction_source = f.get("extraction_source")
+                fixed_value = f.get("fixed_value")
+                if (
+                    not extraction_source
+                    and not fixed_value
+                    and subtask_context_value
+                    and self._is_context_like_field(f)
+                ):
+                    extraction_source = "subtask_context"
+                    fixed_value = subtask_context_value
+
                 fields.append(
                     FieldDefinition(
                         name=f.get("name", ""),
@@ -53,12 +66,45 @@ class SubTaskWorker:
                         required=f.get("required", True),
                         data_type=f.get("data_type", "text"),
                         example=f.get("example"),
+                        extraction_source=extraction_source,
+                        fixed_value=fixed_value,
                     )
                 )
             except Exception:
                 continue
 
         return fields
+
+    def _is_context_like_field(self, field: dict) -> bool:
+        name = str(field.get("name") or "").strip().lower()
+        desc = str(field.get("description") or "").strip().lower()
+        text = f"{name} {desc}"
+        keywords = (
+            "category",
+            "分类",
+            "类别",
+            "类型",
+            "tag",
+            "标签",
+            "所属",
+            "行业",
+            "project_category",
+        )
+        return any(k in text for k in keywords)
+
+    def _infer_subtask_context_value(self) -> str:
+        # 优先从 task_description 里提取被引号包裹的分类词，取最后一个更接近具体子类
+        task_desc = str(self.subtask.task_description or "")
+        quoted = re.findall(r"[\"“'‘](.*?)[\"”'’]", task_desc)
+        if quoted:
+            candidate = str(quoted[-1]).strip()
+            if candidate:
+                return candidate
+
+        # 回退使用子任务名，并去掉常见后缀噪声
+        name = str(self.subtask.name or "").strip()
+        name = re.sub(r"(子任务|分类|类别|列表|采集|抓取|任务)$", "", name).strip(":-： ")
+        return name
 
     def _resolve_pipeline_transport(self) -> tuple[str, str | None]:
         """解析子任务的通道模式与 redis key 前缀。"""

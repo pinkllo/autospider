@@ -329,9 +329,11 @@ def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, An
             action = "scroll"
         elif args.get("url"):
             action = "navigate"
-        elif args.get("text") and args.get("mark_id") is not None:
+        elif args.get("text") and (
+            args.get("mark_id") is not None or args.get("target_text")
+        ):
             action = "type"
-        elif args.get("mark_id") is not None:
+        elif args.get("mark_id") is not None or args.get("target_text"):
             action = "click"
 
     action = _ACTION_ALIASES.get(action, action)

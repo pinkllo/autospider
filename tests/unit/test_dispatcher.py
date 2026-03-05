@@ -108,13 +108,7 @@ class TestDispatcherExecution:
             dispatcher = TaskDispatcher(
                 plan=plan, fields=[], output_dir=str(tmp_path)
             )
-            # Dispatcher 会在单次 run 中只调度一轮；
-            # 重试需要重新运行
             result = await dispatcher.run()
-
-            # 第一次应该失败并被标记为 PENDING（可重试）
-            if st.status == SubTaskStatus.PENDING:
-                result = await dispatcher.run()
 
         # 最终应该要么成功要么用尽重试
         assert st.retry_count >= 1
@@ -223,3 +217,102 @@ class TestConcurrencyControl:
             await dispatcher.run()
 
         assert max_concurrent_observed <= 2
+
+
+class TestRuntimePlanDelegation:
+    """执行阶段模型请求升级为 Planner 的测试。"""
+
+    @pytest.mark.asyncio
+    async def test_model_requested_plan_upgrade_spawns_subtasks(self, tmp_path, monkeypatch):
+        parent = _make_subtask("01", name="入口任务")
+        plan = _make_plan([parent])
+        runtime_child = _make_subtask(
+            "category_01",
+            name="子类A",
+            list_url="https://example.com/category/a",
+            task_description="采集子类A数据",
+        )
+
+        class _FakeWorker:
+            def __init__(self, subtask, fields, output_dir, headless):
+                _ = (fields, output_dir, headless)
+                self.subtask = subtask
+
+            async def execute(self):
+                if self.subtask.id == "01":
+                    return {
+                        "total_urls": 0,
+                        "success_count": 0,
+                        "plan_upgrade_request": {
+                            "requested": True,
+                            "reason": "当前页是分类入口，建议拆分子任务",
+                        },
+                    }
+                return {"total_urls": 2, "success_count": 2, "items_file": "child.jsonl"}
+
+        async def _fake_runtime_plan(self, parent, reason):
+            _ = (parent, reason)
+            return [runtime_child.model_copy(deep=True)]
+        
+        async def _fake_review(self, parent, reason):
+            _ = (parent, reason)
+            return True, "上层 Plan Agent 批准", ""
+
+        monkeypatch.setattr("autospider.pipeline.dispatcher.SubTaskWorker", _FakeWorker)
+        monkeypatch.setattr(TaskDispatcher, "_ask_plan_agent_review", _fake_review)
+        monkeypatch.setattr(TaskDispatcher, "_plan_runtime_subtasks", _fake_runtime_plan)
+
+        dispatcher = TaskDispatcher(
+            plan=plan,
+            fields=[],
+            output_dir=str(tmp_path),
+            enable_runtime_subtasks=True,
+        )
+        result = await dispatcher.run()
+
+        assert len(plan.subtasks) == 2
+        child = next(st for st in plan.subtasks if st.parent_id == "01")
+        assert parent.status == SubTaskStatus.SKIPPED
+        assert child.status == SubTaskStatus.COMPLETED
+        assert result["skipped"] == 1
+        assert result["completed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_model_requested_plan_upgrade_rejected_by_plan_agent(self, tmp_path, monkeypatch):
+        parent = _make_subtask("01", name="入口任务")
+        plan = _make_plan([parent])
+
+        class _FakeWorker:
+            def __init__(self, subtask, fields, output_dir, headless):
+                _ = (fields, output_dir, headless)
+                self.subtask = subtask
+
+            async def execute(self):
+                return {
+                    "total_urls": 0,
+                    "success_count": 0,
+                    "plan_upgrade_request": {
+                        "requested": True,
+                        "reason": "当前页像是分类入口",
+                    },
+                }
+
+        async def _fake_reject_review(self, parent, reason):
+            _ = (parent, reason)
+            return False, "上层 Plan Agent 判定无需拆分", ""
+
+        monkeypatch.setattr("autospider.pipeline.dispatcher.SubTaskWorker", _FakeWorker)
+        monkeypatch.setattr(TaskDispatcher, "_ask_plan_agent_review", _fake_reject_review)
+
+        dispatcher = TaskDispatcher(
+            plan=plan,
+            fields=[],
+            output_dir=str(tmp_path),
+            enable_runtime_subtasks=True,
+        )
+        result = await dispatcher.run()
+
+        assert len(plan.subtasks) == 1
+        assert parent.status == SubTaskStatus.FAILED
+        assert "plan_agent_rejected" in str(parent.error or "")
+        assert result["failed"] == 1

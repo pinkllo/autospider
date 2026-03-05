@@ -217,6 +217,20 @@ class FieldExtractor:
         """
         result = FieldExtractionResult(field_name=field.name)
 
+        source = str(field.extraction_source or "").strip().lower()
+        fixed_value = (field.fixed_value or "").strip()
+        if source in {"constant", "subtask_context"} and fixed_value:
+            result.value = fixed_value
+            result.confidence = 1.0
+            result.extraction_method = source
+            return result
+
+        if source == "task_url":
+            result.value = self.page.url
+            result.confidence = 1.0
+            result.extraction_method = "task_url"
+            return result
+
         html_content = await self._get_full_page_html()
         might_contain = await self.field_decider.check_field_in_page_text(html_content, field)
 
@@ -434,29 +448,42 @@ class FieldExtractor:
                     except (TypeError, ValueError):
                         mark_id_value = None
 
-                # 修改原因：字段导航点击同样经常出现“文本选对但 mark_id 读错/歧义”的问题，统一用文本优先纠正
-                if config.url_collector.validate_mark_id and target_text:
-                    mark_id_value = await resolve_single_mark_id(
-                        page=self.page,
-                        llm=self.llm_decider.llm,
-                        snapshot=snapshot,
-                        mark_id=mark_id_value,
-                        target_text=target_text,
-                        max_retries=config.url_collector.max_validation_retries,
-                    )
+                # 文本优先：当 mark_id 缺失，或开启验证时，按 target_text 解析/纠正元素。
+                if target_text and (config.url_collector.validate_mark_id or mark_id_value is None):
+                    try:
+                        mark_id_value = await resolve_single_mark_id(
+                            page=self.page,
+                            llm=self.llm_decider.llm,
+                            snapshot=snapshot,
+                            mark_id=mark_id_value,
+                            target_text=target_text,
+                            max_retries=config.url_collector.max_validation_retries,
+                        )
+                    except Exception as e:
+                        logger.info(f"[FieldExtractor] 点击动作文本解析失败，回退 text-only 执行: {e}")
 
-                if mark_id_value is not None:
-                    await self._execute_click(mark_id_value, snapshot)
+                if mark_id_value is not None or target_text:
+                    await self._execute_click(mark_id_value, snapshot, target_text=target_text)
+                else:
+                    logger.info("[FieldExtractor] 点击动作缺少 mark_id 与 target_text，已跳过")
                 await asyncio.sleep(1.0)
 
             elif action == "type":
                 mark_id = args.get("mark_id")
                 target_text = args.get("target_text") or ""
                 text = args.get("text")
-                if mark_id and text:
+                if text:
                     try:
-                        mark_id_value = int(mark_id)
-                        if config.url_collector.validate_mark_id and target_text:
+                        mark_id_value = int(mark_id) if mark_id is not None else None
+                    except (TypeError, ValueError):
+                        mark_id_value = None
+                        logger.info(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
+
+                    # 文本优先：当 mark_id 缺失，或开启验证时，按 target_text 解析/纠正输入框。
+                    if target_text and (
+                        config.url_collector.validate_mark_id or mark_id_value is None
+                    ):
+                        try:
                             mark_id_value = await resolve_single_mark_id(
                                 page=self.page,
                                 llm=self.llm_decider.llm,
@@ -465,11 +492,19 @@ class FieldExtractor:
                                 target_text=target_text,
                                 max_retries=config.url_collector.max_validation_retries,
                             )
-                        await self._execute_type(mark_id_value, text, snapshot)
-                    except (TypeError, ValueError):
-                        logger.info(f"[FieldExtractor] 输入动作 mark_id 无效: {mark_id}")
+                        except Exception as e:
+                            logger.info(
+                                f"[FieldExtractor] 输入动作文本解析失败，回退 text-only 执行: {e}"
+                            )
+
+                    await self._execute_type(
+                        mark_id_value,
+                        text,
+                        snapshot,
+                        target_text=target_text,
+                    )
                 else:
-                    logger.info("[FieldExtractor] 输入动作缺少 mark_id 或 text")
+                    logger.info("[FieldExtractor] 输入动作缺少 text")
                 await asyncio.sleep(0.5)
 
             elif action == "scroll":
@@ -490,7 +525,13 @@ class FieldExtractor:
         logger.info(f"[FieldExtractor] 达到最大导航步数 {self.max_nav_steps}")
         return None
 
-    async def _execute_click(self, mark_id: int, snapshot) -> bool:
+    async def _execute_click(
+        self,
+        mark_id: int | None,
+        snapshot,
+        *,
+        target_text: str | None = None,
+    ) -> bool:
         """执行点击操作"""
         try:
             mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
@@ -498,6 +539,7 @@ class FieldExtractor:
             action = Action(
                 action=ActionType.CLICK,
                 mark_id=mark_id,
+                target_text=target_text,
             )
 
             result, _ = await self.action_executor.execute(
@@ -511,7 +553,14 @@ class FieldExtractor:
             logger.info(f"[FieldExtractor] 点击失败: {e}")
             return False
 
-    async def _execute_type(self, mark_id: int, text: str, snapshot) -> bool:
+    async def _execute_type(
+        self,
+        mark_id: int | None,
+        text: str,
+        snapshot,
+        *,
+        target_text: str | None = None,
+    ) -> bool:
         """执行输入操作"""
         try:
             mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
@@ -519,6 +568,7 @@ class FieldExtractor:
             action = Action(
                 action=ActionType.TYPE,
                 mark_id=mark_id,
+                target_text=target_text,
                 text=text,
             )
 

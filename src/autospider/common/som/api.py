@@ -104,15 +104,29 @@ async def inject_and_scan(page: "Page") -> SoMSnapshot:
         scroll_info=scroll_info,
     )
 
+    # 默认隐藏覆盖层：执行与截图走“文本优先”，仅在歧义重选时再临时框选
+    try:
+        await set_overlay_visibility(page, False)
+    except Exception:
+        pass
+
     return snapshot
 
 
-async def capture_screenshot_with_marks(page: "Page") -> tuple[bytes, str]:
+async def capture_screenshot_with_marks(
+    page: "Page",
+    *,
+    include_marks: bool = False,
+) -> tuple[bytes, str]:
     """
-    截图（包含 SoM 标注框）
+    截图（默认不显示 SoM 标注框）
 
     返回: (screenshot_bytes, base64_encoded)
     """
+    try:
+        await set_overlay_visibility(page, bool(include_marks))
+    except Exception:
+        pass
     screenshot_bytes = await page.screenshot(full_page=False)
     screenshot_base64 = base64.b64encode(screenshot_bytes).decode("utf-8")
     return screenshot_bytes, screenshot_base64
@@ -247,6 +261,23 @@ async def capture_screenshot_with_custom_marks(
     }
     """
 
+    original_overlay_visible = False
+    try:
+        original_overlay_visible = bool(
+            await page.evaluate(
+                """
+                () => {
+                  const c = document.getElementById('__som_overlay_container__');
+                  if (!c) return false;
+                  const style = window.getComputedStyle(c);
+                  return style.display !== 'none' && style.visibility !== 'hidden';
+                }
+                """
+            )
+        )
+    except Exception:
+        original_overlay_visible = False
+
     await page.evaluate(
         js_draw,
         {
@@ -265,7 +296,7 @@ async def capture_screenshot_with_custom_marks(
             js_clear,
             {
                 "containerId": container_id,
-                "showOriginal": bool(hide_original_som),
+                "showOriginal": bool(hide_original_som and original_overlay_visible),
             },
         )
 

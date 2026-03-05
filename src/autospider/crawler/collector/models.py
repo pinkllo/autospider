@@ -65,3 +65,6 @@ class URLCollectorResult:
     task_description: str = ""  # 任务描述
     total_pages_scrolled: int = 0
     created_at: str = ""
+    plan_upgrade_requested: bool = False
+    plan_upgrade_reason: str = ""
+    plan_upgrade_site_url: str = ""

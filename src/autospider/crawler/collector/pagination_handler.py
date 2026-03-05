@@ -293,70 +293,70 @@ class PaginationHandler:
                 input_xpath = None
                 button_xpath = None
 
-                if input_mark_id:
-                    try:
-                        input_mark_id_value = int(input_mark_id)
-                    except (TypeError, ValueError):
-                        input_mark_id_value = None
+                try:
+                    input_mark_id_value = int(input_mark_id) if input_mark_id is not None else None
+                except (TypeError, ValueError):
+                    input_mark_id_value = None
 
-                    # 修改原因：全项目统一“文本优先纠正 mark_id”，输入框常见 innerText 为空，需要依赖 placeholder/aria-label
-                    if config.url_collector.validate_mark_id and input_text:
-                        corrected_mark_id = await resolve_single_mark_id(
-                            page=self.page,
-                            llm=self.llm_decision_maker.decider.llm,
-                            snapshot=snapshot,
-                            mark_id=input_mark_id_value,
-                            target_text=input_text,
-                            max_retries=config.url_collector.max_validation_retries,
-                        )
-                        if corrected_mark_id is not None:
-                            input_mark_id_value = corrected_mark_id
-
-                    element = (
-                        next(
-                            (m for m in snapshot.marks if m.mark_id == int(input_mark_id_value)),
-                            None,
-                        )
-                        if input_mark_id_value is not None
-                        else None
+                # 文本优先：即使未返回 mark_id，也允许仅凭文本解析输入框元素
+                if input_text and (config.url_collector.validate_mark_id or input_mark_id_value is None):
+                    corrected_mark_id = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decision_maker.decider.llm,
+                        snapshot=snapshot,
+                        mark_id=input_mark_id_value,
+                        target_text=input_text,
+                        max_retries=config.url_collector.max_validation_retries,
                     )
-                    if element and element.xpath_candidates:
-                        sorted_candidates = sorted(
-                            element.xpath_candidates, key=lambda x: x.priority
-                        )
-                        input_xpath = sorted_candidates[0].xpath if sorted_candidates else None
+                    if corrected_mark_id is not None:
+                        input_mark_id_value = corrected_mark_id
 
-                if button_mark_id:
-                    try:
-                        button_mark_id_value = int(button_mark_id)
-                    except (TypeError, ValueError):
-                        button_mark_id_value = None
-
-                    if config.url_collector.validate_mark_id and button_text:
-                        corrected_mark_id = await resolve_single_mark_id(
-                            page=self.page,
-                            llm=self.llm_decision_maker.decider.llm,
-                            snapshot=snapshot,
-                            mark_id=button_mark_id_value,
-                            target_text=button_text,
-                            max_retries=config.url_collector.max_validation_retries,
-                        )
-                        if corrected_mark_id is not None:
-                            button_mark_id_value = corrected_mark_id
-
-                    element = (
-                        next(
-                            (m for m in snapshot.marks if m.mark_id == int(button_mark_id_value)),
-                            None,
-                        )
-                        if button_mark_id_value is not None
-                        else None
+                element = (
+                    next(
+                        (m for m in snapshot.marks if m.mark_id == int(input_mark_id_value)),
+                        None,
                     )
-                    if element and element.xpath_candidates:
-                        sorted_candidates = sorted(
-                            element.xpath_candidates, key=lambda x: x.priority
-                        )
-                        button_xpath = sorted_candidates[0].xpath if sorted_candidates else None
+                    if input_mark_id_value is not None
+                    else None
+                )
+                if element and element.xpath_candidates:
+                    sorted_candidates = sorted(
+                        element.xpath_candidates, key=lambda x: x.priority
+                    )
+                    input_xpath = sorted_candidates[0].xpath if sorted_candidates else None
+
+                try:
+                    button_mark_id_value = int(button_mark_id) if button_mark_id is not None else None
+                except (TypeError, ValueError):
+                    button_mark_id_value = None
+
+                if button_text and (
+                    config.url_collector.validate_mark_id or button_mark_id_value is None
+                ):
+                    corrected_mark_id = await resolve_single_mark_id(
+                        page=self.page,
+                        llm=self.llm_decision_maker.decider.llm,
+                        snapshot=snapshot,
+                        mark_id=button_mark_id_value,
+                        target_text=button_text,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
+                    if corrected_mark_id is not None:
+                        button_mark_id_value = corrected_mark_id
+
+                element = (
+                    next(
+                        (m for m in snapshot.marks if m.mark_id == int(button_mark_id_value)),
+                        None,
+                    )
+                    if button_mark_id_value is not None
+                    else None
+                )
+                if element and element.xpath_candidates:
+                    sorted_candidates = sorted(
+                        element.xpath_candidates, key=lambda x: x.priority
+                    )
+                    button_xpath = sorted_candidates[0].xpath if sorted_candidates else None
 
                 if input_xpath and button_xpath:
                     return {"input": input_xpath, "button": button_xpath}
@@ -413,10 +413,16 @@ class PaginationHandler:
                 mark_id_raw = args.get("mark_id")
                 target_text = target_text or (args.get("target_text") or "")
 
-            if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
+            if (
+                data
+                and data.get("action") == "select"
+                and purpose in {"pagination_next", "next_page"}
+                and found
+                and (mark_id_raw is not None or target_text)
+            ):
                 reasoning = args.get("reasoning") or ""
                 logger.info(
-                    f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw}]: {reasoning}"
+                    f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw if mark_id_raw is not None else 'text-only'}]: {reasoning}"
                 )
 
                 try:
@@ -424,8 +430,8 @@ class PaginationHandler:
                 except (TypeError, ValueError):
                     mark_id_value = None
 
-                # 修改原因：分页按钮很容易把页面上的“>”等符号误认为编号，统一用文本优先纠正
-                if config.url_collector.validate_mark_id and target_text:
+                # 文本优先：mark_id 可缺省，始终允许按文本纠正/解析
+                if target_text and (config.url_collector.validate_mark_id or mark_id_value is None):
                     mark_id_value = await resolve_single_mark_id(
                         page=self.page,
                         llm=self.llm_decision_maker.decider.llm,
@@ -434,6 +440,10 @@ class PaginationHandler:
                         target_text=target_text,
                         max_retries=config.url_collector.max_validation_retries,
                     )
+
+                if mark_id_value is None:
+                    logger.info("[Extract-Pagination-LLM] 无法根据文本解析分页按钮 mark_id")
+                    return None
 
                 # 找到对应的元素，获取其 xpath
                 element = next((m for m in snapshot.marks if m.mark_id == mark_id_value), None)
@@ -633,15 +643,23 @@ class PaginationHandler:
                 mark_id_raw = args.get("mark_id")
                 target_text = target_text or (args.get("target_text") or "")
 
-            if data and data.get("action") == "select" and purpose in {"pagination_next", "next_page"} and found and mark_id_raw is not None:
-                logger.info(f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw}]")
+            if (
+                data
+                and data.get("action") == "select"
+                and purpose in {"pagination_next", "next_page"}
+                and found
+                and (mark_id_raw is not None or target_text)
+            ):
+                logger.info(
+                    f"[Pagination-LLM] 找到下一页按钮 [{mark_id_raw if mark_id_raw is not None else 'text-only'}]"
+                )
 
                 try:
                     mark_id_value = int(mark_id_raw)
                 except (TypeError, ValueError):
                     mark_id_value = None
 
-                if config.url_collector.validate_mark_id and target_text:
+                if target_text and (config.url_collector.validate_mark_id or mark_id_value is None):
                     mark_id_value = await resolve_single_mark_id(
                         page=self.page,
                         llm=self.llm_decision_maker.decider.llm,
@@ -650,10 +668,6 @@ class PaginationHandler:
                         target_text=target_text,
                         max_retries=config.url_collector.max_validation_retries,
                     )
-
-                if mark_id_value is None:
-                    logger.info(f"[Pagination-LLM] mark_id 无效，无法点击: {mark_id_raw}")
-                    return False
 
                 mark_id_to_xpath = build_mark_id_to_xpath_map(snapshot)
                 executor = ActionExecutor(self.page)

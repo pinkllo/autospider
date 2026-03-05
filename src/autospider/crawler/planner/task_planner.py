@@ -20,6 +20,7 @@ from ...common.config import config
 from ...common.logger import get_logger
 from ...common.protocol import parse_json_dict_from_llm
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
+from ...common.som.text_first import resolve_single_mark_id
 from ...common.types import SubTask, SubTaskStatus, TaskPlan
 from ...common.utils.paths import get_prompt_path
 from ...common.utils.prompt_template import render_template
@@ -49,6 +50,7 @@ class TaskPlanner:
         site_url: str,
         user_request: str,
         output_dir: str = "output",
+        use_main_model: bool = False,
     ):
         """初始化任务规划器。
 
@@ -57,16 +59,24 @@ class TaskPlanner:
             site_url: 目标网站的根地址或起始 URL。
             user_request: 用户的原始采集需求描述。
             output_dir: 规划结果（TaskPlan）的保存目录，默认为 "output"。
+            use_main_model: 是否强制使用主模型配置（用于执行阶段权限下放）。
         """
         self.page = page
         self.site_url = site_url
         self.user_request = user_request
         self.output_dir = output_dir
 
-        # 获取 LLM 配置：优先使用 planner 专用配置，若无则回退到主配置
-        api_key = config.llm.planner_api_key or config.llm.api_key
-        api_base = config.llm.planner_api_base or config.llm.api_base
-        model = config.llm.planner_model or config.llm.model
+        # 获取 LLM 配置：
+        # - 默认优先使用 planner 专用配置（兼容现有逻辑）
+        # - use_main_model=True 时，强制使用主模型，支持“执行阶段下放规划权限”
+        if use_main_model:
+            api_key = config.llm.api_key
+            api_base = config.llm.api_base
+            model = config.llm.model
+        else:
+            api_key = config.llm.planner_api_key or config.llm.api_key
+            api_base = config.llm.planner_api_base or config.llm.api_base
+            model = config.llm.planner_model or config.llm.model
 
         # 初始化 ChatOpenAI 实例
         self.llm = ChatOpenAI(
@@ -102,7 +112,7 @@ class TaskPlanner:
         await clear_overlay(self.page)
 
         # 步骤 3: 将截图发送给 LLM 进行视觉分析，识别导航分类
-        analysis = await self._analyze_site_structure(screenshot_base64)
+        analysis = await self._analyze_site_structure(screenshot_base64, snapshot)
 
         if not analysis:
             logger.warning("[Planner] LLM 分析失败或未识别到有效结构，将生成空计划")
@@ -118,11 +128,56 @@ class TaskPlanner:
         logger.info("[Planner] 规划完成，识别并生成了 %d 个子任务", len(plan.subtasks))
         return plan
 
-    async def _analyze_site_structure(self, screenshot_base64: str) -> dict | None:
+    def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
+        """构建提供给 LLM 的候选分类元素列表（文本优先，不依赖截图框号）。"""
+        marks = getattr(snapshot, "marks", None) or []
+        if not marks:
+            return "无"
+
+        interactive_roles = {"link", "tab", "menuitem", "button", "option", "treeitem"}
+        candidates: list[tuple[int, str]] = []
+
+        for mark in marks:
+            text = str(getattr(mark, "text", "") or "").strip()
+            aria_label = str(getattr(mark, "aria_label", "") or "").strip()
+            href = str(getattr(mark, "href", "") or "").strip()
+            tag = str(getattr(mark, "tag", "") or "").lower()
+            role = str(getattr(mark, "role", "") or "").lower()
+
+            if tag not in {"a", "button", "li", "div", "span"} and role not in interactive_roles:
+                continue
+            label = text or aria_label
+            if not label:
+                continue
+
+            score = 0
+            if tag == "a":
+                score += 3
+            if role in {"link", "tab", "menuitem"}:
+                score += 2
+            if href:
+                score += 1
+            if len(label) > 40:
+                score -= 1
+
+            line = f"- [{mark.mark_id}] {label}"
+            if href:
+                line += f" | href={href[:80]}"
+            candidates.append((score, line))
+
+        if not candidates:
+            return "无"
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        lines = [line for _, line in candidates[:max_candidates]]
+        return "\n".join(lines) if lines else "无"
+
+    async def _analyze_site_structure(self, screenshot_base64: str, snapshot: object) -> dict | None:
         """调用 LLM 视觉接口，分析带 SoM 标注的页面截图。
 
         Args:
-            screenshot_base64: Base64 编码的页面截图（包含 mark_id 标注）。
+            screenshot_base64: Base64 编码的页面截图（默认不含 SoM 标注框）。
+            snapshot: SoM 扫描快照（用于构建候选元素列表）。
 
         Returns:
             dict | None: 解析后的 JSON 对象，包含 subtasks 列表；如果失败则返回 None。
@@ -139,6 +194,7 @@ class TaskPlanner:
             variables={
                 "user_request": self.user_request,
                 "current_url": self.page.url,
+                "candidate_elements": self._build_planner_candidates(snapshot),
             },
         )
 
@@ -174,6 +230,56 @@ class TaskPlanner:
 
         return None
 
+    async def _resolve_mark_id_from_link_text(self, snapshot: object, link_text: str) -> int | None:
+        """根据分类文本解析 mark_id（仅在歧义时触发文本消歧）。"""
+        target = str(link_text or "").strip()
+        if not target:
+            return None
+
+        marks = getattr(snapshot, "marks", None) or []
+        if not marks:
+            return None
+
+        normalized_target = "".join(target.lower().split())
+        exact_candidates: list[int] = []
+        fuzzy_candidates: list[int] = []
+
+        for mark in marks:
+            text = str(getattr(mark, "text", "") or "").strip()
+            aria_label = str(getattr(mark, "aria_label", "") or "").strip()
+            haystack = " ".join([text, aria_label]).strip()
+            if not haystack:
+                continue
+            normalized_haystack = "".join(haystack.lower().split())
+            if not normalized_haystack:
+                continue
+            if normalized_haystack == normalized_target:
+                exact_candidates.append(mark.mark_id)
+            elif normalized_target in normalized_haystack or normalized_haystack in normalized_target:
+                fuzzy_candidates.append(mark.mark_id)
+
+        if len(exact_candidates) == 1:
+            return exact_candidates[0]
+        if not exact_candidates and len(fuzzy_candidates) == 1:
+            return fuzzy_candidates[0]
+
+        try:
+            # 文本优先统一解析：多命中时会自动进入候选框消歧。
+            return await resolve_single_mark_id(
+                page=self.page,
+                llm=self.llm,
+                snapshot=snapshot,
+                mark_id=None,
+                target_text=target,
+                max_retries=config.url_collector.max_validation_retries,
+            )
+        except Exception:
+            if exact_candidates:
+                return exact_candidates[0]
+            if fuzzy_candidates:
+                return fuzzy_candidates[0]
+            return None
+
     async def _extract_subtask_urls(
         self, analysis: dict, snapshot: object
     ) -> list[SubTask]:
@@ -202,7 +308,15 @@ class TaskPlanner:
 
         for idx, raw in enumerate(raw_subtasks):
             name = raw.get("name", f"分类_{idx + 1}")
-            mark_id = raw.get("mark_id")
+            link_text = str(raw.get("link_text") or name or "").strip()
+            try:
+                mark_id = int(raw.get("mark_id")) if raw.get("mark_id") is not None else None
+            except (TypeError, ValueError):
+                mark_id = None
+            if mark_id is None and link_text:
+                mark_id = await self._resolve_mark_id_from_link_text(snapshot, link_text)
+                if mark_id is not None:
+                    logger.info("[Planner] [%s] 文本解析到 mark_id=%s", name, mark_id)
             task_desc = raw.get("task_description", f"采集 {name} 分类的数据")
 
             list_url = ""

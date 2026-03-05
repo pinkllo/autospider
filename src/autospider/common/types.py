@@ -115,6 +115,7 @@ class ActionType(str, Enum):
     EXTRACT = "extract"
     GO_BACK = "go_back"  # 返回当前标签页上一页
     GO_BACK_TAB = "go_back_tab"  # 返回上一标签页
+    PLAN_SUBTASKS = "plan_subtasks"  # 执行阶段主动升级为 plan agent 并拆分子任务
     DONE = "done"
     RETRY = "retry"
 
@@ -132,6 +133,7 @@ class Action(BaseModel):
     timeout_ms: int = Field(default=5000, description="等待超时")
     thinking: str = Field(default="", description="LLM 决策推理过程")
     expectation: str | None = Field(default=None, description="预期结果（用于校验）")
+    summary: str | None = Field(default=None, description="动作摘要（如 plan_subtasks 的升级理由）")
 
 
 class ActionResult(BaseModel):
@@ -258,6 +260,13 @@ class SubTask(BaseModel):
     max_pages: int | None = Field(default=None, description="最大翻页次数")
     target_url_count: int | None = Field(default=None, description="目标采集 URL 数量")
     priority: int = Field(default=0, description="优先级，越小越优先")
+    parent_id: str | None = Field(default=None, description="父子任务 ID（运行时拆分时使用）")
+    depth: int = Field(default=0, description="子任务层级深度（根任务=0）")
+    created_by: str = Field(default="initial_plan", description="子任务来源（initial_plan/runtime_plan）")
+    runtime_plan_attempted: bool = Field(
+        default=False,
+        description="是否已在执行阶段尝试过运行时再规划",
+    )
     nav_steps: list[dict] = Field(default_factory=list, description="从首页到达该分类的导航步骤")
     status: SubTaskStatus = Field(default=SubTaskStatus.PENDING, description="当前状态")
     retry_count: int = Field(default=0, description="已重试次数")

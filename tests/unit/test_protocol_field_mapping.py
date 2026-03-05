@@ -32,8 +32,12 @@ def test_parse_protocol_message_from_dict_payload():
     assert parsed["args"]["mark_id"] == 12
 
 
-def test_parse_protocol_message_missing_action_returns_none():
-    assert parse_protocol_message({"args": {"mark_id": 1}}) is None
+def test_parse_protocol_message_missing_action_can_infer_action():
+    parsed = parse_protocol_message({"args": {"mark_id": 1}})
+    assert parsed is not None
+    assert parsed["action"] == "click"
+    assert parsed["args"]["mark_id"] == 1
+    assert parse_protocol_message({}) is None
     assert parse_protocol_message(None) is None
 
 

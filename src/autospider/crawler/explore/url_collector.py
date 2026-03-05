@@ -100,6 +100,9 @@ class URLCollector(BaseCollector):
         self.step_index = 0  # 当前操作步数索引
         self.visited_detail_urls: set[str] = set()  # 已访问过的详情页 URL，用于去重
         self.common_pattern: CommonPattern | None = None  # 提取出的公共模式（XPath 等）
+        self.plan_upgrade_requested: bool = False
+        self.plan_upgrade_reason: str = ""
+        self.plan_upgrade_site_url: str = ""
 
         # 初始化额外组件
         self.decider = LLMDecider()  # LLM 决策核心组件
@@ -203,6 +206,20 @@ class URLCollector(BaseCollector):
             new_page = self.navigation_handler.page
             new_list_url = self.navigation_handler.list_url or new_page.url
             self._sync_page_references(new_page, list_url=new_list_url)
+
+        if self.navigation_handler and self.navigation_handler.plan_upgrade_requested:
+            self.plan_upgrade_requested = True
+            self.plan_upgrade_reason = self.navigation_handler.plan_upgrade_reason
+            self.plan_upgrade_site_url = self.page.url
+
+            logger.info("\n[Phase 2] 模型主动请求升级为 Planner，进入子任务拆分流程")
+            logger.info("[Phase 2] 升级原因: %s", self.plan_upgrade_reason[:300])
+            self._save_progress_status(
+                status="FAILED",
+                pause_reason="plan_upgrade_requested",
+                append_urls=True,
+            )
+            return self._create_result()
 
         # 3. 探索阶段
         if is_resume and self.common_detail_xpath:
@@ -476,11 +493,16 @@ class URLCollector(BaseCollector):
         args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
         reasoning = args.get("reasoning", "")
         items = args.get("items") or []
-        mark_id_text_map = {
-            str(it.get("mark_id")): str(it.get("text") or it.get("target_text") or "")
-            for it in items
-            if isinstance(it, dict) and it.get("mark_id") is not None
-        }
+        mark_id_text_map: dict[str, str] = {}
+        for idx, it in enumerate(items):
+            if not isinstance(it, dict):
+                continue
+            text_value = str(it.get("text") or it.get("target_text") or "").strip()
+            if not text_value:
+                continue
+            raw_mark_id = it.get("mark_id")
+            key = str(raw_mark_id) if raw_mark_id is not None else f"text_only_{idx}"
+            mark_id_text_map[key] = text_value
         if not mark_id_text_map:
             mark_id_text_map = args.get("mark_id_text_map", {}) or {}
         old_mark_ids = args.get("mark_ids", [])
@@ -491,17 +513,24 @@ class URLCollector(BaseCollector):
             logger.info(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
 
             # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
-            if config.url_collector.validate_mark_id:
+            should_resolve_by_text = config.url_collector.validate_mark_id or any(
+                not str(k).isdigit() for k in mark_id_text_map.keys()
+            )
+            if should_resolve_by_text:
                 # 修改原因：解析逻辑已统一抽到 common/som/text_first.py，这里直接调用避免重复封装
-                mark_ids = await resolve_mark_ids_from_map(
-                    page=self.page,
-                    llm=self.decider.llm,
-                    snapshot=snapshot,
-                    mark_id_text_map=mark_id_text_map,
-                    max_retries=config.url_collector.max_validation_retries,
-                )
+                try:
+                    mark_ids = await resolve_mark_ids_from_map(
+                        page=self.page,
+                        llm=self.decider.llm,
+                        snapshot=snapshot,
+                        mark_id_text_map=mark_id_text_map,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
+                except Exception as e:
+                    logger.warning(f"[Explore] 文本解析 mark_id 失败，回退数字 id: {e}")
+                    mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
             else:
-                mark_ids = [int(k) for k in mark_id_text_map.keys()]
+                mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
         elif old_mark_ids:
             logger.info(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
             mark_ids = old_mark_ids
@@ -573,7 +602,7 @@ class URLCollector(BaseCollector):
         logger.info(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
 
         # 文本优先纠正 mark_id，提高点击准确度
-        if config.url_collector.validate_mark_id and target_text:
+        if target_text and (config.url_collector.validate_mark_id or mark_id is None):
             try:
                 mark_id = await resolve_single_mark_id(
                     page=self.page,
@@ -669,6 +698,9 @@ class URLCollector(BaseCollector):
             list_page_url=self.list_url,
             task_description=self.task_description,
             created_at=datetime.now().isoformat(),
+            plan_upgrade_requested=self.plan_upgrade_requested,
+            plan_upgrade_reason=self.plan_upgrade_reason,
+            plan_upgrade_site_url=self.plan_upgrade_site_url,
         )
 
     async def _save_result(self, result: URLCollectorResult, crawler_script: str = "") -> None:
@@ -685,6 +717,9 @@ class URLCollector(BaseCollector):
             "list_page_url": result.list_page_url,
             "task_description": result.task_description,
             "collected_urls": result.collected_urls,
+            "plan_upgrade_requested": result.plan_upgrade_requested,
+            "plan_upgrade_reason": result.plan_upgrade_reason,
+            "plan_upgrade_site_url": result.plan_upgrade_site_url,
             "nav_steps": self.nav_steps,
             "detail_visits": [
                 {

@@ -253,7 +253,7 @@ class PlannerConfig(BaseModel):
 
     # 同时运行的子任务最大数量
     max_concurrent_subtasks: int = Field(
-        default_factory=lambda: int(os.getenv("PLANNER_MAX_CONCURRENT", "3"))
+        default_factory=lambda: int(os.getenv("PLANNER_MAX_CONCURRENT", "10"))
     )
     # 失败子任务的最大重试次数
     max_subtask_retries: int = Field(
@@ -270,6 +270,24 @@ class PlannerConfig(BaseModel):
     # 子任务内部详情抽取消费者并发数（默认 1，避免资源过载）
     subtask_consumer_concurrency: int = Field(
         default_factory=lambda: int(os.getenv("PLANNER_SUBTASK_CONSUMER_CONCURRENCY", "1"))
+    )
+    # 是否允许在执行阶段动态再规划并新增子任务
+    runtime_subtasks_enabled: bool = Field(
+        default_factory=lambda: os.getenv("PLANNER_RUNTIME_SUBTASKS_ENABLED", "true").lower()
+        == "true"
+    )
+    # 运行时再规划允许的最大深度（根任务 depth=0）
+    runtime_subtasks_max_depth: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_RUNTIME_SUBTASKS_MAX_DEPTH", "5"))
+    )
+    # 单次运行时再规划最多新增子任务数
+    runtime_subtasks_max_children: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_RUNTIME_SUBTASKS_MAX_CHILDREN", "20"))
+    )
+    # 运行时再规划是否强制使用当前执行模型（而非 planner 专用模型）
+    runtime_subtasks_use_main_model: bool = Field(
+        default_factory=lambda: os.getenv("PLANNER_RUNTIME_SUBTASKS_USE_MAIN_MODEL", "true").lower()
+        == "true"
     )
 
 

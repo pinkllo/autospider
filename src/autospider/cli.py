@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import threading
 from pathlib import Path
@@ -18,7 +19,7 @@ from .common.exceptions import ValidationError, URLValidationError
 from .common.llm import TaskClarifier, DialogueMessage, ClarifiedTask
 from .common.logger import get_logger
 from .field import FieldDefinition
-from .pipeline import run_pipeline
+from .graph import GraphInput, GraphRunner
 from .field import run_field_pipeline
 
 # 日志器
@@ -246,6 +247,40 @@ def _resolve_chat_execution_mode(
     return "multi"
 
 
+def _serialize_fields(fields: list[FieldDefinition]) -> list[dict]:
+    """将字段定义序列化为可传输字典。"""
+    return [dataclasses.asdict(field) for field in fields]
+
+
+def _invoke_graph(entry_mode: str, cli_args: dict) -> dict:
+    """统一调用 GraphRunner 并返回 dict 结构结果。"""
+    runner = GraphRunner()
+    graph_result = run_async_safely(
+        runner.invoke(
+            GraphInput(
+                entry_mode=entry_mode,  # type: ignore[arg-type]
+                cli_args=cli_args,
+            )
+        )
+    )
+    return graph_result.model_dump()
+
+
+def _raise_if_graph_failed(result: dict) -> None:
+    """图执行失败时抛出可读异常。"""
+    status = str(result.get("status") or "")
+    if status != "failed":
+        return
+    error = result.get("error") or {}
+    if isinstance(error, dict):
+        message = str(error.get("message") or "图执行失败")
+        code = str(error.get("code") or "")
+        if code:
+            raise RuntimeError(f"{code}: {message}")
+        raise RuntimeError(message)
+    raise RuntimeError("图执行失败")
+
+
 @app.command("generate-config")
 def generate_config_command(
     list_url: str = typer.Option(
@@ -302,15 +337,18 @@ def generate_config_command(
 
     # 运行配置生成器
     try:
-        result = run_async_safely(
-            _run_config_generator(
-                list_url=list_url,
-                task=task,
-                explore_count=explore_count,
-                headless=headless,
-                output_dir=output_dir,
-            )
+        graph_result = _invoke_graph(
+            "generate_config",
+            {
+                "list_url": list_url,
+                "task": task,
+                "explore_count": explore_count,
+                "headless": headless,
+                "output_dir": output_dir,
+            },
         )
+        _raise_if_graph_failed(graph_result)
+        summary = graph_result.get("summary") or {}
 
         # 显示结果
         logger.info(
@@ -318,10 +356,10 @@ def generate_config_command(
                 f"[green]配置文件已生成！[/green]\n\n"
                 f"文件路径: {output_dir}/collection_config.json\n\n"
                 f"配置内容:\n"
-                f"  - 导航步骤: {len(result.nav_steps)} 个\n"
-                f"  - 公共 XPath: {'已提取' if result.common_detail_xpath else '未提取'}\n"
-                f"  - 分页控件: {'已提取' if result.pagination_xpath else '未提取'}\n"
-                f"  - 跳转控件: {'已提取' if result.jump_widget_xpath else '未提取'}\n\n"
+                f"  - 导航步骤: {summary.get('nav_steps', 0)} 个\n"
+                f"  - 公共 XPath: {'已提取' if summary.get('has_common_detail_xpath') else '未提取'}\n"
+                f"  - 分页控件: {'已提取' if summary.get('has_pagination_xpath') else '未提取'}\n"
+                f"  - 跳转控件: {'已提取' if summary.get('has_jump_widget_xpath') else '未提取'}\n\n"
                 f"下一步: 使用 'autospider batch-collect --config-path {output_dir}/collection_config.json' 进行批量收集",
                 title="生成成功",
                 style="green",
@@ -408,20 +446,24 @@ def batch_collect_command(
 
     # 运行批量收集器
     try:
-        result = run_async_safely(
-            _run_batch_collector(
-                config_path=config_path,
-                max_pages=max_pages,
-                target_url_count=target_url_count,
-                headless=headless,
-                output_dir=output_dir,
-            )
+        graph_result = _invoke_graph(
+            "batch_collect",
+            {
+                "config_path": config_path,
+                "max_pages": max_pages,
+                "target_url_count": target_url_count,
+                "headless": headless,
+                "output_dir": output_dir,
+            },
         )
+        _raise_if_graph_failed(graph_result)
+        result = (graph_result.get("data") or {}).get("result")
 
         # 显示结果
+        collected_urls = list(getattr(result, "collected_urls", [])) if result else []
         logger.info(
             Panel(
-                f"[green]共收集到 {len(result.collected_urls)} 个详情页 URL[/green]\n\n"
+                f"[green]共收集到 {len(collected_urls)} 个详情页 URL[/green]\n\n"
                 f"结果已保存到:\n"
                 f"  - {output_dir}/collected_urls.json\n"
                 f"  - {output_dir}/urls.txt",
@@ -431,12 +473,12 @@ def batch_collect_command(
         )
 
         # 显示前 10 个 URL
-        if result.collected_urls:
+        if collected_urls:
             logger.info("\n[bold]前 10 个 URL:[/bold]")
-            for i, url in enumerate(result.collected_urls[:10], 1):
+            for i, url in enumerate(collected_urls[:10], 1):
                 logger.info(f"  {i}. {url}")
-            if len(result.collected_urls) > 10:
-                logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
+            if len(collected_urls) > 10:
+                logger.info(f"  ... 还有 {len(collected_urls) - 10} 个")
 
     except KeyboardInterrupt:
         logger.info("\n[yellow]用户中断[/yellow]")
@@ -551,21 +593,24 @@ def pipeline_run_command(
     )
 
     try:
-        result = run_async_safely(
-            run_pipeline(
-                list_url=list_url,
-                task_description=task,
-                fields=fields,
-                output_dir=output_dir,
-                headless=headless,
-                explore_count=field_explore_count,
-                validate_count=field_validate_count,
-                consumer_concurrency=consumer_concurrency,
-                max_pages=max_pages,
-                target_url_count=target_url_count,
-                pipeline_mode=pipeline_mode.strip() or None,
-            )
+        graph_result = _invoke_graph(
+            "pipeline_run",
+            {
+                "list_url": list_url,
+                "task_description": task,
+                "fields": _serialize_fields(fields),
+                "output_dir": output_dir,
+                "headless": headless,
+                "field_explore_count": field_explore_count,
+                "field_validate_count": field_validate_count,
+                "consumer_concurrency": consumer_concurrency,
+                "max_pages": max_pages,
+                "target_url_count": target_url_count,
+                "pipeline_mode": pipeline_mode.strip() or None,
+            },
         )
+        _raise_if_graph_failed(graph_result)
+        result = (graph_result.get("data") or {}).get("result") or {}
 
         logger.info(
             Panel(
@@ -914,23 +959,39 @@ def chat_pipeline_command(
         final_task = regen_task
 
     try:
-        if resolved_execution_mode == "single":
-            run_result = run_async_safely(
-                run_pipeline(
-                    list_url=list_url,
-                    task_description=task_description,
-                    fields=fields,
-                    output_dir=output_dir,
-                    headless=headless,
-                    explore_count=use_field_explore_count,
-                    validate_count=use_field_validate_count,
-                    consumer_concurrency=use_consumer_concurrency,
-                    max_pages=use_max_pages,
-                    target_url_count=use_target_url_count,
-                    pipeline_mode=pipeline_mode.strip() or None,
-                )
-            )
+        graph_result = _invoke_graph(
+            "chat_pipeline",
+            {
+                "request": initial_request,
+                "execution_mode": normalized_execution_mode,
+                "headless": headless,
+                "output_dir": output_dir,
+                "max_pages": use_max_pages,
+                "target_url_count": use_target_url_count,
+                "consumer_concurrency": use_consumer_concurrency,
+                "field_explore_count": use_field_explore_count,
+                "field_validate_count": use_field_validate_count,
+                "pipeline_mode": pipeline_mode.strip() or None,
+                "max_concurrent": use_max_concurrent,
+                "clarified_task": {
+                    "intent": final_task.intent,
+                    "list_url": list_url,
+                    "task_description": task_description,
+                    "fields": _serialize_fields(fields),
+                    "max_pages": final_task.max_pages,
+                    "target_url_count": final_task.target_url_count,
+                    "consumer_concurrency": final_task.consumer_concurrency,
+                    "field_explore_count": final_task.field_explore_count,
+                    "field_validate_count": final_task.field_validate_count,
+                },
+            },
+        )
+        _raise_if_graph_failed(graph_result)
+        summary = graph_result.get("summary") or {}
+        resolved_mode = str(summary.get("execution_mode_resolved") or resolved_execution_mode)
 
+        if resolved_mode == "single":
+            run_result = (graph_result.get("data") or {}).get("result") or {}
             console.print(
                 Panel(
                     f"[green]流水线完成（single）[/green]\n\n"
@@ -943,32 +1004,13 @@ def chat_pipeline_command(
                 )
             )
         else:
-            if pipeline_mode.strip():
-                logger.info("[chat-pipeline] multi 模式下忽略 --mode 参数。")
-            import dataclasses
-
-            fields_dicts = [dataclasses.asdict(f) for f in fields]
-            multi_request = (initial_request or task_description).strip()
-            multi_result = run_async_safely(
-                _run_multi_pipeline(
-                    site_url=list_url,
-                    request=multi_request,
-                    fields=fields_dicts,
-                    max_concurrent=use_max_concurrent,
-                    headless=headless,
-                    output_dir=output_dir,
-                )
-            )
-            if multi_result.get("error"):
-                raise RuntimeError(str(multi_result.get("error")))
-
             console.print(
                 Panel(
                     f"[green]流水线完成（multi）[/green]\n\n"
-                    f"总子任务数: {multi_result.get('total', 0)}\n"
-                    f"成功: {multi_result.get('completed', 0)}\n"
-                    f"失败: {multi_result.get('failed', 0)}\n"
-                    f"总采集数: {multi_result.get('total_collected', 0)}\n"
+                    f"总子任务数: {summary.get('total', 0)}\n"
+                    f"成功: {summary.get('completed', 0)}\n"
+                    f"失败: {summary.get('failed', 0)}\n"
+                    f"总采集数: {summary.get('total_collected', 0)}\n"
                     f"合并结果: {output_dir}/merged_results.jsonl\n"
                     f"进度文件: {output_dir}/task_progress.json",
                     title="执行完成",
@@ -1041,16 +1083,18 @@ def field_extract_command(
     )
 
     try:
-        run_async_safely(
-            _run_field_pipeline(
-                urls=urls,
-                fields=fields,
-                output_dir=output_dir,
-                headless=headless,
-                explore_count=field_explore_count,
-                validate_count=field_validate_count,
-            )
+        graph_result = _invoke_graph(
+            "field_extract",
+            {
+                "urls": urls,
+                "fields": _serialize_fields(fields),
+                "output_dir": output_dir,
+                "headless": headless,
+                "field_explore_count": field_explore_count,
+                "field_validate_count": field_validate_count,
+            },
         )
+        _raise_if_graph_failed(graph_result)
 
         logger.info(
             Panel(
@@ -1213,23 +1257,26 @@ def collect_urls_command(
     # 运行收集器（状态提示）
     try:
         with console.status("[cyan]正在执行收集任务...[/cyan]", spinner="dots"):
-            result = run_async_safely(
-                _run_collector(
-                    list_url=list_url,
-                    task=task,
-                    explore_count=explore_count,
-                    max_pages=max_pages,
-                    target_url_count=target_url_count,
-                    headless=headless,
-                    output_dir=output_dir,
-                )
+            graph_result = _invoke_graph(
+                "collect_urls",
+                {
+                    "list_url": list_url,
+                    "task": task,
+                    "explore_count": explore_count,
+                    "max_pages": max_pages,
+                    "target_url_count": target_url_count,
+                    "headless": headless,
+                    "output_dir": output_dir,
+                },
             )
+            _raise_if_graph_failed(graph_result)
+            result = (graph_result.get("data") or {}).get("result")
 
         # 显示结果
         logger.info("\n")
 
         # 显示探索的详情页
-        if result.detail_visits:
+        if result and result.detail_visits:
             table = Table(title="探索的详情页")
             table.add_column("序号", style="cyan")
             table.add_column("元素文本", style="green")
@@ -1252,7 +1299,7 @@ def collect_urls_command(
             logger.info(table)
 
         # 显示提取的模式
-        if result.common_pattern:
+        if result and result.common_pattern:
             pattern = result.common_pattern
             logger.info(
                 Panel(
@@ -1267,9 +1314,10 @@ def collect_urls_command(
             )
 
         # 显示收集结果
+        collected_urls = list(getattr(result, "collected_urls", [])) if result else []
         logger.info(
             Panel(
-                f"[green]共收集到 {len(result.collected_urls)} 个详情页 URL[/green]\n\n"
+                f"[green]共收集到 {len(collected_urls)} 个详情页 URL[/green]\n\n"
                 f"结果已保存到:\n"
                 f"  - {output_dir}/collected_urls.json\n"
                 f"  - {output_dir}/urls.txt",
@@ -1279,12 +1327,12 @@ def collect_urls_command(
         )
 
         # 显示前 10 个 URL
-        if result.collected_urls:
+        if collected_urls:
             logger.info("\n[bold]前 10 个 URL:[/bold]")
-            for i, url in enumerate(result.collected_urls[:10], 1):
+            for i, url in enumerate(collected_urls[:10], 1):
                 logger.info(f"  {i}. {url}")
-            if len(result.collected_urls) > 10:
-                logger.info(f"  ... 还有 {len(result.collected_urls) - 10} 个")
+            if len(collected_urls) > 10:
+                logger.info(f"  ... 还有 {len(collected_urls) - 10} 个")
 
     except KeyboardInterrupt:
         logger.info("\n[yellow]用户中断[/yellow]")
@@ -1485,22 +1533,19 @@ def multi_pipeline_command(
     )
 
     try:
-        result = run_async_safely(
-            _run_multi_pipeline(
-                site_url=site_url,
-                request=request,
-                fields=fields_dicts,
-                max_concurrent=max_concurrent,
-                headless=headless,
-                output_dir=output_dir,
-            )
+        graph_result = _invoke_graph(
+            "multi_pipeline",
+            {
+                "site_url": site_url,
+                "request": request,
+                "fields": fields_dicts,
+                "max_concurrent": max_concurrent,
+                "headless": headless,
+                "output_dir": output_dir,
+            },
         )
-
-        if result.get("error"):
-            console.print(
-                Panel(f"[red]{result['error']}[/red]", title="执行错误", style="red")
-            )
-            raise typer.Exit(1)
+        _raise_if_graph_failed(graph_result)
+        result = graph_result.get("summary") or {}
 
         console.print(
             Panel(
@@ -1577,16 +1622,6 @@ async def _run_multi_pipeline(
         table.add_row(str(i), st.name, st.list_url[:60] + "...", st.task_description[:30])
 
     console.print(table)
-
-    # 用户确认
-    action = typer.prompt(
-        "请确认 [1=开始执行, 2=取消]", default="1"
-    ).strip()
-
-    if action != "1":
-        await shutdown_browser_engine()
-        console.print("[yellow]已取消[/yellow]")
-        return {"error": "用户取消"}
 
     # Phase 2: 调度执行
     console.print("\n[bold cyan]🚀 Phase 2: 并行执行子任务...[/bold cyan]")

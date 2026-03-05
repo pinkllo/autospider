@@ -376,11 +376,16 @@ class ConfigGenerator:
         args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
         reasoning = args.get("reasoning", "")
         items = args.get("items") or []
-        mark_id_text_map = {
-            str(it.get("mark_id")): str(it.get("text") or it.get("target_text") or "")
-            for it in items
-            if isinstance(it, dict) and it.get("mark_id") is not None
-        }
+        mark_id_text_map: dict[str, str] = {}
+        for idx, it in enumerate(items):
+            if not isinstance(it, dict):
+                continue
+            text_value = str(it.get("text") or it.get("target_text") or "").strip()
+            if not text_value:
+                continue
+            raw_mark_id = it.get("mark_id")
+            key = str(raw_mark_id) if raw_mark_id is not None else f"text_only_{idx}"
+            mark_id_text_map[key] = text_value
         if not mark_id_text_map:
             mark_id_text_map = args.get("mark_id_text_map", {}) or {}
         old_mark_ids = args.get("mark_ids", [])
@@ -391,17 +396,24 @@ class ConfigGenerator:
             logger.info(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
 
             # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
-            if config.url_collector.validate_mark_id:
+            should_resolve_by_text = config.url_collector.validate_mark_id or any(
+                not str(k).isdigit() for k in mark_id_text_map.keys()
+            )
+            if should_resolve_by_text:
                 # 修改原因：解析逻辑已统一抽到 common/som/text_first.py，这里直接调用避免重复封装
-                mark_ids = await resolve_mark_ids_from_map(
-                    page=self.page,
-                    llm=self.decider.llm,
-                    snapshot=snapshot,
-                    mark_id_text_map=mark_id_text_map,
-                    max_retries=config.url_collector.max_validation_retries,
-                )
+                try:
+                    mark_ids = await resolve_mark_ids_from_map(
+                        page=self.page,
+                        llm=self.decider.llm,
+                        snapshot=snapshot,
+                        mark_id_text_map=mark_id_text_map,
+                        max_retries=config.url_collector.max_validation_retries,
+                    )
+                except Exception as e:
+                    logger.warning(f"[Explore] 文本解析 mark_id 失败，回退数字 id: {e}")
+                    mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
             else:
-                mark_ids = [int(k) for k in mark_id_text_map.keys()]
+                mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
         elif old_mark_ids:
             logger.info(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
             mark_ids = old_mark_ids
@@ -465,7 +477,7 @@ class ConfigGenerator:
         logger.info(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
 
         # 修改原因：全项目统一“文本优先纠正 mark_id”，避免 LLM 读错编号导致误点
-        if config.url_collector.validate_mark_id and target_text:
+        if target_text and (config.url_collector.validate_mark_id or mark_id is None):
             try:
                 mark_id = await resolve_single_mark_id(
                     page=self.page,

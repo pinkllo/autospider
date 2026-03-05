@@ -369,6 +369,8 @@ class BatchFieldExtractor:
                     "description": f.description,
                     "required": f.required,
                     "data_type": f.data_type,
+                    "extraction_source": f.extraction_source,
+                    "fixed_value": f.fixed_value,
                 }
                 for f in result.fields
             ],
