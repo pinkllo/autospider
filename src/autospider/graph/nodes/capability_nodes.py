@@ -25,6 +25,16 @@ def _ok(
     payload: dict[str, Any] | None = None,
     artifacts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
+    """
+    构造成功的状态字典返回。
+    
+    Args:
+        payload: 节点处理后的有效载荷数据。
+        artifacts: 生成的文件产物列表。
+        
+    Returns:
+        包含成功状态、载荷、产物及空错误的字典。
+    """
     return {
         "node_status": "ok",
         "node_payload": payload or {},
@@ -34,6 +44,16 @@ def _ok(
 
 
 def _fatal(code: str, message: str) -> dict[str, Any]:
+    """
+    构造失败的状态字典返回。
+    
+    Args:
+        code: 错误代码。
+        message: 错误详细信息。
+        
+    Returns:
+        包含失败状态、错误代码及消息的字典。
+    """
     return {
         "node_status": "fatal",
         "node_payload": {},
@@ -45,6 +65,15 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
 
 
 def _field_definitions_from_dicts(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
+    """
+    将原始字典格式的字段列表转换为 FieldDefinition 对象列表。
+    
+    Args:
+        raw_fields: 包含字典形式字段配置的列表。
+        
+    Returns:
+        标准化的 FieldDefinition 对象列表。
+    """
     fields: list[FieldDefinition] = []
     for raw in raw_fields:
         if not isinstance(raw, dict):
@@ -62,6 +91,16 @@ def _field_definitions_from_dicts(raw_fields: list[dict[str, Any]]) -> list[Fiel
 
 
 def _artifact(label: str, path: str | Path) -> dict[str, str]:
+    """
+    构造标准化的产物字典。
+    
+    Args:
+        label: 产物标签/标识。
+        path: 产物文件路径。
+        
+    Returns:
+        产物字典，包含 label 和 path。
+    """
     return {"label": label, "path": str(path)}
 
 
@@ -70,6 +109,19 @@ async def _run_with_retry(
     *,
     error_code: str,
 ) -> dict[str, Any]:
+    """
+    使用重试机制运行异步任务。
+    
+    根据设定的重试延迟 (RETRY_DELAYS) 捕获异常并等待后重试。
+    如果在达到最大重试次数后仍然失败，则返回带有错误代码的致命错误结果。
+    
+    Args:
+        runner: 要执行的返回字典的异步回调函数。
+        error_code: 执行失败时返回的错误代码。
+        
+    Returns:
+        任务执行成功结果或最终失败时的致命错误结果。
+    """
     last_error: Exception | None = None
     for attempt in range(len(RETRY_DELAYS) + 1):
         try:
@@ -83,6 +135,12 @@ async def _run_with_retry(
 
 
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    单链路提取执行节点。
+    
+    解析状态参数，调用标准的单页面或列表结构页面爬取流水线 (run_pipeline)。
+    执行完成后汇总抓取链接、成功条目数据，并将产物信息挂载至状态返回。
+    """
     params = dict(state.get("normalized_params") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -118,6 +176,12 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    URL收集节点。
+    
+    启动浏览器引擎读取列表网页，使用大模型结合视觉页面探查 (SoM)，
+    智能收集符合用户指定任务要求的下属详情页URL。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -159,6 +223,12 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    智能提取配置生成节点。
+    
+    基于单页或列表页信息进行智能探查，推演产出通用的爬取配置模板（包含通用的XPath、分页定位、跳转规则等），
+    提供给后续阶段进行无头大批量的抓取使用。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -190,6 +260,12 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    大批量链接采集节点。
+    
+    利用已有提取配置（如之前生成的XPath模板）或用户传入配置，进行高效批量的链接抓取。
+    过程中不再进行缓慢的大模型视觉探索，提升爬取速率。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -228,6 +304,12 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    结构化字段详细提取节点。
+    
+    针对给定的长列表URL和字段定义结构 (FieldDefinition)，打开目标页使用多步流水线解析内容。
+    结合XPath和LLM清洗提取准确的高价值文本。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -270,6 +352,12 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    任务自动规划节点 (Plan)。
+    
+    作为 Recursive Plan 核心的起点。接管开放性任务描述，通过启动无头浏览器并分析首页导航结构，
+    将其细分为不同类别或栏目的精准子任务清单，构建 TaskPlan 并向后传导。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
@@ -301,6 +389,12 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def dispatch_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    多分支调度分发节点 (Dispatch)。
+    
+    承接 TaskPlan，运用队列对多个子任务 (Subtasks) 甚至运行期衍生的深层子任务 (Runtime Subtasks)
+    进行高并发排队执行。完成爬取过程的分支扩展和并发控制。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
     plan = state.get("task_plan")
     if not isinstance(plan, TaskPlan):
@@ -329,6 +423,12 @@ async def dispatch_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    结果统一聚合节点 (Aggregate)。
+    
+    在所有子任务并发执行并产生独立的产物文件后运行。负责全盘搜索并将局部的提取记录
+    (items)、链路记录合并为全局唯一的聚合输出文件，完成最终收尾打包任务。
+    """
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
     plan = state.get("task_plan")
     if not isinstance(plan, TaskPlan):
@@ -363,7 +463,13 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def execute_single_or_multi(state: dict[str, Any]) -> dict[str, Any]:
-    """chat-pipeline 的执行节点（single/multi）。"""
+    """
+    主路由综合执行节点（单模式/多模式无缝切换）。
+    
+    基于执行意图解析阶段的决策 (execution_mode_resolved):
+    - single: 表示简单页面，直接拉起 run_pipeline_node 线性获取。
+    - multi: 遇到复杂层级网站，拉起完整的 Plan -> Dispatch -> Aggregate 大模型规划递归分发链路。
+    """
     params = dict(state.get("normalized_params") or {})
     mode = str(params.get("execution_mode_resolved") or "multi")
 
