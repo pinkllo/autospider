@@ -14,6 +14,7 @@ from loguru import logger
 from playwright.async_api import Page
 
 from .base import BaseAnomalyHandler
+from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
 
 
@@ -84,6 +85,15 @@ class ChallengeHandler(BaseAnomalyHandler):
 
     async def handle(self, page: Page) -> None:
         logger.warning(">>> 触发通用风控挑战接管模式 <<<")
+        if interrupts_enabled(page):
+            raise BrowserInterventionRequired(
+                build_interrupt_payload(
+                    page,
+                    intervention_type="challenge_required",
+                    handler_name=self.name,
+                    message="请先完成人机验证或风控挑战，然后 resume。",
+                )
+            )
         self._user_confirmed = False
         confirm_task = None
         try:

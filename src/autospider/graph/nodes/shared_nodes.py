@@ -32,6 +32,7 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
     if not summary:
         payload = dict(state.get("node_payload") or {})
         summary = dict(payload.get("result") or {})
+    summary["thread_id"] = str(state.get("thread_id") or "")
     summary["request_id"] = str(state.get("request_id") or "")
     summary["entry_mode"] = str(state.get("entry_mode") or "")
     return {"summary": summary}

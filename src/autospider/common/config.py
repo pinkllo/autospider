@@ -114,6 +114,25 @@ class RedisConfig(BaseModel):
     max_retries: int = Field(default_factory=lambda: int(os.getenv("REDIS_MAX_RETRIES", "3")))
 
 
+class GraphCheckpointConfig(BaseModel):
+    """LangGraph checkpoint 配置。"""
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv("GRAPH_CHECKPOINT_ENABLED", "false").lower() == "true"
+    )
+    backend: str = Field(default_factory=lambda: os.getenv("GRAPH_CHECKPOINT_BACKEND", "redis"))
+    redis_url: str = Field(default_factory=lambda: os.getenv("GRAPH_REDIS_URL", ""))
+    host: str = Field(
+        default_factory=lambda: os.getenv("GRAPH_REDIS_HOST", os.getenv("REDIS_HOST", "localhost"))
+    )
+    port: int = Field(
+        default_factory=lambda: int(os.getenv("GRAPH_REDIS_PORT", os.getenv("REDIS_PORT", "6379")))
+    )
+    password: str | None = Field(
+        default_factory=lambda: os.getenv("GRAPH_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", None))
+    )
+    db: int = Field(default_factory=lambda: int(os.getenv("GRAPH_REDIS_DB", "1")))
+
 class URLCollectorConfig(BaseModel):
     """URL 收集器配置"""
 
@@ -299,6 +318,7 @@ class Config(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    graph_checkpoint: GraphCheckpointConfig = Field(default_factory=GraphCheckpointConfig)
     field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     planner: PlannerConfig = Field(default_factory=PlannerConfig)

@@ -13,6 +13,7 @@ from typing import Optional, List, Set
 from playwright.async_api import Page
 from loguru import logger
 from .base import BaseAnomalyHandler
+from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
 
 # UI 样式配置
@@ -176,6 +177,16 @@ class LoginHandler(BaseAnomalyHandler):
         5. 统一刷新动作由 PageGuard 在 handler 结束后执行
         """
         logger.warning(">>> 触发人工登录模式 <<<")
+        if interrupts_enabled(page):
+            raise BrowserInterventionRequired(
+                build_interrupt_payload(
+                    page,
+                    intervention_type="login_required",
+                    handler_name=self.name,
+                    message="请先完成人工登录，并确认认证状态已写入 .auth/default.json 后再 resume。",
+                    details={"auth_file": self.auth_file},
+                )
+            )
         
         success_reason = None
         try:

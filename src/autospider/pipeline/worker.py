@@ -32,11 +32,15 @@ class SubTaskWorker:
         fields: list[dict],
         output_dir: str = "output",
         headless: bool = False,
+        thread_id: str = "",
+        guard_intervention_mode: str = "blocking",
     ):
         self.subtask = subtask
         self.raw_fields = fields
         self.output_dir = str(Path(output_dir) / f"subtask_{subtask.id}")
         self.headless = headless
+        self.thread_id = thread_id
+        self.guard_intervention_mode = guard_intervention_mode
 
     def _prepare_fields(self) -> list[FieldDefinition]:
         """将字段定义字典转换为 FieldDefinition 列表。"""
@@ -146,6 +150,8 @@ class SubTaskWorker:
             consumer_concurrency=config.planner.subtask_consumer_concurrency,
             pipeline_mode=pipeline_mode,
             redis_key_prefix=redis_key_prefix,
+            guard_intervention_mode=self.guard_intervention_mode,
+            guard_thread_id=self.thread_id,
         )
 
         logger.info(

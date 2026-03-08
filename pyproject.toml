@@ -31,6 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 redis = [
     "redis>=7.1.0",
+    "langgraph-checkpoint-redis>=0.3.6",
 ]
 db = [
     "pandas>=2.3.3",

@@ -19,7 +19,7 @@ EntryMode = Literal[
 ]
 
 NodeStatus = Literal["ok", "retryable", "fatal"]
-GraphStatus = Literal["success", "partial_success", "failed"]
+GraphStatus = Literal["success", "partial_success", "failed", "interrupted"]
 
 
 class GraphError(BaseModel):
@@ -36,6 +36,7 @@ class GraphInput(BaseModel):
     cli_args: dict[str, Any] = Field(default_factory=dict)
     request_id: str = Field(default_factory=lambda: uuid4().hex)
     invoked_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    thread_id: str = Field(default_factory=lambda: uuid4().hex)
 
 
 class NodeResult(BaseModel):
@@ -56,3 +57,7 @@ class GraphResult(BaseModel):
     artifacts: list[dict[str, str]] = Field(default_factory=list)
     error: GraphError | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    thread_id: str = ""
+    checkpoint_id: str = ""
+    next_nodes: list[str] = Field(default_factory=list)
+    interrupts: list[dict[str, Any]] = Field(default_factory=list)

@@ -11,6 +11,7 @@ from loguru import logger
 
 from .registry import get_handlers
 from .handlers.base import BaseAnomalyHandler
+from .intervention import BrowserInterventionRequired
 from .task_utils import create_monitored_task
 
 
@@ -26,7 +27,9 @@ class PageGuard:
     与 GuardedPage 配合使用，实现业务代码无感的异常处理。
     """
 
-    def __init__(self):
+    def __init__(self, intervention_mode: str = "blocking", thread_id: str = ""):
+        self.intervention_mode = intervention_mode
+        self.thread_id = thread_id
         self._is_handling = False  # 标记是否正在处理异常
         self._lock = asyncio.Lock()  # 并发锁，确保同一时间只有一个处理器在工作
         self._poll_tasks: dict[int, asyncio.Task] = {}
@@ -36,6 +39,7 @@ class PageGuard:
         # set() = 空闲状态，clear() = 处理中状态
         self._idle_event = asyncio.Event()
         self._idle_event.set()  # 初始为空闲状态
+        self._pending_intervention: BrowserInterventionRequired | None = None
 
     async def run_inspection(self, page: Page):
         """
@@ -70,9 +74,13 @@ class PageGuard:
                         try:
                             # 发现问题，执行对应处理方法
                             await handler.handle(page)
-                            # 统一后置动作：异常处理后刷新当前 context 的全部页面，
-                            # 让共享风控状态在各标签页尽快同步生效。
-                            await self._refresh_context_pages(page, source_handler=handler.name)
+                            if self._pending_intervention is None:
+                                # 统一后置动作：异常处理后刷新当前 context 的全部页面，
+                                # 让共享风控状态在各标签页尽快同步生效。
+                                await self._refresh_context_pages(page, source_handler=handler.name)
+                        except BrowserInterventionRequired as exc:
+                            self._pending_intervention = exc
+                            logger.warning(f"[PageGuard] 异常状态已转换为 interrupt: {handler.name}")
                         finally:
                             # 无论成功与否，都重置处理状态并释放等待者
                             self._is_handling = False
@@ -119,6 +127,10 @@ class PageGuard:
         此方法由 GuardedPage 在导航操作后调用，实现业务代码无感等待。
         """
         await self._idle_event.wait()
+        pending = self._pending_intervention
+        if pending is not None:
+            self._pending_intervention = None
+            raise pending
 
     def attach_to_page(self, page: Page):
         """

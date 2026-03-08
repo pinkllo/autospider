@@ -32,11 +32,15 @@ class BrowserSession:
         viewport_width: int | None = None,
         viewport_height: int | None = None,
         slow_mo: int | None = None,
+        guard_intervention_mode: str = "blocking",
+        guard_thread_id: str = "",
     ):
         self.headless = headless if headless is not None else config.browser.headless
         self.viewport_width = viewport_width or config.browser.viewport_width
         self.viewport_height = viewport_height or config.browser.viewport_height
         self.slow_mo = slow_mo if slow_mo is not None else config.browser.slow_mo
+        self.guard_intervention_mode = guard_intervention_mode
+        self.guard_thread_id = guard_thread_id
 
         self._engine: BrowserEngine | None = None
         self._page: Page | GuardedPage | None = None
@@ -59,6 +63,8 @@ class BrowserSession:
             },
             timeout=config.browser.timeout_ms,
             auth_file=str(Path.cwd() / ".auth" / "default.json"),
+            guard_intervention_mode=self.guard_intervention_mode,
+            guard_thread_id=self.guard_thread_id,
         )
 
         # 进入上下文获取页面
@@ -126,12 +132,16 @@ async def create_browser_session(
     viewport_width: int | None = None,
     viewport_height: int | None = None,
     close_engine: bool = False,
+    guard_intervention_mode: str = "blocking",
+    guard_thread_id: str = "",
 ) -> AsyncGenerator[BrowserSession, None]:
     """创建浏览器会话的上下文管理器"""
     session = BrowserSession(
         headless=headless,
         viewport_width=viewport_width,
         viewport_height=viewport_height,
+        guard_intervention_mode=guard_intervention_mode,
+        guard_thread_id=guard_thread_id,
     )
     try:
         await session.start()

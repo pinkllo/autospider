@@ -48,6 +48,7 @@ class TaskDispatcher:
         runtime_subtask_max_depth: int | None = None,
         runtime_subtask_max_children: int | None = None,
         runtime_subtasks_use_main_model: bool | None = None,
+        global_target_url_count: int | None = None,
     ):
         """初始化多子任务并行调度器。
         
@@ -61,9 +62,11 @@ class TaskDispatcher:
             runtime_subtask_max_depth (int | None): 运行时扩充分支任务时允许的最大深度。
             runtime_subtask_max_children (int | None): 每个需扩充任务允许生成的最多子任务数量。
             runtime_subtasks_use_main_model (bool | None): 运行时扩充时是否强制使用主模型进行任务推断。
+            global_target_url_count (int | None): 用户指定的全局目标采集数量，用于运行时子任务继承。
         """
         self.plan = plan
         self.fields = fields
+        self.global_target_url_count = int(global_target_url_count) if global_target_url_count is not None else None
         self.output_dir = output_dir
         self.headless = headless
 
@@ -440,7 +443,7 @@ class TaskDispatcher:
                 if child.max_pages is None:
                     child.max_pages = parent.max_pages
                 if child.target_url_count is None:
-                    child.target_url_count = parent.target_url_count
+                    child.target_url_count = parent.target_url_count or self.global_target_url_count
 
                 # 做去重过滤判断（针对 URL 与执行描述）防止同级别重复执行
                 signature = self._task_signature(child)

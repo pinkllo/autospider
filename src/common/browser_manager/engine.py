@@ -171,6 +171,8 @@ class BrowserEngine:
         timeout: Optional[int] = None,
         enable_guard: bool = True,  # 是否启用异常监控，默认启用
         auto_load_cookie: bool = True,  # 是否自动加载默认 Cookie 文件
+        guard_intervention_mode: str = "blocking",
+        guard_thread_id: str = "",
         **context_kwargs
     ) -> AsyncGenerator[Page, None]:
         """
@@ -221,7 +223,7 @@ class BrowserEngine:
         if enable_guard:
             from .guarded_page import GuardedPage
             
-            guard = PageGuard()
+            guard = PageGuard(intervention_mode=guard_intervention_mode, thread_id=guard_thread_id)
             guard.attach_to_page(page)
             # 在初始导航前运行一次检查
             create_monitored_task(

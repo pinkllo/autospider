@@ -14,6 +14,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from ..common.browser.intervention import BrowserInterventionRequired
+
 from ..common.browser import BrowserSession, shutdown_browser_engine
 from ..common.config import config
 from ..common.channel.factory import create_url_channel
@@ -101,6 +103,8 @@ async def run_pipeline(
     target_url_count: int | None = None,
     pipeline_mode: str | None = None,
     redis_key_prefix: str | None = None,
+    guard_intervention_mode: str = "blocking",
+    guard_thread_id: str = "",
 ) -> dict:
     """并发运行列表采集和详情提取。
 
@@ -169,8 +173,16 @@ async def run_pipeline(
     url_only_mode = len(fields) == 0
 
     # 初始化两个独立的浏览器会话，分别用于列表页和详情页，减少资源竞争
-    list_session = BrowserSession(headless=headless)
-    detail_session = BrowserSession(headless=headless)
+    list_session = BrowserSession(
+        headless=headless,
+        guard_intervention_mode=guard_intervention_mode,
+        guard_thread_id=guard_thread_id,
+    )
+    detail_session = BrowserSession(
+        headless=headless,
+        guard_intervention_mode=guard_intervention_mode,
+        guard_thread_id=guard_thread_id,
+    )
 
     await list_session.start()
     await detail_session.start()
@@ -199,6 +211,8 @@ async def run_pipeline(
                 state["plan_upgrade_request"] = request
                 _set_state_error(state, "plan_upgrade_requested")
                 summary["plan_upgrade_request"] = request
+        except BrowserInterventionRequired:
+            raise
         except Exception as exc:  # noqa: BLE001
             _set_state_error(state, f"producer_error: {exc}")
             logger.info(f"[Pipeline] Producer failed: {exc}")
@@ -318,7 +332,11 @@ async def run_pipeline(
                 await task_queue.put(None)
 
         async def worker(_worker_id: int) -> None:
-            session = BrowserSession(headless=headless)
+            session = BrowserSession(
+                headless=headless,
+                guard_intervention_mode=guard_intervention_mode,
+                guard_thread_id=guard_thread_id,
+            )
             await session.start()
             extractor = BatchXPathExtractor(
                 page=session.page,
@@ -425,6 +443,8 @@ async def _process_task(
 
     try:
         record = await extractor._extract_from_url(url)
+    except BrowserInterventionRequired:
+        raise
     except Exception as exc:  # noqa: BLE001
         # 兜底处理：确保单条失败不会中断整条流水线
         async with summary_lock:
