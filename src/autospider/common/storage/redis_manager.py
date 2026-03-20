@@ -27,9 +27,110 @@ import json
 import time
 
 import redis.asyncio as aioredis
+from redis.asyncio.client import Script
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
+
+# ==================== Lua 脚本定义 ====================
+
+# 1. 原子推送：HSETNX 去重 + XADD 入队
+LUA_PUSH_TASK = """
+local is_new = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+if is_new == 1 then
+    redis.call('XADD', KEYS[2], '*', 'data_id', ARGV[1])
+    return 1
+end
+return 0
+"""
+
+# 2. 原子获取：XREADGROUP + HGET 批量获取详情
+LUA_FETCH_TASK = """
+local results = redis.call('XREADGROUP', 'GROUP', ARGV[1], ARGV[2], 'COUNT', ARGV[3], 'STREAMS', KEYS[1], '>')
+if not results or #results == 0 then return {} end
+
+local final_tasks = {}
+local messages = results[1][2]
+for _, msg in ipairs(messages) do
+    local stream_id = msg[1]
+    local fields = msg[2]
+    local data_id = nil
+    for i=1, #fields, 2 do
+        if fields[i] == 'data_id' then
+            data_id = fields[i+1]
+            break
+        end
+    end
+    
+    if data_id then
+        local data_json = redis.call('HGET', KEYS[2], data_id)
+        table.insert(final_tasks, {stream_id, data_id, data_json})
+    end
+end
+return final_tasks
+"""
+
+# 3. 原子失败处理：读取-判断计数-更新状态/转移死信
+LUA_FAIL_TASK = """
+local data_json = redis.call('HGET', KEYS[1], ARGV[1])
+if not data_json then return 0 end
+
+local data = cjson.decode(data_json)
+if not data['metadata'] or type(data['metadata']) ~= 'table' then
+    data['metadata'] = {}
+end
+
+local retry_count = tonumber(data['metadata']['retry_count'] or 0)
+local max_retries = tonumber(ARGV[5])
+
+if retry_count < max_retries then
+    data['metadata']['retry_count'] = retry_count + 1
+    data['metadata']['last_error'] = ARGV[4]
+    data['metadata']['last_failed_at'] = tonumber(ARGV[6])
+    redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(data))
+    return 1
+else
+    redis.call('XACK', KEYS[2], ARGV[3], ARGV[2])
+    data['final_failed_at'] = tonumber(ARGV[6])
+    data['final_error'] = ARGV[4]
+    data['total_retries'] = retry_count
+    redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(data))
+    redis.call('XADD', KEYS[3], '*', 
+        'data_id', ARGV[1], 
+        'url', data['url'] or '', 
+        'error', ARGV[4], 
+        'retries', tostring(retry_count), 
+        'failed_at', ARGV[6]
+    )
+    return 2
+end
+"""
+
+# 4. 原子捞回：XAUTOCLAIM + HGET 批量获取详情
+LUA_RECOVER_TASK = """
+local result = redis.call('XAUTOCLAIM', KEYS[1], ARGV[1], ARGV[2], ARGV[3], '0-0', 'COUNT', ARGV[4])
+local claimed_messages = result[2]
+if not claimed_messages or #claimed_messages == 0 then return {result[1], {}} end
+
+local final_tasks = {}
+for _, msg in ipairs(claimed_messages) do
+    local stream_id = msg[1]
+    local fields = msg[2]
+    local data_id = nil
+    for i=1, #fields, 2 do
+        if fields[i] == 'data_id' then
+            data_id = fields[i+1]
+            break
+        end
+    end
+    
+    if data_id then
+        local data_json = redis.call('HGET', KEYS[2], data_id)
+        table.insert(final_tasks, {stream_id, data_id, data_json})
+    end
+end
+return {result[1], final_tasks}
+"""
 
 
 class RedisQueueManager:
@@ -72,6 +173,12 @@ class RedisQueueManager:
         self.data_key = f"{key_prefix}:data"
         self.stream_key = f"{key_prefix}:stream"
         self.group_name = f"{key_prefix}:workers"
+
+        # Lua 脚本实例
+        self._lua_push: Script | None = None
+        self._lua_fetch: Script | None = None
+        self._lua_fail: Script | None = None
+        self._lua_recover: Script | None = None
 
     def _generate_hash_id(self, item: str) -> str:
         """生成 item 的稳定 hash ID
@@ -119,6 +226,12 @@ class RedisQueueManager:
             self.logger.info(
                 f"已连接到 Redis {self.host}:{self.port}，数据库: {self.db}，Key 前缀: {self.key_prefix}"
             )
+
+            # 注册 Lua 脚本
+            self._lua_push = self.client.register_script(LUA_PUSH_TASK)
+            self._lua_fetch = self.client.register_script(LUA_FETCH_TASK)
+            self._lua_fail = self.client.register_script(LUA_FAIL_TASK)
+            self._lua_recover = self.client.register_script(LUA_RECOVER_TASK)
 
             # 初始化 Consumer Group（如果不存在）
             await self._ensure_consumer_group()
@@ -182,7 +295,7 @@ class RedisQueueManager:
         Returns:
             是否成功推入（False 表示数据已存在，已去重）
         """
-        if not self.client:
+        if not self.client or not self._lua_push:
             return False
 
         try:
@@ -198,22 +311,18 @@ class RedisQueueManager:
 
             data_json = json.dumps(data, ensure_ascii=False)
 
-            # 1. 存入 Hash（HSETNX 去重）
-            # 利用 Redis 的 HSETNX 指令实现不可变单例写入：
-            # 若 identical(去重后) hash_id 已存在，直接返回 0。这是避免重复下发任务的第一道屏障。
-            is_new = await self.client.hsetnx(self.data_key, hash_id, data_json)
+            # 使用 Lua 脚本执行原子 HSETNX + XADD
+            is_new = await self._lua_push(
+                keys=[self.data_key, self.stream_key],
+                args=[hash_id, data_json]
+            )
 
-            if not is_new:
+            if is_new == 1:
+                self.logger.debug(f"已推入任务: {item[:60]}...")
+                return True
+            else:
                 self.logger.debug(f"数据项已存在（去重）: {item[:60]}...")
                 return False
-
-            # 2. 发布任务到 Stream 任务管道
-            # Stream 中只传递极度轻量级的 data_id（不包含庞大的完整网页元数据）。
-            # 消费者凭此 ID 回源 Hash 表读取明细，既保障了吞吐量又切断了消息体膨胀隐患。
-            await self.client.xadd(self.stream_key, {"data_id": hash_id})
-
-            self.logger.debug(f"已推入任务: {item[:60]}...")
-            return True
 
         except Exception as e:
             self.logger.error(f"推入任务失败: {e}")
@@ -231,13 +340,13 @@ class RedisQueueManager:
         Returns:
             成功推入的新任务数量（排除已存在的重复项）。
         """
-        if not self.client or not items:
+        if not self.client or not self._lua_push or not items:
             return 0
 
         success_count = 0
 
         try:
-            # 使用 pipeline 减少网络往返开销
+            # 使用 pipeline + Lua 脚本提高吞吐量
             async with self.client.pipeline() as pipe:
                 for i, item in enumerate(items):
                     hash_id = self._generate_hash_id(item)
@@ -251,18 +360,16 @@ class RedisQueueManager:
 
                     data_json = json.dumps(data, ensure_ascii=False)
 
-                    # 检查是否存在并存入 Hash
-                    pipe.hsetnx(self.data_key, hash_id, data_json)
-                    # 发布到 Stream
-                    pipe.xadd(self.stream_key, {"data_id": hash_id})
+                    # 在 pipeline 中调用 Lua 脚本
+                    self._lua_push(
+                        keys=[self.data_key, self.stream_key],
+                        args=[hash_id, data_json],
+                        client=pipe
+                    )
 
                 results = await pipe.execute()
 
-            # results 中每两个元素对应一个项的操作结果 [HSETNX_result, XADD_result]
-            for i in range(0, len(results), 2):
-                if results[i]:  # HSETNX 返回 1 表示是新插入的数据
-                    success_count += 1
-
+            success_count = sum(1 for res in results if res == 1)
             self.logger.info(f"批量推入完成: {success_count}/{len(items)} 个新任务")
             return success_count
 
@@ -275,14 +382,10 @@ class RedisQueueManager:
     ) -> list[tuple[str, str, dict]]:
         """从消费者组中获取任务。获取到的消息会自动进入该消费者的专属 PEL (Pending Entries List)。
 
-        在分布式爬虫架构下，Consumer Group 是保障任务派发不重叠的核心基础级机制。
-        在此模式下，任何被 Consumer 获取的消息绝不会立刻出列，这充当了分布式爬虫极佳的“扣留期保护伞”。
-        即使进程异常僵死，依靠下面提供的故障转移与捞取机制，系统也能坚不可摧。
-
         Args:
-            consumer_name: 当前消费者的唯一名称（应用层应传入如: "节点IP-进程PID"，以识别认领方）。
-            block_ms: 如果队列为空，阻塞等待的毫秒数。0 表示立即返回。
-            count: 单次获取的任务上限。
+            consumer_name: 当前消费者的唯一名称
+            block_ms: 如果队列为空，阻塞等待的毫秒数
+            count: 单次获取的任务上限
 
         Returns:
             任务列表 [(StreamID, HashID, DataDict), ...]。
@@ -291,7 +394,15 @@ class RedisQueueManager:
             return []
 
         try:
-            # ">" 表示获取从未分配给任何消费者的新消息
+            # 1. 尝试使用 Lua 脚本一次性拉取详情 (非阻塞优化路径)
+            if block_ms == 0 and self._lua_fetch:
+                raw_tasks = await self._lua_fetch(
+                    keys=[self.stream_key, self.data_key],
+                    args=[self.group_name, consumer_name, count]
+                )
+                return [(t[0], t[1], json.loads(t[2])) for t in raw_tasks if t[2]]
+
+            # 2. 如果包含阻塞，先执行标准 XREADGROUP
             response = await self.client.xreadgroup(
                 groupname=self.group_name,
                 consumername=consumer_name,
@@ -303,18 +414,24 @@ class RedisQueueManager:
             if not response:
                 return []
 
-            tasks = []
-            for _, messages in response:  # response: [[stream_key, [msg, ...]]]
+            # 3. 提取 data_id 并使用 HMGET 批量合并请求 (1 RTT)
+            messages_info = []
+            data_ids = []
+            for _, messages in response:
                 for stream_id, fields in messages:
                     data_id = fields.get("data_id")
-                    if not data_id:
-                        continue
+                    if data_id:
+                        messages_info.append((stream_id, data_id))
+                        data_ids.append(data_id)
 
-                    # 根据索引 HashID 获取实际数据内容
-                    data_json = await self.client.hget(self.data_key, data_id)
-                    if data_json:
-                        data = json.loads(data_json)
-                        tasks.append((stream_id, data_id, data))
+            if not data_ids: return []
+
+            data_jsons = await self.client.hmget(self.data_key, data_ids)
+            
+            tasks = []
+            for (stream_id, data_id), dj in zip(messages_info, data_jsons):
+                if dj:
+                    tasks.append((stream_id, data_id, json.loads(dj)))
 
             if tasks:
                 self.logger.debug(f"消费者 [{consumer_name}] 成功获取 {len(tasks)} 个任务")
@@ -352,102 +469,38 @@ class RedisQueueManager:
     async def fail_task(
         self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3
     ) -> bool:
-        """标记任务失败并实现重试机制
-
-        核心工作流分流：
-        1. 读取当前数据中的 `retry_count`。
-        2. 如果尚具重试资格：
-           - 让失败计数加1并落盘持久化至 Hash表。
-           - **战略性不 ACK此消息！** 故意让该故障消息滞留其专属的 PEL 里。
-           - 背景静默跑的 `recover_stale_tasks()` 监工协程最终定会通过 XAUTOCLAIM 机制将其捞出强制改派。
-        3. 如果已穷尽重试大限：
-           - ACK 任务，让该毒药节点从活跃的消费者 PEL 中物理蒸发、正式入殓。
-           - 投递封存至 XADD 死信队列 (Dead Letter Queue)，以便于研发追溯日志。
-
-        Args:
-            stream_id: 任务的 Redis Stream ID
-            data_id: 数据 Hash ID (即指纹键)
-            error_msg: 追踪报错信息
-            max_retries: 设定的最大重试阈值（默认 3 次）
-
-        Returns:
-            bool: 标记动作是否执行成功
+        """标记任务失败并实现原子重试/死信机制。
+        
+        使用 Lua 脚本实现原子状态机转换，避免并发下的计数器覆盖。
         """
-        if not self.client:
+        if not self.client or not self._lua_fail:
             return False
 
         try:
-            # 1. 读取当前数据和重试次数
-            data_json = await self.client.hget(self.data_key, data_id)
-            if not data_json:
-                self.logger.error(f"数据不存在: {data_id}")
+            dead_letter_key = f"{self.key_prefix}:dead_letter"
+            
+            # 返回值: 1=重试中, 2=入死信, 0=数据不存在
+            result = await self._lua_fail(
+                keys=[self.data_key, self.stream_key, dead_letter_key],
+                args=[
+                    data_id, 
+                    stream_id, 
+                    self.group_name, 
+                    error_msg or "Unknown error", 
+                    max_retries, 
+                    int(time.time())
+                ]
+            )
+
+            if result == 1:
+                self.logger.warning(f"任务将重试: {data_id}, 错误: {error_msg}")
+                return True
+            elif result == 2:
+                self.logger.error(f"任务彻底失败并移入死信: {data_id}")
+                return True
+            else:
+                self.logger.error(f"标记失败任务失败 (数据不存在): {data_id}")
                 return False
-
-            data = json.loads(data_json)
-            metadata = data.get("metadata", {})
-
-            # 从 metadata 中获取重试次数
-            if isinstance(metadata, dict):
-                retry_count = metadata.get("retry_count", 0)
-            else:
-                retry_count = 0
-
-            # 2. 判断是否超过最大重试次数
-            if retry_count < max_retries:
-                # 未超过：增加重试计数，不 ACK，让任务留在 PEL 中
-                new_retry_count = retry_count + 1
-
-                if not isinstance(metadata, dict):
-                    metadata = {}
-
-                metadata["retry_count"] = new_retry_count
-                metadata["last_error"] = error_msg
-                metadata["last_failed_at"] = int(time.time())
-
-                data["metadata"] = metadata
-
-                await self.client.hset(self.data_key, data_id, json.dumps(data, ensure_ascii=False))
-
-                self.logger.warning(
-                    f"任务失败，将重试 ({new_retry_count}/{max_retries}): "
-                    f"{data.get('url', 'Unknown')[:60]}, 错误: {error_msg}"
-                )
-
-                # 关键：不调用 XACK，让任务留在 PEL 中
-                # 其他消费者可以通过 recover_stale_tasks() 捞回
-                return True
-            else:
-                # 超过最大重试次数：彻底失败，ACK 并移入死信队列
-                self.logger.error(
-                    f"任务彻底失败（已重试 {retry_count} 次）: "
-                    f"{data.get('url', 'Unknown')[:60]}, 最后错误: {error_msg}"
-                )
-
-                # ACK 任务（从 PEL 中移除）
-                await self.client.xack(self.stream_key, self.group_name, stream_id)
-
-                # 记录彻底失败的信息
-                data["final_failed_at"] = int(time.time())
-                data["final_error"] = error_msg
-                data["total_retries"] = retry_count
-
-                await self.client.hset(self.data_key, data_id, json.dumps(data, ensure_ascii=False))
-
-                # 可选：移入死信队列
-                dead_letter_key = f"{self.key_prefix}:dead_letter"
-                await self.client.xadd(
-                    dead_letter_key,
-                    {
-                        "data_id": data_id,
-                        "url": data.get("url", ""),
-                        "error": error_msg or "",
-                        "retries": str(retry_count),
-                        "failed_at": str(int(time.time())),
-                    },
-                )
-
-                self.logger.info(f"任务已移入死信队列: {dead_letter_key}")
-                return True
 
         except Exception as e:
             self.logger.error(f"标记失败任务时出错: {e}")
@@ -456,54 +509,28 @@ class RedisQueueManager:
     async def recover_stale_tasks(
         self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10
     ) -> list[tuple[str, str, dict]]:
-        """捞回超时僵尸未 ACK 的遗留任务（实现全系统故障转移重派发生命线）。
+        """捞回超时僵尸未 ACK 的遗留任务。
         
-        防范场景：当集群架构中的一个爬虫机器在取走了消息之后瞬间机器宕机或断网失联，
-        这些消息会无限滞留在该坠毁实例身上的 PEL 集合里（无任何心跳并成为幽灵死信）。
-        
-        该方法利用 Redis 内置的 XAUTOCLAIM 巡检其他消费者身下潜水/过期过久的任务，
-        生生暴力抢夺它们的归属权，转移改派（Claim）到自己（当前的活跃消费者）名下来消化重爬。
-
-        Args:
-            consumer_name: 即将强制接管此残局的当前消费者名称。
-            max_idle_ms: 判定僵尸进程的最大时间阈值界线。
-            count: 单次尝试夺取任务的数量极限。
-
-        Returns:
-            list[tuple[str, str, dict]]: 所捕获接手的任务详单。
+        使用 Lua 脚本实现原子 XAUTOCLAIM + HGET 详情拉取。
         """
-        if not self.client:
+        if not self.client or not self._lua_recover:
             return []
 
         try:
-            # 自动认领超时消息
-            result = await self.client.xautoclaim(
-                name=self.stream_key,
-                groupname=self.group_name,
-                consumername=consumer_name,
-                min_idle_time=max_idle_ms,
-                start_id="0-0",
-                count=count,
+            # result 格式: [next_id, [[stream_id, data_id, data_json], ...]]
+            result = await self._lua_recover(
+                keys=[self.stream_key, self.data_key],
+                args=[self.group_name, consumer_name, max_idle_ms, count]
             )
 
-            # result: (next_start_id, [msg, ...], [deleted_ids])
             if not result or len(result) < 2:
                 return []
 
-            claimed_messages = result[1]
-            if not claimed_messages:
-                return []
-
+            raw_tasks = result[1]
             tasks = []
-            for stream_id, fields in claimed_messages:
-                data_id = fields.get("data_id")
-                if not data_id:
-                    continue
-
-                data_json = await self.client.hget(self.data_key, data_id)
-                if data_json:
-                    data = json.loads(data_json)
-                    tasks.append((stream_id, data_id, data))
+            for rt in raw_tasks:
+                if rt[2]:
+                    tasks.append((rt[0], rt[1], json.loads(rt[2])))
 
             if tasks:
                 self.logger.warning(
