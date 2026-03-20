@@ -10,15 +10,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 
 from ..common.browser.intervention import BrowserInterventionRequired
 
-from ..common.browser import BrowserSession, shutdown_browser_engine
+from ..common.browser import BrowserSession
 from ..common.config import config
 from ..common.channel.factory import create_url_channel
+from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..common.channel.base import URLTask, URLChannel
 from ..crawler.explore.url_collector import URLCollector
 from ..field import FieldDefinition, BatchFieldExtractor, BatchXPathExtractor
@@ -127,8 +130,15 @@ async def run_pipeline(
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    started_at = datetime.now()
-    run_id = started_at.strftime("%Y%m%d_%H%M%S_%f")
+    execution_id = _build_execution_id(
+        list_url=list_url,
+        task_description=task_description,
+        fields=fields,
+        target_url_count=target_url_count,
+        max_pages=max_pages,
+        pipeline_mode=pipeline_mode,
+        thread_id=guard_thread_id,
+    )
 
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
@@ -147,12 +157,24 @@ async def run_pipeline(
         redis_key_prefix=redis_key_prefix,
     )
 
-    items_path = output_path / f"pipeline_extracted_items_{run_id}.jsonl"
-    summary_path = output_path / f"pipeline_summary_{run_id}.json"
-    latest_summary_path = output_path / "pipeline_summary.json"
+    items_path = output_path / "pipeline_extracted_items.jsonl"
+    summary_path = output_path / "pipeline_summary.json"
+    staging_dir = output_path / ".pipeline_items"
+    manifest_path = output_path / "pipeline_execution.json"
+    _prepare_pipeline_workspace(
+        output_path=output_path,
+        staging_dir=staging_dir,
+        items_path=items_path,
+        summary_path=summary_path,
+        manifest_path=manifest_path,
+        execution_id=execution_id,
+        list_url=list_url,
+        task_description=task_description,
+    )
+    staged_records = _load_staged_records(staging_dir)
 
     summary = {
-        "run_id": run_id,
+        "run_id": execution_id,
         "list_url": list_url,
         "task_description": task_description,
         "mode": (pipeline_mode or config.pipeline.mode),
@@ -160,10 +182,11 @@ async def run_pipeline(
         "success_count": 0,
         "consumer_concurrency": consumer_workers,
         "target_url_count": target_url_count,
-        "started_at": started_at.isoformat(),
+        "started_at": "",
         "finished_at": "",
         "items_file": str(items_path),
         "summary_file": str(summary_path),
+        "execution_id": execution_id,
     }
 
     producer_done = asyncio.Event()
@@ -199,6 +222,7 @@ async def run_pipeline(
                 url_channel=channel,
                 redis_manager=redis_manager,
                 target_url_count=target_url_count,
+                persist_progress=False,
             )
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
@@ -352,8 +376,8 @@ async def run_pipeline(
                     await _process_task(
                         extractor=extractor,
                         task=task,
-                        items_path=items_path,
-                        summary=summary,
+                        staging_dir=staging_dir,
+                        staged_records=staged_records,
                         summary_lock=summary_lock,
                     )
             finally:
@@ -373,13 +397,17 @@ async def run_pipeline(
     finally:
         if previous_max_pages is not None:
             config.url_collector.max_pages = previous_max_pages
-        summary["finished_at"] = datetime.now().isoformat()
+        summary["finished_at"] = ""
         if state.get("plan_upgrade_request"):
             summary["plan_upgrade_request"] = state.get("plan_upgrade_request")
         if state.get("error"):
             summary["error"] = state.get("error")
+        committed_records = _load_staged_records(staging_dir)
+        committed_summary = _build_summary_from_staged_records(committed_records)
+        summary["total_urls"] = committed_summary["total_urls"]
+        summary["success_count"] = committed_summary["success_count"]
+        _commit_items_file(items_path, committed_records)
         _write_summary(summary_path, summary)
-        _write_summary(latest_summary_path, summary)
         await list_session.stop()
         await detail_session.stop()
 # await shutdown_browser_engine()
@@ -423,8 +451,8 @@ async def _collect_tasks(
 async def _process_task(
     extractor: BatchXPathExtractor,
     task: URLTask,
-    items_path: Path,
-    summary: dict,
+    staging_dir: Path,
+    staged_records: dict[str, dict],
     summary_lock: asyncio.Lock,
 ) -> None:
     """执行单条任务提取并保存结果。
@@ -441,43 +469,52 @@ async def _process_task(
         await task.fail_task("empty_url")
         return
 
+    async with summary_lock:
+        existing_record = staged_records.get(url)
+
+    if existing_record is not None:
+        await _finalize_task_from_staged_record(task, existing_record)
+        return
+
     try:
         record = await extractor._extract_from_url(url)
     except BrowserInterventionRequired:
         raise
     except Exception as exc:  # noqa: BLE001
-        # 兜底处理：确保单条失败不会中断整条流水线
-        async with summary_lock:
-            _append_jsonl(
-                items_path,
-                {
-                    "url": url,
-                    "_error": f"extractor_exception: {exc}",
-                },
-            )
-            summary["total_urls"] += 1
-        await task.fail_task(f"extractor_exception: {exc}")
-        return
-
-    # 将提取到的字段映射为简单的键值对字典
-    item = {"url": record.url}
-    for field_result in record.fields:
-        item[field_result.field_name] = field_result.value
-
-    # 将结果追加到 JSONL 文件并更新统计（并发下需要互斥）
-    async with summary_lock:
-        _append_jsonl(items_path, item)
-        summary["total_urls"] += 1
-        if record.success:
-            summary["success_count"] += 1
-
-    if record.success:
-        # 标记任务成功（Redis 模式下会进行 ACK）
-        await task.ack_task()
+        staged_record = _build_staged_record(
+            url=url,
+            item={
+                "url": url,
+                "_error": f"extractor_exception: {exc}",
+            },
+            success=False,
+            failure_reason=f"extractor_exception: {exc}",
+        )
     else:
-        # 标记任务失败并记录原因
-        reason = _build_error_reason(record)
-        await task.fail_task(reason)
+        item = {"url": record.url}
+        for field_result in record.fields:
+            item[field_result.field_name] = field_result.value
+
+        if record.success:
+            staged_record = _build_staged_record(
+                url=url,
+                item=item,
+                success=True,
+                failure_reason="",
+            )
+        else:
+            staged_record = _build_staged_record(
+                url=url,
+                item=item,
+                success=False,
+                failure_reason=_build_error_reason(record),
+            )
+
+    async with summary_lock:
+        _write_staged_record(staging_dir, staged_record)
+        staged_records[url] = staged_record
+
+    await _finalize_task_from_staged_record(task, staged_record)
 
 
 async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:
@@ -503,26 +540,177 @@ def _build_error_reason(record) -> str:
     return "; ".join(errors) if errors else "extraction_failed"
 
 
-def _append_jsonl(path: Path, item: dict) -> None:
-    """向 JSONL 文件追加一条结果记录。
+def _build_execution_id(
+    *,
+    list_url: str,
+    task_description: str,
+    fields: list[FieldDefinition],
+    target_url_count: int | None,
+    max_pages: int | None,
+    pipeline_mode: str | None,
+    thread_id: str,
+) -> str:
+    payload = {
+        "list_url": list_url,
+        "task_description": task_description,
+        "fields": [field.model_dump(mode="python") for field in fields],
+        "target_url_count": target_url_count,
+        "max_pages": max_pages,
+        "pipeline_mode": pipeline_mode,
+        "thread_id": thread_id,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
-    Args:
-        path: 文件路径。
-        item: 要保存的字典对象。
-    """
-    payload = json.dumps(item, ensure_ascii=False)
+
+
+def _prepare_pipeline_workspace(
+    *,
+    output_path: Path,
+    staging_dir: Path,
+    items_path: Path,
+    summary_path: Path,
+    manifest_path: Path,
+    execution_id: str,
+    list_url: str,
+    task_description: str,
+) -> None:
+    previous_execution_id = ""
+    if manifest_path.exists():
+        try:
+            previous_execution_id = str(
+                json.loads(manifest_path.read_text(encoding="utf-8")).get("execution_id") or ""
+            )
+        except Exception:
+            previous_execution_id = ""
+
+    if previous_execution_id and previous_execution_id != execution_id:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+        if items_path.exists():
+            items_path.unlink(missing_ok=True)
+        if summary_path.exists():
+            summary_path.unlink(missing_ok=True)
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "execution_id": execution_id,
+        "list_url": list_url,
+        "task_description": task_description,
+        "updated_at": "",
+    }
+    write_json_idempotent(manifest_path, manifest, identity_keys=("execution_id", "list_url", "task_description"))
+
+
+
+def _staged_record_path(staging_dir: Path, url: str) -> Path:
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    return staging_dir / f"{digest}.json"
+
+
+
+def _build_staged_record(
+    *,
+    url: str,
+    item: dict,
+    success: bool,
+    failure_reason: str,
+) -> dict:
+    return {
+        "url": url,
+        "success": bool(success),
+        "failure_reason": str(failure_reason or ""),
+        "item": dict(item),
+    }
+
+
+
+def _write_staged_record(staging_dir: Path, record: dict) -> None:
+    path = _staged_record_path(staging_dir, str(record.get("url") or ""))
+    _write_json_atomic(path, record)
+
+
+
+def _load_staged_records(staging_dir: Path) -> dict[str, dict]:
+    if not staging_dir.exists():
+        return {}
+
+    records: dict[str, dict] = {}
+    for record_file in sorted(staging_dir.glob("*.json")):
+        try:
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        url = str(record.get("url") or "").strip()
+        item = record.get("item")
+        if not url or not isinstance(item, dict):
+            continue
+        records[url] = {
+            "url": url,
+            "success": bool(record.get("success", False)),
+            "failure_reason": str(record.get("failure_reason") or ""),
+            "item": dict(item),
+        }
+    return records
+
+
+
+def _build_summary_from_staged_records(records: dict[str, dict]) -> dict[str, int]:
+    total_urls = len(records)
+    success_count = sum(1 for record in records.values() if bool(record.get("success")))
+    return {
+        "total_urls": total_urls,
+        "success_count": success_count,
+    }
+
+
+
+def _commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
+    payload_lines = [
+        json.dumps(record["item"], ensure_ascii=False)
+        for _, record in sorted(records.items(), key=lambda pair: pair[0])
+    ]
+    payload = "\n".join(payload_lines)
+    if payload:
+        payload += "\n"
+    write_text_if_changed(items_path, payload)
+
+
+async def _finalize_task_from_staged_record(task: URLTask, staged_record: dict) -> None:
+    if bool(staged_record.get("success")):
+        await task.ack_task()
+        return
+    reason = str(staged_record.get("failure_reason") or "extraction_failed")
+    await task.fail_task(reason)
+
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(payload + "\n")
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(payload, encoding="utf-8")
+    temp_path.replace(path)
+
+
 
 
 def _write_summary(path: Path, summary: dict) -> None:
-    """将执行摘要写入 JSON 文件。
-
-    Args:
-        path: 文件路径。
-        summary: 汇总信息字典。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(summary, handle, ensure_ascii=False, indent=2)
+    """将执行摘要写入 JSON 文件。"""
+    write_json_idempotent(
+        path,
+        summary,
+        identity_keys=("run_id", "list_url", "task_description"),
+        volatile_keys={"created_at", "updated_at", "timestamp", "last_updated", "started_at", "finished_at"},
+    )

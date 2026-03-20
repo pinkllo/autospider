@@ -24,6 +24,14 @@ class GraphState(TypedDict, total=False):
     chat_pending_question: str
     chat_flow_state: str
     chat_review_state: str
+
+    collection_config: dict[str, Any]
+    collection_progress: dict[str, Any]
+    collected_urls: list[str]
+    fields_config: list[dict[str, Any]]
+    xpath_result: dict[str, Any] | None
+    pipeline_result: dict[str, Any]
+
     task_plan: Any
     dispatch_queue: list[dict[str, Any]]
     current_batch: list[dict[str, Any]]

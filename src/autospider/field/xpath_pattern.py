@@ -49,17 +49,17 @@ class FieldXPathExtractor:
         api_key = config.llm.planner_api_key or config.llm.api_key
         api_base = config.llm.planner_api_base or config.llm.api_base
         model = config.llm.planner_model or config.llm.model
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not set")
-        self.llm = ChatOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            model=model,
-            temperature=0.0,
-            max_tokens=1024,
-            model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": config.llm.enable_thinking},
-        )
+        self.llm = None
+        if api_key:
+            self.llm = ChatOpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                model=model,
+                temperature=0.0,
+                max_tokens=1024,
+                model_kwargs={"response_format": {"type": "json_object"}},
+                extra_body={"enable_thinking": config.llm.enable_thinking},
+            )
 
     async def extract_common_pattern(
         self,
@@ -84,16 +84,9 @@ class FieldXPathExtractor:
             f"[FieldXPathExtractor] 从 {len(records)} 条记录中提取字段 '{field_name}' 的公共 XPath..."
         )
 
-        # 收集所有 XPath（主 xpath + 多策略候选）
-        xpaths = []
-        per_record_candidates: list[list[dict]] = []
-        for record in records:
-            field_result = record.get_field(field_name)
-            if field_result and field_result.xpath:
-                xpaths.append(field_result.xpath)
-                per_record_candidates.append(
-                    field_result.xpath_candidates if field_result.xpath_candidates else []
-                )
+        # 仅使用已成功提取字段值的最终 XPath。
+        # 不再混入候选 XPath、启发式重打分或 LLM 生成模式。
+        xpaths = self._collect_verified_xpaths(records, field_name)
 
         if not xpaths:
             logger.info("[FieldXPathExtractor] ⚠ 未找到有效的 XPath")
@@ -103,98 +96,104 @@ class FieldXPathExtractor:
         for xpath in xpaths:
             logger.info(f"  - {_escape_markup(xpath)}")
 
-        # --- P1: 从多策略候选中按策略分组，优先寻找带属性锚点的公共模式 ---
-        candidate_pattern = self._find_common_pattern_from_candidates(per_record_candidates)
-        if candidate_pattern and not self._is_over_broad_pattern(candidate_pattern):
-            logger.info(
-                f"[FieldXPathExtractor] ✓ 多策略候选合并成功: {_escape_markup(candidate_pattern)}"
-            )
-
-        # 传统规则合并
-        rule_pattern = self._find_common_xpath_pattern(xpaths)
-        dominant_pattern = self._find_dominant_exact_xpath(xpaths)
-        normalized_structures = {self._normalize_for_comparison(xpath) for xpath in xpaths}
-
-        if len(normalized_structures) == 1 and dominant_pattern:
-            logger.info(
-                "[FieldXPathExtractor] 检测到同构 XPath 变体，优先使用主模板精确 XPath"
-            )
-            common_pattern = dominant_pattern
-        else:
-            common_pattern = rule_pattern or dominant_pattern
-
-        # 如果多策略候选合并成功，且比传统规则更稳定，则替换
-        if candidate_pattern and not self._is_over_broad_pattern(candidate_pattern):
-            candidate_score = self._xpath_stability_score(candidate_pattern)
-            current_score = self._xpath_stability_score(common_pattern) if common_pattern else -10.0
-            if candidate_score > current_score:
-                logger.info(
-                    "[FieldXPathExtractor] 多策略候选稳定性更高，优先使用"
-                )
-                common_pattern = candidate_pattern
-
-        if not common_pattern or self._is_over_broad_pattern(common_pattern):
-            common_pattern = await self._generate_common_pattern_with_llm(
-                field_name=field_name,
-                source_xpaths=xpaths,
-            )
-
-        # LLM 回答过宽时，按稳定性优先级回退
-        if common_pattern and self._is_over_broad_pattern(common_pattern):
-            if candidate_pattern and not self._is_over_broad_pattern(candidate_pattern):
-                logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到多策略候选模式")
-                common_pattern = candidate_pattern
-            elif rule_pattern and not self._is_over_broad_pattern(rule_pattern):
-                logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到规则模式")
-                common_pattern = rule_pattern
-            elif dominant_pattern and not self._is_over_broad_pattern(dominant_pattern):
-                logger.info("[FieldXPathExtractor] LLM 结果过宽，回退到主模板精确 XPath")
-                common_pattern = dominant_pattern
-            else:
-                logger.info("[FieldXPathExtractor] ⚠ 公共 XPath 过宽，放弃该字段模式")
-                common_pattern = None
-
-        if not common_pattern:
+        majority = self._select_majority_pattern(xpaths)
+        if not majority:
             logger.info("[FieldXPathExtractor] ⚠ 未找到公共 XPath 模式")
             return None
 
-        common_pattern, inline_fallbacks = self._normalize_union_to_priority_chain(
-            xpath_pattern=common_pattern,
-            source_xpaths=xpaths,
-        )
-        fallback_xpaths = self._build_priority_fallback_xpaths(
-            source_xpaths=xpaths,
-            primary_xpath=common_pattern,
-        )
-        for xpath in inline_fallbacks:
-            if xpath not in fallback_xpaths:
-                fallback_xpaths.append(xpath)
-        if fallback_xpaths:
-            logger.info(
-                "[FieldXPathExtractor] 检测到异构模板，启用优先级回退: %s",
-                " -> ".join(_escape_markup(x) for x in fallback_xpaths),
-            )
+        common_pattern = str(majority["xpath"])
+        support_count = int(majority["support_count"])
+        support_rate = float(majority["support_rate"])
+
+        if self._is_over_broad_pattern(common_pattern):
+            logger.info("[FieldXPathExtractor] ⚠ 多数投票结果过宽，放弃该字段模式")
+            return None
 
         logger.info(
-            f"[FieldXPathExtractor] ✓ 公共 XPath 模式: {_escape_markup(common_pattern)}"
+            "[FieldXPathExtractor] ✓ 公共 XPath 模式: %s (支持度: %s/%s, 支持率: %.0f%%)",
+            _escape_markup(common_pattern),
+            support_count,
+            len(xpaths),
+            support_rate * 100,
         )
-
-        # 计算置信度（统一使用标准化逻辑，避免出现异常低分）
-        confidence = self._calculate_pattern_confidence(xpaths, common_pattern)
 
         return CommonFieldXPath(
             field_name=field_name,
             xpath_pattern=common_pattern,
-            fallback_xpaths=fallback_xpaths,
+            fallback_xpaths=[],
             source_xpaths=xpaths,
-            confidence=confidence,
+            confidence=support_rate,
         )
+
+    def _collect_verified_xpaths(
+        self,
+        records: list[PageExtractionRecord],
+        field_name: str,
+    ) -> list[str]:
+        xpaths: list[str] = []
+        for record in records:
+            field_result = record.get_field(field_name)
+            if not field_result:
+                continue
+            if field_result.value is None:
+                continue
+            xpath = (field_result.xpath or "").strip()
+            if not xpath:
+                continue
+            xpaths.append(xpath)
+        return xpaths
+
+    def _normalize_majority_key(self, xpath: str) -> str:
+        value = self._clean_xpath(xpath)
+        if not value:
+            return ""
+        value = re.sub(r"\[\d+\]", "", value)
+        value = re.sub(r"\s+", "", value)
+        return value
+
+    def _select_majority_pattern(self, xpaths: list[str]) -> dict[str, float | int | str] | None:
+        if len(xpaths) < 2:
+            return None
+
+        grouped: dict[str, list[str]] = {}
+        order: list[str] = []
+        for xpath in xpaths:
+            normalized = self._normalize_majority_key(xpath)
+            if not normalized:
+                continue
+            if normalized not in grouped:
+                grouped[normalized] = []
+                order.append(normalized)
+            grouped[normalized].append(xpath)
+
+        if not grouped:
+            return None
+
+        primary_key = max(
+            order,
+            key=lambda key: (len(grouped[key]), -order.index(key)),
+        )
+        support_count = len(grouped[primary_key])
+        support_rate = support_count / len(xpaths)
+
+        if support_count < 2:
+            return None
+        if support_rate < 0.6:
+            return None
+
+        return {
+            "xpath": primary_key,
+            "support_count": support_count,
+            "support_rate": support_rate,
+        }
 
     async def _generate_common_pattern_with_llm(
         self,
         field_name: str,
         source_xpaths: list[str],
     ) -> str | None:
+        if self.llm is None:
+            return None
         if not source_xpaths:
             return None
 

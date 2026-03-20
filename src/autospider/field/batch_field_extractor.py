@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from ..common.config import config
 from ..common.logger import get_logger
+from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage import RedisQueueManager
 
 from .models import (
@@ -319,8 +320,8 @@ class BatchFieldExtractor:
         config_path = self.output_dir / "extraction_config.json"
         extraction_config = result.to_extraction_config()
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(extraction_config, f, ensure_ascii=False, indent=2)
+        persisted_config = write_json_idempotent(config_path, extraction_config)
+        extraction_config = dict(persisted_config or extraction_config)
 
         logger.info(f"\n[BatchFieldExtractor] 提取配置已保存: {config_path}")
 
@@ -409,8 +410,9 @@ class BatchFieldExtractor:
             "created_at": result.created_at,
         }
 
-        with open(detail_path, "w", encoding="utf-8") as f:
-            json.dump(detail_data, f, ensure_ascii=False, indent=2)
+        persisted_detail = write_json_idempotent(detail_path, detail_data)
+        detail_data = dict(persisted_detail or detail_data)
+        result.created_at = str(detail_data.get("created_at") or result.created_at)
 
         logger.info(f"[BatchFieldExtractor] 详细结果已保存: {detail_path}")
 

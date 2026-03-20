@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ..config import config
 from ..logger import get_logger
+from ..storage.idempotent_io import write_text_if_changed
 
 logger = get_logger(__name__)
 _TRACE_WRITE_LOCK = threading.Lock()
@@ -21,10 +22,13 @@ def append_llm_trace(component: str, payload: dict[str, Any]) -> None:
         return
 
     max_chars = max(2000, int(config.llm.trace_max_chars))
+    sanitized = _sanitize(payload, max_chars)
+    trace_id = _build_trace_id(component=component, payload=sanitized)
     record = {
-        "timestamp": datetime.now().isoformat(),
+        "trace_id": trace_id,
+        "timestamp": "",
         "component": component,
-        **_sanitize(payload, max_chars),
+        **sanitized,
     }
 
     trace_path = Path(config.llm.trace_file)
@@ -35,12 +39,28 @@ def append_llm_trace(component: str, payload: dict[str, Any]) -> None:
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         with _TRACE_WRITE_LOCK:
             records = _load_trace_records(trace_path)
-            records.append(record)
+            replaced = False
+            for index, existing in enumerate(records):
+                if str(existing.get("trace_id") or "") != trace_id:
+                    continue
+                preserved = dict(existing)
+                preserved.update(record)
+                preserved["timestamp"] = str(existing.get("timestamp") or record["timestamp"])
+                records[index] = preserved
+                replaced = True
+                break
+            if not replaced:
+                records.append(record)
             text = json.dumps(records, ensure_ascii=False, indent=2, default=str) + "\n"
-            trace_path.write_text(text, encoding="utf-8")
+            write_text_if_changed(trace_path, text)
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"[LLMTrace] 写入失败（忽略）: {exc}")
 
+
+
+def _build_trace_id(component: str, payload: dict[str, Any]) -> str:
+    raw = json.dumps({"component": component, "payload": payload}, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 def _load_trace_records(path: Path) -> list[dict[str, Any]]:
     """读取既有追踪记录，兼容 JSON 数组与历史 JSONL。"""

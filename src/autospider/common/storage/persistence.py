@@ -13,8 +13,9 @@ from typing import Any
 
 # 引入通用文件操作工具
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
-from utils.file_utils import ensure_directory, save_json, load_json, file_exists
+from utils.file_utils import ensure_directory, load_json, file_exists
 from autospider.common.logger import get_logger
+from .idempotent_io import write_json_idempotent, write_text_if_changed
 
 logger = get_logger(__name__)
 
@@ -86,19 +87,16 @@ class ConfigPersistence:
         self.config_file = self.config_dir / "collection_config.json"
 
     def save(self, config: CollectionConfig) -> None:
-        """保存配置
-
-        Args:
-            config: 要保存的配置
-        """
-        # 更新时间戳
-        if not config.created_at:
-            config.created_at = datetime.now().isoformat()
-        config.updated_at = datetime.now().isoformat()
-
-        # 保存到文件
+        """保存配置"""
         data = config.to_dict()
-        save_json(self.config_file, data)
+        persisted = write_json_idempotent(
+            self.config_file,
+            data,
+            identity_keys=("list_url", "task_description"),
+        )
+        normalized = CollectionConfig.from_dict(dict(persisted or data))
+        config.created_at = normalized.created_at
+        config.updated_at = normalized.updated_at
         logger.info(f"[持久化] 配置已保存到: {self.config_file}")
 
     def load(self) -> CollectionConfig | None:
@@ -206,17 +204,17 @@ class ProgressPersistence:
         self.urls_file = self.output_dir / "urls.txt"
 
     def save_progress(self, progress: CollectionProgress) -> None:
-        """保存进度
-
-        Args:
-            progress: 进度信息
-        """
-        # 更新时间戳
+        """保存进度"""
         progress.last_updated = datetime.now().isoformat()
-
-        # 保存到文件
         data = progress.to_dict()
-        save_json(self.progress_file, data)
+        persisted = write_json_idempotent(
+            self.progress_file,
+            data,
+            identity_keys=("list_url", "task_description"),
+            volatile_keys={"last_updated"},
+        )
+        normalized = CollectionProgress.from_dict(dict(persisted or data))
+        progress.last_updated = normalized.last_updated
 
     def load_progress(self) -> CollectionProgress | None:
         """加载进度
@@ -254,9 +252,11 @@ class ProgressPersistence:
         # 追加新URL
         new_urls = [url for url in urls if url not in existing_urls]
         if new_urls:
-            with open(self.urls_file, "a", encoding="utf-8") as f:
-                for url in new_urls:
-                    f.write(url + "\n")
+            merged_urls = sorted(existing_urls.union(new_urls))
+            payload = "\n".join(merged_urls)
+            if payload:
+                payload += "\n"
+            write_text_if_changed(self.urls_file, payload)
 
     def load_collected_urls(self) -> list[str]:
         """加载已收集的URL

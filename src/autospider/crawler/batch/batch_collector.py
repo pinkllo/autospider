@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ...common.logger import get_logger
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..collector import (
     URLCollectorResult,
     LLMDecisionMaker,
@@ -45,6 +46,7 @@ class BatchCollector(BaseCollector):
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
+        persist_progress: bool = True,
     ):
         """初始化批量爬取器
 
@@ -69,6 +71,7 @@ class BatchCollector(BaseCollector):
             url_channel=url_channel,
             redis_manager=redis_manager,
             target_url_count=target_url_count,
+            persist_progress=persist_progress,
         )
 
         # 配置持久化管理器
@@ -280,7 +283,7 @@ class BatchCollector(BaseCollector):
             collected_urls=self.collected_urls,
             list_page_url=self.list_url,
             task_description=self.task_description,
-            created_at=datetime.now().isoformat(),
+            created_at="",
         )
 
     def _create_empty_result(self) -> URLCollectorResult:
@@ -290,7 +293,7 @@ class BatchCollector(BaseCollector):
             collected_urls=[],
             list_page_url="",
             task_description="",
-            created_at=datetime.now().isoformat(),
+            created_at="",
         )
 
     async def _save_result(self, result: URLCollectorResult) -> None:
@@ -304,12 +307,20 @@ class BatchCollector(BaseCollector):
             "created_at": result.created_at,
         }
 
-        output_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        persisted = write_json_idempotent(
+            output_file,
+            data,
+            identity_keys=("list_page_url", "task_description"),
+        )
+        result.created_at = str((persisted or data).get("created_at") or result.created_at)
         logger.info(f"[Save] 结果已保存到: {output_file}")
 
         # 保存 URL 列表
         urls_file = self.output_dir / "urls.txt"
-        urls_file.write_text("\n".join(result.collected_urls), encoding="utf-8")
+        payload = "\n".join(result.collected_urls)
+        if payload:
+            payload += "\n"
+        write_text_if_changed(urls_file, payload)
         logger.info(f"[Save] URL 列表已保存到: {urls_file}")
 
 
@@ -319,6 +330,7 @@ async def batch_collect_urls(
     config_path: str | Path,
     target_url_count: int | None = None,
     output_dir: str = "output",
+    persist_progress: bool = True,
 ) -> URLCollectorResult:
     """批量收集 URL 的便捷函数
 
@@ -336,5 +348,6 @@ async def batch_collect_urls(
         config_path=config_path,
         target_url_count=target_url_count,
         output_dir=output_dir,
+        persist_progress=persist_progress,
     )
     return await collector.collect_from_config()

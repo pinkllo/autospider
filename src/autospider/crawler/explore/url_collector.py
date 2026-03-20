@@ -17,6 +17,7 @@ from ...common.config import config
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..output.script_generator import ScriptGenerator
 from ...common.som import (
     capture_screenshot_with_marks,
@@ -69,6 +70,7 @@ class URLCollector(BaseCollector):
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
+        persist_progress: bool = True,
     ):
         """初始化 URLCollector
 
@@ -90,6 +92,7 @@ class URLCollector(BaseCollector):
             url_channel=url_channel,
             redis_manager=redis_manager,
             target_url_count=target_url_count,
+            persist_progress=persist_progress,
         )
 
         self.explore_count = explore_count
@@ -697,7 +700,7 @@ class URLCollector(BaseCollector):
             collected_urls=self.collected_urls,
             list_page_url=self.list_url,
             task_description=self.task_description,
-            created_at=datetime.now().isoformat(),
+            created_at="",
             plan_upgrade_requested=self.plan_upgrade_requested,
             plan_upgrade_reason=self.plan_upgrade_reason,
             plan_upgrade_site_url=self.plan_upgrade_site_url,
@@ -736,18 +739,26 @@ class URLCollector(BaseCollector):
             "created_at": result.created_at,
         }
 
-        output_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        persisted = write_json_idempotent(
+            output_file,
+            data,
+            identity_keys=("list_page_url", "task_description"),
+        )
+        result.created_at = str((persisted or data).get("created_at") or result.created_at)
         logger.info(f"[Save] 结果已保存到: {output_file}")
 
         # 保存 URL 列表
         urls_file = self.output_dir / "urls.txt"
-        urls_file.write_text("\n".join(result.collected_urls), encoding="utf-8")
+        payload = "\n".join(result.collected_urls)
+        if payload:
+            payload += "\n"
+        write_text_if_changed(urls_file, payload)
         logger.info(f"[Save] URL 列表已保存到: {urls_file}")
 
         # 保存爬虫脚本
         if crawler_script:
             script_file = self.output_dir / "spider.py"
-            script_file.write_text(crawler_script, encoding="utf-8")
+            write_text_if_changed(script_file, crawler_script)
             logger.info(f"[Save] Scrapy 爬虫脚本已保存到: {script_file}")
             logger.info(f"[Save] 运行方式: scrapy runspider {script_file} -o output.json")
 
@@ -760,6 +771,7 @@ async def collect_detail_urls(
     explore_count: int = 3,
     target_url_count: int | None = None,
     output_dir: str = "output",
+    persist_progress: bool = True,
 ) -> URLCollectorResult:
     """收集详情页 URL 的便捷入口函数
 
@@ -781,5 +793,6 @@ async def collect_detail_urls(
         explore_count=explore_count,
         target_url_count=target_url_count,
         output_dir=output_dir,
+        persist_progress=persist_progress,
     )
     return await collector.run()

@@ -537,6 +537,7 @@ async def generate_collection_config(
     task_description: str,
     explore_count: int = 3,
     output_dir: str = "output",
+    persist_progress: bool = True,
 ) -> CollectionConfig:
     """生成爬取配置的便捷函数
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import operator
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Annotated, TypedDict
 
@@ -134,7 +133,8 @@ def _build_dispatch_summary(plan: TaskPlan, subtask_results: list[dict[str, Any]
     skipped = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.SKIPPED)
     total_collected = sum(int(subtask.collected_count or 0) for subtask in plan.subtasks)
     plan.total_subtasks = total
-    plan.updated_at = datetime.now().isoformat()
+    if not plan.updated_at:
+        plan.updated_at = plan.created_at
     return {
         "total": total,
         "completed": completed,

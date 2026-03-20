@@ -62,6 +62,7 @@ class BaseCollector(ABC):
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
         target_url_count: int | None = None,
+        persist_progress: bool = True,
     ):
         """初始化 BaseCollector 基类
 
@@ -75,6 +76,7 @@ class BaseCollector(ABC):
         self.page = page
         self.list_url = list_url
         self.task_description = task_description
+        self.persist_progress = bool(persist_progress)
 
         # 初始化输出路径
         self.output_dir = Path(output_dir)
@@ -231,10 +233,11 @@ class BaseCollector(ABC):
                     logger.info(f"从 Redis 加载了 {len(urls)} 个历史 URL")
 
         # 2. 尝试从本地 urls.txt 加载
-        file_urls = self.progress_persistence.load_collected_urls()
-        if file_urls:
-            loaded_urls.extend(file_urls)
-            logger.info(f"从本地文件加载了 {len(file_urls)} 个历史 URL")
+        if self.persist_progress:
+            file_urls = self.progress_persistence.load_collected_urls()
+            if file_urls:
+                loaded_urls.extend(file_urls)
+                logger.info(f"从本地文件加载了 {len(file_urls)} 个历史 URL")
 
         if not loaded_urls:
             return
@@ -600,6 +603,8 @@ class BaseCollector(ABC):
         append_urls: bool = False,
     ) -> None:
         """按指定状态持久化进度。"""
+        if not self.persist_progress:
+            return
         normalized_status = (status or "RUNNING").upper()
         progress = CollectionProgress(
             status=normalized_status,
@@ -649,7 +654,7 @@ class BaseCollector(ABC):
             collected_urls=self.collected_urls,
             list_page_url=self.list_url,
             task_description=self.task_description,
-            created_at=datetime.now().isoformat(),
+            created_at="",
         )
 
     @abstractmethod

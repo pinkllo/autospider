@@ -882,15 +882,15 @@ class BatchXPathExtractor:
             ],
             "total_urls": len(records),
             "success_count": success_count,
-            "created_at": datetime.now().isoformat(),
+            "created_at": "",
         }
 
     def _save_results(self, result_data: dict, records: list[PageExtractionRecord]) -> None:
         """将提取结果保存至文件"""
         # 保存结构化的详细结果
         result_path = self.output_dir / "batch_extraction_result.json"
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        persisted_result = write_json_idempotent(result_path, result_data)
+        result_data = dict(persisted_result or result_data)
         logger.info(f"\n[BatchXPathExtractor] 结果已保存: {result_path}")
 
         # 保存平铺的数据集（便于直接分发使用）
@@ -902,8 +902,7 @@ class BatchXPathExtractor:
                 item[field_result.field_name] = field_result.value
             items.append(item)
 
-        with open(items_path, "w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
+        write_json_idempotent(items_path, items, volatile_keys=set())
         logger.info(f"[BatchXPathExtractor] 明细已保存: {items_path}")
 
     def _print_record_summary(self, record: PageExtractionRecord) -> None:

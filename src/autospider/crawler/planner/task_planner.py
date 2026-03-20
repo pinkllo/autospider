@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from ...common.som.text_first import resolve_single_mark_id
 from ...common.types import SubTask, SubTaskStatus, TaskPlan
 from ...common.utils.paths import get_prompt_path
 from ...common.utils.prompt_template import render_template
+from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -123,7 +125,7 @@ class TaskPlanner:
 
         # 步骤 5: 构建 TaskPlan 对象并将其保存到本地文件系统
         plan = self._build_plan(subtasks)
-        self._save_plan(plan)
+        plan = self._save_plan(plan)
 
         logger.info("[Planner] 规划完成，识别并生成了 %d 个子任务", len(plan.subtasks))
         return plan
@@ -449,43 +451,57 @@ class TaskPlanner:
         return ""
 
     def _build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
-        """构造 TaskPlan 响应对象。
-
-        Args:
-            subtasks: 提取出的子任务列表。
-
-        Returns:
-            TaskPlan: 封装后的计划对象，包含唯一标识符和时间戳。
-        """
-        now = datetime.now().isoformat()
-        plan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        """构造 TaskPlan 响应对象。"""
+        existing = self._load_saved_plan()
+        created_at = existing.created_at if existing else ""
+        updated_at = existing.updated_at if existing else ""
 
         return TaskPlan(
-            plan_id=plan_id,
+            plan_id=(existing.plan_id if existing else self._build_plan_id()),
             original_request=self.user_request,
             site_url=self.site_url,
             subtasks=subtasks,
             total_subtasks=len(subtasks),
-            created_at=now,
-            updated_at=now,
+            created_at=created_at,
+            updated_at=updated_at,
         )
+
+    def _build_plan_id(self) -> str:
+        raw = json.dumps(
+            {"site_url": self.site_url, "user_request": self.user_request},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+    def _load_saved_plan(self) -> TaskPlan | None:
+        plan_file = Path(self.output_dir) / "task_plan.json"
+        data = load_json_if_exists(plan_file)
+        if not isinstance(data, dict):
+            return None
+        if str(data.get("site_url") or "") != self.site_url:
+            return None
+        if str(data.get("original_request") or "") != self.user_request:
+            return None
+        try:
+            return TaskPlan.model_validate(data)
+        except Exception:
+            return None
 
     def _create_empty_plan(self) -> TaskPlan:
         """当分析失败或 LLM 未产生结果时，返回一个没有任何子任务的空计划。"""
         return self._build_plan([])
 
-    def _save_plan(self, plan: TaskPlan) -> None:
-        """将生成的任务计划序列化为 JSON 文件，存储在指定的输出目录中。
-
-        Args:
-            plan: 待保存的 TaskPlan 对象。
-        """
+    def _save_plan(self, plan: TaskPlan) -> TaskPlan:
+        """将生成的任务计划序列化为 JSON 文件，存储在指定的输出目录中。"""
         output_path = Path(self.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         plan_file = output_path / "task_plan.json"
 
-        # 使用 Pydantic 的 model_dump 导出数据并写入文件
-        with open(plan_file, "w", encoding="utf-8") as f:
-            json.dump(plan.model_dump(), f, ensure_ascii=False, indent=2)
-
+        persisted = write_json_idempotent(
+            plan_file,
+            plan.model_dump(mode="python"),
+            identity_keys=("site_url", "original_request", "plan_id"),
+        )
         logger.info("[Planner] 任务计划已成功持久化至: %s", plan_file)
+        return TaskPlan.model_validate(persisted)

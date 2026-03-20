@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -13,6 +15,7 @@ from ...common.browser.intervention import BrowserInterventionRequired
 
 from ...common.browser import BrowserSession, create_browser_session
 from ...common.config import config
+from ...common.storage.idempotent_io import write_json_idempotent
 from ...common.types import SubTask, TaskPlan
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
@@ -78,7 +81,6 @@ def _browser_session_options(state: dict[str, Any], params: dict[str, Any]) -> d
 
 
 def _build_fallback_plan(params: dict[str, Any]) -> TaskPlan:
-    now = datetime.now().isoformat()
     list_url = str(params.get("site_url") or params.get("list_url") or "")
     task_description = str(params.get("request") or params.get("task_description") or "")
     shared_fields = list(params.get("fields") or [])
@@ -92,16 +94,84 @@ def _build_fallback_plan(params: dict[str, Any]) -> TaskPlan:
         target_url_count=params.get("target_url_count"),
         created_by="fallback_plan",
     )
+    plan_key = json.dumps({"list_url": list_url, "task_description": task_description}, ensure_ascii=False, sort_keys=True)
     return TaskPlan(
-        plan_id=datetime.now().strftime("%Y%m%d_%H%M%S"),
+        plan_id=hashlib.sha1(plan_key.encode("utf-8")).hexdigest()[:16],
         original_request=task_description,
         site_url=list_url,
         subtasks=[fallback_subtask],
         total_subtasks=1,
         shared_fields=shared_fields,
-        created_at=now,
-        updated_at=now,
+        created_at="",
+        updated_at="",
     )
+
+
+def _collection_config_payload(config_obj: Any) -> dict[str, Any]:
+    return {
+        "nav_steps": list(getattr(config_obj, "nav_steps", []) or []),
+        "common_detail_xpath": getattr(config_obj, "common_detail_xpath", None),
+        "pagination_xpath": getattr(config_obj, "pagination_xpath", None),
+        "jump_widget_xpath": getattr(config_obj, "jump_widget_xpath", None),
+        "list_url": str(getattr(config_obj, "list_url", "") or ""),
+        "task_description": str(getattr(config_obj, "task_description", "") or ""),
+    }
+
+
+def _load_collection_config_payload(config_path: str | Path) -> dict[str, Any]:
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        "nav_steps": list(raw.get("nav_steps") or []),
+        "common_detail_xpath": raw.get("common_detail_xpath"),
+        "pagination_xpath": raw.get("pagination_xpath"),
+        "jump_widget_xpath": raw.get("jump_widget_xpath"),
+        "list_url": str(raw.get("list_url") or ""),
+        "task_description": str(raw.get("task_description") or ""),
+    }
+
+
+def _materialize_collection_config(output_dir: str | Path, collection_config: dict[str, Any]) -> Path:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    config_path = output_path / "collection_config.json"
+    write_json_idempotent(
+        config_path,
+        dict(collection_config or {}),
+        identity_keys=("list_url", "task_description"),
+    )
+    return config_path
+
+
+def _collection_progress_payload(*, list_url: str, task_description: str, collected_count: int, current_page_num: int = 1, status: str = "COMPLETED") -> dict[str, Any]:
+    return {
+        "status": status,
+        "pause_reason": None,
+        "list_url": list_url,
+        "task_description": task_description,
+        "current_page_num": current_page_num,
+        "collected_count": collected_count,
+        "backoff_level": 0,
+        "consecutive_success_pages": 0,
+    }
+
+
+def _serialize_xpath_result(raw_result: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_result, dict):
+        return None
+    return {
+        "fields": list(raw_result.get("fields") or []),
+        "records": list(raw_result.get("records") or []),
+        "total_urls": int(raw_result.get("total_urls", 0) or 0),
+        "success_count": int(raw_result.get("success_count", 0) or 0),
+    }
 
 
 async def _run_with_retry(
@@ -161,12 +231,20 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
             artifacts.append(_artifact("pipeline_items", str(result["items_file"])))
         summary_file = Path(str(params.get("output_dir") or "output")) / "pipeline_summary.json"
         artifacts.append(_artifact("pipeline_summary", summary_file))
+        pipeline_result = {
+            "total_urls": int(result.get("total_urls", 0) or 0),
+            "success_count": int(result.get("success_count", 0) or 0),
+            "items_file": str(result.get("items_file", "")),
+            "summary_file": str(summary_file),
+            "execution_id": str(result.get("execution_id", "")),
+        }
         return {
-            **_ok({"result": result}, artifacts),
+            **_ok({"result": pipeline_result}, artifacts),
+            "pipeline_result": pipeline_result,
             "summary": {
-                "total_urls": int(result.get("total_urls", 0) or 0),
-                "success_count": int(result.get("success_count", 0) or 0),
-                "items_file": str(result.get("items_file", "")),
+                "total_urls": pipeline_result["total_urls"],
+                "success_count": pipeline_result["success_count"],
+                "items_file": pipeline_result["items_file"],
             },
         }
 
@@ -194,6 +272,7 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
                     explore_count=int(params.get("explore_count") or 3),
                     target_url_count=params.get("target_url_count"),
                     output_dir=str(params.get("output_dir") or "output"),
+                    persist_progress=False,
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -202,14 +281,22 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
                 config.url_collector.max_pages = previous_max_pages
 
         output_dir = Path(str(params.get("output_dir") or "output"))
+        collected_urls = list(result.collected_urls)
+        collection_progress = _collection_progress_payload(
+            list_url=str(params.get("list_url") or ""),
+            task_description=str(params.get("task") or ""),
+            collected_count=len(collected_urls),
+        )
         artifacts = [
             _artifact("collected_urls_json", output_dir / "collected_urls.json"),
             _artifact("collected_urls_txt", output_dir / "urls.txt"),
             _artifact("collector_spider", output_dir / "spider.py"),
         ]
         return {
-            **_ok({"result": result}, artifacts),
-            "summary": {"collected_urls": len(result.collected_urls)},
+            **_ok({"result": {"collected_urls": len(collected_urls)}}, artifacts),
+            "collected_urls": collected_urls,
+            "collection_progress": collection_progress,
+            "summary": {"collected_urls": len(collected_urls)},
         }
 
     node_result = await _run_with_retry(_runner, error_code="collect_urls_failed")
@@ -231,14 +318,24 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
                     task_description=str(params.get("task") or ""),
                     explore_count=int(params.get("explore_count") or 3),
                     output_dir=str(params.get("output_dir") or "output"),
+                    persist_progress=False,
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
         output_dir = Path(str(params.get("output_dir") or "output"))
+        collection_config = _collection_config_payload(config_result)
         artifacts = [_artifact("collection_config", output_dir / "collection_config.json")]
         return {
-            **_ok({"result": config_result}, artifacts),
+            **_ok({
+                "result": {
+                    "nav_steps": len(config_result.nav_steps),
+                    "has_common_detail_xpath": bool(config_result.common_detail_xpath),
+                    "has_pagination_xpath": bool(config_result.pagination_xpath),
+                    "has_jump_widget_xpath": bool(config_result.jump_widget_xpath),
+                }
+            }, artifacts),
+            "collection_config": collection_config,
             "summary": {
                 "nav_steps": len(config_result.nav_steps),
                 "has_common_detail_xpath": bool(config_result.common_detail_xpath),
@@ -259,6 +356,15 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
         if params.get("max_pages") is not None:
             previous_max_pages = config.url_collector.max_pages
             config.url_collector.max_pages = int(params["max_pages"])
+        collection_config = dict(state.get("collection_config") or {})
+        config_path = str(params.get("config_path") or "").strip()
+        if not config_path and collection_config:
+            config_path = str(_materialize_collection_config(
+                str(params.get("output_dir") or "output"),
+                collection_config,
+            ))
+        if not config_path:
+            raise ValueError("missing_collection_config")
         try:
             async with create_browser_session(
                 close_engine=True,
@@ -266,9 +372,10 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
             ) as session:
                 result = await batch_collect_urls(
                     page=session.page,
-                    config_path=str(params.get("config_path") or ""),
+                    config_path=config_path,
                     target_url_count=params.get("target_url_count"),
                     output_dir=str(params.get("output_dir") or "output"),
+                    persist_progress=False,
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -277,13 +384,24 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
                 config.url_collector.max_pages = previous_max_pages
 
         output_dir = Path(str(params.get("output_dir") or "output"))
+        if not collection_config:
+            collection_config = _load_collection_config_payload(config_path)
+        collected_urls = list(result.collected_urls)
+        collection_progress = _collection_progress_payload(
+            list_url=str(collection_config.get("list_url") or params.get("list_url") or ""),
+            task_description=str(collection_config.get("task_description") or params.get("task") or ""),
+            collected_count=len(collected_urls),
+        )
         artifacts = [
             _artifact("batch_collected_urls_json", output_dir / "collected_urls.json"),
             _artifact("batch_collected_urls_txt", output_dir / "urls.txt"),
         ]
         return {
-            **_ok({"result": result}, artifacts),
-            "summary": {"collected_urls": len(result.collected_urls)},
+            **_ok({"result": {"collected_urls": len(collected_urls)}}, artifacts),
+            "collection_config": collection_config,
+            "collected_urls": collected_urls,
+            "collection_progress": collection_progress,
+            "summary": {"collected_urls": len(collected_urls)},
         }
 
     node_result = await _run_with_retry(_runner, error_code="batch_collect_failed")
@@ -301,6 +419,7 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
         if use_validate is None:
             use_validate = config.field_extractor.validate_count
 
+        urls = list(params.get("urls") or state.get("collected_urls") or [])
         try:
             async with create_browser_session(
                 close_engine=True,
@@ -308,7 +427,7 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
             ) as session:
                 result = await run_field_pipeline(
                     page=session.page,
-                    urls=list(params.get("urls") or []),
+                    urls=urls,
                     fields=_field_definitions_from_dicts(list(params.get("fields") or [])),
                     output_dir=str(params.get("output_dir") or "output"),
                     explore_count=use_explore,
@@ -319,15 +438,26 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
             return {"__browser_intervention__": exc.payload}
 
         output_dir = Path(str(params.get("output_dir") or "output"))
+        fields_config = list(result.get("fields_config") or [])
+        xpath_result = _serialize_xpath_result(result.get("xpath_result"))
         artifacts = [
             _artifact("field_extraction_config", output_dir / "extraction_config.json"),
             _artifact("field_extraction_result", output_dir / "extraction_result.json"),
             _artifact("field_extracted_items", output_dir / "extracted_items.json"),
         ]
         return {
-            **_ok({"result": result}, artifacts),
+            **_ok({
+                "result": {
+                    "field_count": len(list(params.get("fields") or [])),
+                    "url_count": len(urls),
+                    "has_xpath_result": bool(xpath_result),
+                    "fields_config_count": len(fields_config),
+                }
+            }, artifacts),
+            "fields_config": fields_config,
+            "xpath_result": xpath_result,
             "summary": {
-                "url_count": len(list(params.get("urls") or [])),
+                "url_count": len(urls),
                 "field_count": len(list(params.get("fields") or [])),
             },
         }

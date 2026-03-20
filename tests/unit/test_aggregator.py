@@ -127,6 +127,28 @@ class TestAggregator:
         assert result["total_items"] == 0
         assert result["unique_urls"] == 0
 
+
+    def test_prefer_explicit_result_file_over_stale_history(self, tmp_path):
+        """显式 result_file 应覆盖目录里的历史结果文件。"""
+        current_file = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        stale_file = tmp_path / "subtask_01" / "pipeline_extracted_items_old.jsonl"
+
+        st = _make_subtask("01")
+        st.result_file = str(current_file)
+        plan = _make_plan([st])
+
+        _write_jsonl(current_file, [{"url": "https://example.com/current", "title": "Current"}])
+        _write_jsonl(stale_file, [{"url": "https://example.com/stale", "title": "Stale"}])
+
+        aggregator = ResultAggregator()
+        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+
+        assert result["total_items"] == 1
+        merged = tmp_path / "merged_results.jsonl"
+        lines = merged.read_text(encoding="utf-8").strip().split("\n")
+        assert len(lines) == 1
+        assert json.loads(lines[0])["url"] == "https://example.com/current"
+
     def test_summary_file_created(self, tmp_path):
         """应生成汇总文件。"""
         st = _make_subtask("01")

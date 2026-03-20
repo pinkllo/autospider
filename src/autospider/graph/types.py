@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -34,8 +33,8 @@ class GraphInput(BaseModel):
 
     entry_mode: EntryMode
     cli_args: dict[str, Any] = Field(default_factory=dict)
-    request_id: str = Field(default_factory=lambda: uuid4().hex)
-    invoked_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    request_id: str = Field(default="")
+    invoked_at: str = Field(default="")
     thread_id: str = Field(default_factory=lambda: uuid4().hex)
 
 

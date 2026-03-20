@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 
 
 @dataclass
@@ -49,7 +48,7 @@ class PageExtractionRecord:
     fields: list[FieldExtractionResult] = field(default_factory=list)  # 字段提取结果
     nav_steps: list[dict] = field(default_factory=list)  # 导航步骤（用于重放）
     success: bool = False  # 是否成功提取所有必填字段
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = ""
 
     def get_field(self, field_name: str) -> FieldExtractionResult | None:
         """获取指定字段的提取结果"""
@@ -94,7 +93,7 @@ class BatchExtractionResult:
     fields: list[FieldDefinition] = field(default_factory=list)  # 字段定义
     total_urls_explored: int = 0
     total_urls_validated: int = 0
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    created_at: str = ""
 
     def get_common_xpath(self, field_name: str) -> str | None:
         """获取指定字段的公共 XPath"""

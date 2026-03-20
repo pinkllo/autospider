@@ -304,7 +304,7 @@ class DetailCrawler:
                 "url": url,
                 "title": title,
                 "content": content,
-                "crawled_at": datetime.now().isoformat(),
+                "crawled_at": "",
             }}
             
         except Exception as e:
