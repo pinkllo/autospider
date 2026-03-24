@@ -13,14 +13,11 @@ It can automatically discover detail links, infer highly stable and reusable XPa
 - **Smart Planning Agent**: Employs SoM visual recognition to analyze complex site navigation. It automatically breaks down massive, multi-category websites into independent, stable sub-tasks (`multi` mode) for scalable crawling.
 - **Robust XPath Generation & Error Salvage**: Infers comprehensive multi-attribute XPath selectors (binding `id`, `class`, `data-*`). A built-in "salvage mechanism" automatically fixes and repairs field extraction errors gracefully on the fly.
 - **Non-intrusive Guard & Session Memory**: When captchas or logins interrupt, the crawler pauses seamlessly, popping a unified browser banner for human intervention. Session status is saved incrementally inside `.auth/`.
-- **High-Performance Producer-Consumer Pipeline**: Graph traversal runs decoupled from data extraction. Supports concurrent consumers bounded by flexible queues (`memory`, `file`, `redis`), equipped with rate limiting and breakpoint resumption.
-- **Decoupled Workflows**:
-  - Two-stage stable mode: `generate-config` (explore & generate rules) + `batch-collect` (batch fetch by rules).
-  - Direct extraction from URL list: `field-extract` supports "explore → validate → batch extract" lifecycle.
+- **Flexible execution backend**: the underlying Graph still provides unified orchestration, concurrent pipelines, resumability, adaptive rate control, and `memory` / `file` / `redis` channels, while the public CLI is intentionally reduced to a smaller set of main commands.
 
 ## 🏗️ System Architecture
 
-AutoSpider uses a LangGraph-based state graph architecture, routing through a unified entry node based on `entry_mode`, supporting 7 flexible execution modes:
+AutoSpider uses a LangGraph-based state graph architecture, routing through a unified entry node based on `entry_mode`. The public CLI now keeps only 3 main commands, while the graph still supports multiple internal execution modes:
 
 ```mermaid
 graph LR
@@ -44,12 +41,12 @@ graph LR
 | Entry Mode | Execution Route | Description |
 |:---|:---|:---|
 | `chat_pipeline` | chat_clarify → chat_route_execution → execute_single_or_multi | 💬 AI-driven multi-turn dialog then auto-execute |
-| `pipeline_run` | normalize_pipeline_params → run_pipeline_node | 🔧 Producer-consumer concurrent pipeline |
-| `collect_urls` | collect_urls_node | 🔗 Standalone URL collection |
-| `generate_config` | generate_config_node | ⚙️ Site exploration & config generation |
-| `batch_collect` | batch_collect_node | 📦 Batch paginated collection by config |
-| `field_extract` | field_extract_node | 🔍 XPath inference & structured extraction |
-| `multi_pipeline` | plan_node → dispatch_node → aggregate_node | 🧠 Smart planning + concurrent dispatch + result aggregation |
+| `pipeline_run` | normalize_pipeline_params → run_pipeline_node | 🔧 Internal single-flow pipeline |
+| `collect_urls` | collect_urls_node | 🔗 Internal URL collection |
+| `generate_config` | generate_config_node | ⚙️ Internal config generation |
+| `batch_collect` | batch_collect_node | 📦 Internal batch collection |
+| `field_extract` | field_extract_node | 🔍 Internal field extraction |
+| `multi_pipeline` | plan_node → multi_dispatch_subgraph → aggregate_node | 🧠 Smart planning + concurrent dispatch + result aggregation |
 
 ## ⚙️ Requirements
 
@@ -89,7 +86,7 @@ HEADLESS=false
 PIPELINE_MODE=memory
 ```
 
-*Note: Ensure `PIPELINE_MODE=memory` if Redis is not configured.*
+*Note: if `--mode` is not passed to `chat-pipeline`, the default comes from `PIPELINE_MODE`. Use `memory` when Redis is not configured.*
 
 ## 🚀 Quick Start
 
@@ -98,57 +95,31 @@ PIPELINE_MODE=memory
 Chat your way to data. The system automatically reasons and coordinates tasks via single or multi-channel strategies:
 
 ```bash
-# --execution-mode supports auto/single/multi. "multi" builds a global site plan via Planning Agent.
-autospider chat-pipeline -r "Collect articles across all categories from example.com and extract titles & dates" --execution-mode auto
+# Automatically clarifies the task and picks the right execution path
+autospider chat-pipeline -r "Collect articles across all categories from example.com and extract titles & dates"
 ```
 
-### 1) URL Collection
+### 1) Multi-category parallel collection
 
 ```bash
-autospider collect-urls \
-  --list-url "https://example.com/list" \
-  --task "Collect detail page URLs" \
-  --explore-count 3 \
-  --target-url-count 20
-```
-
-### 2) Two-Stage Configuration & Collection (Stable Mode)
-
-```bash
-# Stage 1: Explore and generate config
-autospider generate-config --list-url "https://example.com/list" --task "Collect detail URLs" --output output
-
-# Stage 2: Batch paginated collection by config
-autospider batch-collect --config-path output/collection_config.json --target-url-count 20 --output output
-```
-
-### 3) Concurrent Processing Pipeline
-
-```bash
-autospider pipeline-run \
-  --list-url "https://example.com/list" \
-  --task "Extract title and publish date from detail pages" \
-  --fields-file fields.json \
-  --target-url-count 20 \
-  --mode memory \
-  --consumer-concurrency 3 \
-  --output output
-```
-
-### 4) Pure Extraction From Given URLs
-
-```bash
-autospider field-extract \
-  --urls-file output/urls.txt \
+autospider multi-pipeline \
+  --site-url "https://example.com" \
+  --request "Collect announcement data across all categories" \
   --fields-file fields.json \
   --output output
+```
+
+### 2) Resume an interrupted run
+
+```bash
+autospider resume --thread-id "<thread_id>"
 ```
 
 ## 📂 Core Project Structure
 
 ```text
 src/autospider/
-├── cli.py                     # CLI entry point (chat-pipeline / pipeline-run etc.)
+├── cli.py                     # CLI entry point (chat-pipeline / multi-pipeline / resume)
 ├── graph/                     # LangGraph state graph orchestration layer
 │   ├── main_graph.py          #   Main graph construction & routing logic
 │   ├── runner.py              #   GraphRunner unified execution entry
