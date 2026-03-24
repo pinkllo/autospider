@@ -181,10 +181,9 @@ src/autospider/
 │   ├── field_decider.py       #   字段决策与挽救机制
 │   ├── batch_field_extractor.py#  批量字段提取
 │   └── batch_xpath_extractor.py#  批量 XPath 提取
-├── pipeline/                  # 并行调度
-│   ├── dispatcher.py          #   TaskDispatcher 任务分发器
+├── pipeline/                  # 采集执行流水线
 │   ├── aggregator.py          #   ResultAggregator 结果聚合器
-│   ├── worker.py              #   Worker 消费者工作单元
+│   ├── worker.py              #   SubTaskWorker 子任务执行单元
 │   └── runner.py              #   Pipeline 生产者-消费者运行器
 ├── output/                    # 输出处理
 └── prompts/                   # AI Prompt 模板与提示词工程

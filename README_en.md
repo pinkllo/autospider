@@ -179,10 +179,9 @@ src/autospider/
 │   ├── field_decider.py       #   Field decision & salvage mechanism
 │   ├── batch_field_extractor.py#  Batch field extraction
 │   └── batch_xpath_extractor.py#  Batch XPath extraction
-├── pipeline/                  # Parallel scheduling
-│   ├── dispatcher.py          #   TaskDispatcher task distributor
+├── pipeline/                  # Pipeline execution
 │   ├── aggregator.py          #   ResultAggregator result merger
-│   ├── worker.py              #   Worker consumer units
+│   ├── worker.py              #   SubTaskWorker isolated subtask worker
 │   └── runner.py              #   Pipeline producer-consumer runner
 ├── output/                    # Output processing
 └── prompts/                   # AI Prompt engineering templates

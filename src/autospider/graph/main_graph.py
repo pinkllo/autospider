@@ -14,7 +14,6 @@ from .nodes.capability_nodes import (
     aggregate_node,
     batch_collect_node,
     collect_urls_node,
-    dispatch_node,
     field_extract_node,
     generate_config_node,
     plan_node,
@@ -112,7 +111,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("batch_collect_node", batch_collect_node)
     graph.add_node("field_extract_node", field_extract_node)
     graph.add_node("plan_node", plan_node)
-    graph.add_node("dispatch_node", dispatch_node)
     graph.add_node("aggregate_node", aggregate_node)
     graph.add_node("build_artifact_index", build_artifact_index)
     graph.add_node("build_summary", build_summary)

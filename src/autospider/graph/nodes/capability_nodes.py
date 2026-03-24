@@ -501,17 +501,6 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
     return await _retry_after_browser_interrupt(state, node_result, plan_node)
 
 
-async def dispatch_node(state: dict[str, Any]) -> dict[str, Any]:
-    dispatch_result = dict(state.get("dispatch_result") or {})
-    if dispatch_result:
-        return {
-            **_ok({"dispatch_result": dispatch_result}),
-            "dispatch_result": dispatch_result,
-            "summary": dispatch_result,
-        }
-    return _fatal("dispatch_deprecated", "dispatch_node 已由 LangGraph multi dispatch subgraph 取代")
-
-
 async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
     plan = state.get("task_plan")

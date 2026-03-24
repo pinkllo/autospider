@@ -228,11 +228,7 @@ def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
 
 async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 澄清节点。"""
-    cli_args = dict(state.get("cli_args") or {})
-
     clarified_task = state.get("clarified_task")
-    if not isinstance(clarified_task, dict):
-        clarified_task = cli_args.get("clarified_task")
     if isinstance(clarified_task, dict) and clarified_task:
         return {
             **_ok({"clarified": True, "source": "state"}),
@@ -240,6 +236,7 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
             "chat_flow_state": "ready",
         }
 
+    cli_args = dict(state.get("cli_args") or {})
     initial_request = str(cli_args.get("request") or "").strip()
     history = _history_from_state(state.get("chat_history"), initial_request)
     if not history:
@@ -319,12 +316,6 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
     resolved_mode = _resolve_chat_execution_mode()
-    if bool(cli_args.get("skip_chat_review_interrupt", False)):
-        return {
-            **_ok({"review_action": "approve", "source": "cli_skip"}),
-            "chat_review_state": "approved",
-        }
-
     review_payload = interrupt(_build_review_payload(state=state, task=task, resolved_mode=resolved_mode))
     action_payload = review_payload if isinstance(review_payload, dict) else {"action": review_payload}
     action = str(action_payload.get("action") or "approve").strip().lower()

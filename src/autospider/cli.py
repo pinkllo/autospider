@@ -14,15 +14,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .common.browser import create_browser_session
 from .common.validators import validate_url, validate_task_description
 from .common.exceptions import ValidationError, URLValidationError
-from .common.llm import TaskClarifier, DialogueMessage, ClarifiedTask
 from .common.logger import get_logger
 from .field import FieldDefinition
 from .graph import GraphInput, GraphRunner
-from .graph.checkpoint import graph_checkpoint_enabled
-from .field import run_field_pipeline
 
 # 日志器
 logger = get_logger(__name__)
@@ -149,13 +145,6 @@ def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
     return fields
 
 
-def _load_generated_fields(generated_fields: list[FieldDefinition]) -> list[FieldDefinition]:
-    """校验 AI 生成字段列表。"""
-    if not generated_fields:
-        raise ValueError("AI 未生成有效字段，请补充更具体的字段要求")
-    return generated_fields
-
-
 def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
     """构建字段预览表格。"""
     table = Table(title="AI 生成字段")
@@ -176,48 +165,6 @@ def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
     return table
 
 
-def _clarify_until_ready(
-    clarifier: TaskClarifier,
-    history: list[DialogueMessage],
-    max_turns: int,
-    *,
-    panel_title_prefix: str = "AI 澄清问题",
-) -> tuple[str, ClarifiedTask | None]:
-    """在限定轮数内执行澄清，直到 ready/reject/超时。"""
-    for turn in range(1, max_turns + 1):
-        result = run_async_safely(clarifier.clarify(history))
-
-        if result.status == "reject":
-            console.print(
-                Panel(
-                    f"[red]{result.reason or '该任务暂不支持自动执行'}[/red]",
-                    title="任务拒绝",
-                    style="red",
-                )
-            )
-            return "reject", None
-
-        if result.status == "ready" and result.task is not None:
-            return "ready", result.task
-
-        question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
-        console.print(
-            Panel(
-                question,
-                title=f"{panel_title_prefix} ({turn}/{max_turns})",
-                style="yellow",
-            )
-        )
-        answer = typer.prompt("你的回答").strip()
-        if not answer:
-            answer = "请按常见默认方案继续，并明确你的默认假设。"
-
-        history.append(DialogueMessage(role="assistant", content=question))
-        history.append(DialogueMessage(role="user", content=answer))
-
-    return "incomplete", None
-
-
 def _load_urls(urls_file: str) -> list[str]:
     path = Path(urls_file)
     if not path.exists():
@@ -229,18 +176,6 @@ def _load_urls(urls_file: str) -> list[str]:
         raise ValueError("URL file is empty")
     return urls
 
-
-def _resolve_chat_execution_mode(
-    mode: str | None = None,
-    *,
-    initial_request: str,
-    task_description: str,
-) -> str:
-    """chat-pipeline 仅保留 multi 模式。"""
-    _ = mode
-    _ = initial_request
-    _ = task_description
-    return "multi"
 
 def _serialize_fields(fields: list[FieldDefinition]) -> list[dict]:
     """将字段定义序列化为可传输字典。"""
@@ -1024,8 +959,6 @@ def chat_pipeline_command(
         )
         raise typer.Exit(1)
 
-    normalized_execution_mode = "multi"
-
     initial_request = request.strip()
     if not initial_request:
         initial_request = typer.prompt("请描述你想爬取什么（可模糊）").strip()
@@ -1040,293 +973,25 @@ def chat_pipeline_command(
         )
         raise typer.Exit(1)
 
-    if graph_checkpoint_enabled():
-        try:
-            graph_result = _invoke_graph(
-                "chat_pipeline",
-                {
-                    "request": initial_request,
-                    "max_turns": max_turns,
-                    "headless": headless,
-                    "output_dir": output_dir,
-                    "max_pages": max_pages,
-                    "target_url_count": target_url_count,
-                    "consumer_concurrency": consumer_concurrency,
-                    "field_explore_count": field_explore_count,
-                    "field_validate_count": field_validate_count,
-                    "pipeline_mode": pipeline_mode.strip() or None,
-                    "max_concurrent": max_concurrent,
-                },
-                thread_id=thread_id,
-            )
-            graph_result = _continue_chat_interrupts(graph_result)
-            _raise_if_graph_failed(graph_result)
-            if str(graph_result.get("status") or "") == "interrupted":
-                _print_graph_interrupted(graph_result)
-                return
-            _print_chat_pipeline_result(graph_result, output_dir=output_dir)
-            return
-        except KeyboardInterrupt:
-            logger.info("\n[yellow]用户中断[/yellow]")
-            raise typer.Exit(130)
-        except Exception as e:
-            console.print(
-                Panel(
-                    f"[red]{str(e)}[/red]",
-                    title="执行错误",
-                    style="red",
-                )
-            )
-            raise typer.Exit(1)
-    try:
-        clarifier = TaskClarifier()
-    except Exception as e:
-        console.print(
-            Panel(
-                f"[red]澄清器初始化失败: {str(e)}[/red]",
-                title="执行错误",
-                style="red",
-            )
-        )
-        raise typer.Exit(1)
-
-    history: list[DialogueMessage] = [DialogueMessage(role="user", content=initial_request)]
-    status, final_task = _clarify_until_ready(
-        clarifier,
-        history,
-        max_turns,
-        panel_title_prefix="AI 澄清问题",
-    )
-
-    if status == "reject":
-        raise typer.Exit(1)
-
-    if final_task is None:
-        console.print(
-            Panel(
-                "[red]在限定轮数内仍未澄清完成。请提供更明确的信息后重试。[/red]",
-                title="澄清未完成",
-                style="red",
-            )
-        )
-        raise typer.Exit(1)
-
-    list_url = ""
-    task_description = ""
-    fields: list[FieldDefinition] = []
-    use_max_pages: int | None = None
-    use_target_url_count: int | None = None
-    use_consumer_concurrency: int | None = None
-    use_field_explore_count: int | None = None
-    use_field_validate_count: int | None = None
-    use_max_concurrent: int | None = None
-    resolved_execution_mode = "multi"
-
-    while True:
-        try:
-            list_url = validate_url(final_task.list_url)
-            task_description = validate_task_description(final_task.task_description)
-            fields = _load_generated_fields(final_task.fields)
-        except (URLValidationError, ValidationError, ValueError) as e:
-            console.print(
-                Panel(
-                    f"[red]{str(e)}[/red]",
-                    title="AI 结果校验失败",
-                    style="red",
-                )
-            )
-            raise typer.Exit(1)
-
-        use_max_pages = max_pages if max_pages is not None else final_task.max_pages
-        use_target_url_count = (
-            target_url_count
-            if target_url_count is not None
-            else final_task.target_url_count
-        )
-        use_consumer_concurrency = (
-            consumer_concurrency
-            if consumer_concurrency is not None
-            else final_task.consumer_concurrency
-        )
-        use_field_explore_count = (
-            field_explore_count
-            if field_explore_count is not None
-            else final_task.field_explore_count
-        )
-        use_field_validate_count = (
-            field_validate_count
-            if field_validate_count is not None
-            else final_task.field_validate_count
-        )
-        mode_text = pipeline_mode.strip() if pipeline_mode else "默认"
-        resolved_execution_mode = _resolve_chat_execution_mode(
-            normalized_execution_mode,
-            initial_request=initial_request,
-            task_description=task_description,
-        )
-        execution_mode_text = (
-            f"{resolved_execution_mode} (auto)"
-            if normalized_execution_mode == "auto"
-            else resolved_execution_mode
-        )
-        intent_text = final_task.intent or "未提供"
-        use_max_concurrent = (
-            max_concurrent
-            if max_concurrent is not None
-            else use_consumer_concurrency
-        )
-
-        console.print(
-            Panel(
-                f"[bold]识别意图:[/bold] {intent_text}\n"
-                f"[bold]列表页 URL:[/bold] {list_url}\n"
-                f"[bold]任务描述:[/bold] {task_description}\n"
-                f"[bold]字段数量:[/bold] {len(fields)}\n"
-                f"[bold]最大翻页:[/bold] {use_max_pages if use_max_pages is not None else '默认'}\n"
-                f"[bold]目标 URL 数:[/bold] "
-                f"{use_target_url_count if use_target_url_count is not None else '默认'}\n"
-                f"[bold]字段探索数:[/bold] "
-                f"{use_field_explore_count if use_field_explore_count is not None else '默认'}\n"
-                f"[bold]字段校验数:[/bold] "
-                f"{use_field_validate_count if use_field_validate_count is not None else '默认'}\n"
-                f"[bold]消费者并发:[/bold] "
-                f"{use_consumer_concurrency if use_consumer_concurrency is not None else '默认'}\n"
-                f"[bold]模式:[/bold] {mode_text}\n"
-                f"[bold]执行引擎:[/bold] {execution_mode_text}\n"
-                f"[bold]多任务并发:[/bold] "
-                f"{use_max_concurrent if use_max_concurrent is not None else '默认'}\n"
-                f"[bold]无头模式:[/bold] {headless}\n"
-                f"[bold]输出目录:[/bold] {output_dir}",
-                title="AI 生成任务配置",
-                style="cyan",
-            )
-        )
-        console.print(_build_generated_fields_table(fields))
-
-        action = typer.prompt(
-            "请选择下一步 [1=开始执行, 2=补充需求并重新生成, 3=手动修改字段, 4=取消]",
-            default="1",
-        ).strip()
-
-        if action == "1":
-            break
-
-        if action == "4":
-            logger.info("[yellow]已取消执行[/yellow]")
-            return
-
-        if action == "3":
-            if not fields:
-                console.print("[yellow]当前没有可编辑字段。[/yellow]")
-                continue
-
-            index_text = typer.prompt(
-                f"请输入要修改的字段序号（1-{len(fields)}）",
-                default="1",
-            ).strip()
-            try:
-                index = int(index_text)
-            except ValueError:
-                console.print("[yellow]序号必须是数字。[/yellow]")
-                continue
-            if index < 1 or index > len(fields):
-                console.print("[yellow]序号超出范围。[/yellow]")
-                continue
-
-            selected = fields[index - 1]
-            new_name = typer.prompt("字段 name", default=selected.name).strip() or selected.name
-            new_desc = (
-                typer.prompt("字段 description", default=selected.description).strip()
-                or selected.description
-            )
-            new_type = (
-                typer.prompt(
-                    "字段 type（text/number/date/url）",
-                    default=selected.data_type,
-                )
-                .strip()
-                .lower()
-            )
-            if new_type not in {"text", "number", "date", "url"}:
-                console.print("[yellow]字段 type 非法，已保留原值。[/yellow]")
-                new_type = selected.data_type
-            new_required = typer.confirm("是否必填（required）", default=selected.required)
-            new_example = typer.prompt("字段 example（可空）", default=selected.example or "").strip()
-            if not new_name or not new_desc:
-                console.print("[yellow]name/description 不能为空。[/yellow]")
-                continue
-
-            fields[index - 1] = FieldDefinition(
-                name=new_name,
-                description=new_desc,
-                required=new_required,
-                data_type=new_type,
-                example=new_example or None,
-            )
-            final_task.fields = fields
-            console.print("[green]字段已更新。[/green]")
-            continue
-
-        if action != "2":
-            console.print("[yellow]无效选项，请输入 1 / 2 / 3 / 4。[/yellow]")
-            continue
-
-        supplement = typer.prompt(
-            "请输入补充要求（示例：字段描述必须保留“相关统一交易标识码”）"
-        ).strip()
-        if not supplement:
-            console.print("[yellow]补充要求为空，保持当前配置。[/yellow]")
-            continue
-
-        history.append(DialogueMessage(role="user", content=supplement))
-        regen_status, regen_task = _clarify_until_ready(
-            clarifier,
-            history,
-            max_turns,
-            panel_title_prefix="AI 追问",
-        )
-        if regen_status == "reject":
-            raise typer.Exit(1)
-        if regen_task is None:
-            console.print(
-                Panel(
-                    "[red]在限定轮数内仍未完成修正，请补充更明确的要求。[/red]",
-                    title="修正未完成",
-                    style="red",
-                )
-            )
-            raise typer.Exit(1)
-        final_task = regen_task
-
     try:
         graph_result = _invoke_graph(
             "chat_pipeline",
             {
                 "request": initial_request,
+                "max_turns": max_turns,
                 "headless": headless,
                 "output_dir": output_dir,
-                "max_pages": use_max_pages,
-                "target_url_count": use_target_url_count,
-                "consumer_concurrency": use_consumer_concurrency,
-                "field_explore_count": use_field_explore_count,
-                "field_validate_count": use_field_validate_count,
+                "max_pages": max_pages,
+                "target_url_count": target_url_count,
+                "consumer_concurrency": consumer_concurrency,
+                "field_explore_count": field_explore_count,
+                "field_validate_count": field_validate_count,
                 "pipeline_mode": pipeline_mode.strip() or None,
-                "max_concurrent": use_max_concurrent,
-                "skip_chat_review_interrupt": True,
-                "clarified_task": {
-                    "intent": final_task.intent,
-                    "list_url": list_url,
-                    "task_description": task_description,
-                    "fields": _serialize_fields(fields),
-                    "max_pages": final_task.max_pages,
-                    "target_url_count": final_task.target_url_count,
-                    "consumer_concurrency": final_task.consumer_concurrency,
-                    "field_explore_count": final_task.field_explore_count,
-                    "field_validate_count": final_task.field_validate_count,
-                },
+                "max_concurrent": max_concurrent,
             },
             thread_id=thread_id,
         )
+        graph_result = _continue_chat_interrupts(graph_result)
         _raise_if_graph_failed(graph_result)
         if str(graph_result.get("status") or "") == "interrupted":
             _print_graph_interrupted(graph_result)
@@ -1436,30 +1101,6 @@ def field_extract_command(
         )
         raise typer.Exit(1)
 
-
-async def _run_field_pipeline(
-    urls: list[str],
-    fields: list[FieldDefinition],
-    output_dir: str,
-    headless: bool,
-    explore_count: int | None,
-    validate_count: int | None,
-):
-    from .common.config import config
-
-    use_explore = explore_count if explore_count is not None else config.field_extractor.explore_count
-    use_validate = validate_count if validate_count is not None else config.field_extractor.validate_count
-
-    async with create_browser_session(headless=headless, close_engine=True) as session:
-        return await run_field_pipeline(
-            page=session.page,
-            urls=urls,
-            fields=fields,
-            output_dir=output_dir,
-            explore_count=use_explore,
-            validate_count=use_validate,
-            run_xpath=True,
-        )
 
 @app.command("collect-urls")
 def collect_urls_command(
@@ -1667,98 +1308,6 @@ def collect_urls_command(
         raise typer.Exit(1)
 
 
-async def _run_config_generator(
-    list_url: str,
-    task: str,
-    explore_count: int,
-    headless: bool,
-    output_dir: str,
-):
-    """异步运行配置生成器"""
-    from .crawler.explore.config_generator import generate_collection_config
-
-    session = None
-    try:
-        async with create_browser_session(headless=headless, close_engine=True) as session:
-            return await generate_collection_config(
-                page=session.page,
-                list_url=list_url,
-                task_description=task,
-                explore_count=explore_count,
-                output_dir=output_dir,
-            )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        # 确保浏览器会话被正确清理
-        if session:
-            try:
-                await session.stop()
-            except Exception:
-                pass
-        raise KeyboardInterrupt("用户中断")
-
-
-async def _run_batch_collector(
-    config_path: str,
-    max_pages: int | None,
-    target_url_count: int | None,
-    headless: bool,
-    output_dir: str,
-):
-    """异步运行批量收集器"""
-    from .crawler.batch.batch_collector import batch_collect_urls
-    from .common.config import config
-
-    previous_max_pages: int | None = None
-    if max_pages is not None:
-        previous_max_pages = config.url_collector.max_pages
-        config.url_collector.max_pages = int(max_pages)
-
-    try:
-        async with create_browser_session(headless=headless, close_engine=True) as session:
-            return await batch_collect_urls(
-                page=session.page,
-                config_path=config_path,
-                target_url_count=target_url_count,
-                output_dir=output_dir,
-            )
-    finally:
-        if previous_max_pages is not None:
-            config.url_collector.max_pages = previous_max_pages
-
-
-async def _run_collector(
-    list_url: str,
-    task: str,
-    explore_count: int,
-    max_pages: int | None,
-    target_url_count: int | None,
-    headless: bool,
-    output_dir: str,
-):
-    """异步运行 URL 收集器（完整流程）"""
-    from .crawler.explore.url_collector import collect_detail_urls
-    from .common.config import config
-
-    previous_max_pages: int | None = None
-    if max_pages is not None:
-        previous_max_pages = config.url_collector.max_pages
-        config.url_collector.max_pages = int(max_pages)
-
-    try:
-        async with create_browser_session(headless=headless, close_engine=True) as session:
-            return await collect_detail_urls(
-                page=session.page,
-                list_url=list_url,
-                task_description=task,
-                explore_count=explore_count,
-                target_url_count=target_url_count,
-                output_dir=output_dir,
-            )
-    finally:
-        if previous_max_pages is not None:
-            config.url_collector.max_pages = previous_max_pages
-
-
 def main():
     """CLI 入口点
 
@@ -1958,86 +1507,6 @@ def resume_graph_command(
     except Exception as exc:
         console.print(Panel(f"[red]{str(exc)}[/red]", title="恢复失败", style="red"))
         raise typer.Exit(1)
-
-async def _run_multi_pipeline(
-    site_url: str,
-    request: str,
-    fields: list[dict],
-    max_concurrent: int | None,
-    headless: bool,
-    output_dir: str,
-) -> dict:
-    """多分类并行采集核心流程。"""
-    from .common.browser import BrowserSession, shutdown_browser_engine
-    from .crawler.planner import TaskPlanner
-    from .pipeline.dispatcher import TaskDispatcher
-    from .pipeline.aggregator import ResultAggregator
-
-    console = Console()
-    # Phase 1: 规划 — 分析网站结构
-    console.print("\n[bold cyan]📋 Phase 1: 分析网站结构...[/bold cyan]")
-
-    planner_session = BrowserSession(headless=headless)
-    await planner_session.start()
-
-    try:
-        planner = TaskPlanner(
-            page=planner_session.page,
-            site_url=site_url,
-            user_request=request,
-            output_dir=output_dir,
-        )
-        plan = await planner.plan()
-    finally:
-        await planner_session.stop()
-
-    if not plan.subtasks:
-        await shutdown_browser_engine()
-        return {"error": "未能识别出任何分类/子任务，请检查网站结构或手动指定"}
-
-    # 设置共享字段
-    plan.shared_fields = fields
-
-    # 展示分析结果
-    table = Table(title=f"识别到 {len(plan.subtasks)} 个子任务")
-    table.add_column("#", justify="right", width=4)
-    table.add_column("名称", min_width=15)
-    table.add_column("列表页 URL", min_width=40)
-    table.add_column("描述", min_width=20)
-
-    for i, st in enumerate(plan.subtasks, 1):
-        table.add_row(str(i), st.name, st.list_url[:60] + "...", st.task_description[:30])
-
-    console.print(table)
-
-    # Phase 2: 调度执行
-    console.print("\n[bold cyan]🚀 Phase 2: 并行执行子任务...[/bold cyan]")
-
-    try:
-        dispatcher = TaskDispatcher(
-            plan=plan,
-            fields=fields,
-            output_dir=output_dir,
-            headless=headless,
-            max_concurrent=max_concurrent,
-        )
-        dispatch_result = await dispatcher.run()
-    finally:
-        await shutdown_browser_engine()
-
-    # Phase 3: 结果聚合
-    console.print("\n[bold cyan]📊 Phase 3: 聚合结果...[/bold cyan]")
-
-    aggregator = ResultAggregator()
-    aggregate_result = aggregator.aggregate(plan=plan, output_dir=output_dir)
-
-    # 合并结果
-    dispatch_result.update({
-        "merged_items": aggregate_result.get("total_items", 0),
-        "unique_urls": aggregate_result.get("unique_urls", 0),
-    })
-
-    return dispatch_result
 
 if __name__ == "__main__":
     main()
