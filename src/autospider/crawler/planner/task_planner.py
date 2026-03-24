@@ -291,7 +291,7 @@ class TaskPlanner:
         1. 优先从 SoM 快照的静态属性中查找 href。
         2. 其次通过执行 JavaScript 获取元素的 href 或最近祖先 A 标签的 href。
         3. 针对 SPA（单页应用），采用模拟点击并监控 URL 变化的方式获取。
-        4. 如果以上都失效，回退到当前页 URL。
+        4. 如果以上都失效，显式跳过该分类，避免把规划失败伪装成“当前页可执行”。
 
         Args:
             analysis: LLM 返回的分类分析字典。
@@ -305,6 +305,7 @@ class TaskPlanner:
             return []
 
         subtasks: list[SubTask] = []
+        seen_signatures: set[tuple[str, str]] = set()
         base_url = self.page.url
         original_url = self.page.url
 
@@ -343,13 +344,24 @@ class TaskPlanner:
                 if list_url:
                     logger.info("[Planner] [%s] 策略3：通过 SPA 模拟点击获取 URL: %s", name, list_url[:80])
 
-            # 策略 4: 最终兜底 — 部分 SPA 点击后内部状态改变但 URL 不变。
-            # 这种情况下，我们将当前页设为入口，依靠 Worker Agent 在执行时重新执行点击逻辑。
             if not list_url:
-                list_url = base_url
-                logger.info("[Planner] [%s] 策略4：无法提取到新 URL，回退至当前页面: %s", name, list_url[:80])
+                logger.warning(
+                    "[Planner] [%s] 无法解析分类入口 URL，跳过该子任务，避免把规划失败伪装成当前页回退",
+                    name,
+                )
+                continue
 
             # 创建子任务实体
+            signature = (list_url, task_desc.strip())
+            if signature in seen_signatures:
+                logger.warning(
+                    "[Planner] [%s] 解析结果与已有子任务重复，跳过重复子任务: %s",
+                    name,
+                    list_url[:80],
+                )
+                continue
+            seen_signatures.add(signature)
+
             subtask = SubTask(
                 id=f"category_{idx + 1:02d}",
                 name=name,

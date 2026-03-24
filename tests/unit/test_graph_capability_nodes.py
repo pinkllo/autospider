@@ -52,7 +52,7 @@ class _FakeContextManager:
         return False
 
 
-def test_plan_node_falls_back_to_single_subtask(monkeypatch):
+def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
     monkeypatch.setattr(capability_nodes, "BrowserSession", _FakeBrowserSession)
     monkeypatch.setattr(capability_nodes, "TaskPlanner", _FakePlannerEmpty)
 
@@ -71,13 +71,9 @@ def test_plan_node_falls_back_to_single_subtask(monkeypatch):
         )
     )
 
-    assert result["node_status"] == "ok"
-    plan = result["task_plan"]
-    assert len(plan.subtasks) == 1
-    assert plan.total_subtasks == 1
-    assert plan.subtasks[0].list_url == "https://example.com/list"
-    assert plan.subtasks[0].task_description == "抓取公告详情"
-    assert result["summary"]["total_subtasks"] == 1
+    assert result["node_status"] == "fatal"
+    assert result["error_code"] == "planner_no_subtasks"
+    assert "未生成任何可执行子任务" in result["error_message"]
 
 
 def test_generate_config_node_persists_collection_config_in_state(monkeypatch, tmp_path):

@@ -27,6 +27,38 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _pagination_rule_selectors() -> list[str]:
+    """规则兜底只保留语义较强的分页选择器，避免误点泛化按钮。"""
+    return [
+        'a:has-text("下一页")',
+        'button:has-text("下一页")',
+        'a:has-text("下页")',
+        'button:has-text("下页")',
+        'a:has-text("Next")',
+        'button:has-text("Next")',
+        'a:has-text("next")',
+        'button:has-text("next")',
+        'a[rel="next"]',
+        'a[aria-label*="next" i]',
+        'button[aria-label*="next" i]',
+        'a[aria-label*="下一页"]',
+        'button[aria-label*="下一页"]',
+        'a[title*="下一页"]',
+        'button[title*="下一页"]',
+        'a[title*="next" i]',
+        'button[title*="next" i]',
+        "#next-page",
+        "#nextPage",
+        'a[class*="page-next"]:not([class*="disabled"])',
+        'button[class*="page-next"]:not([class*="disabled"]):not([disabled])',
+        '[class*="pagination"] a[rel="next"]',
+        '[class*="pagination"] button[aria-label*="next" i]',
+        '[class*="pagination"] a[title*="next" i]',
+        '[class*="pagination"] a:has-text("下一页")',
+        '[class*="pagination"] button:has-text("下一页")',
+    ]
+
+
 class PaginationHandler:
     """分页处理器，负责识别和操作分页控件"""
 
@@ -64,81 +96,7 @@ class PaginationHandler:
 
         # 策略2: 规则兜底 - 增强的分页按钮选择器
         logger.info("[Extract-Pagination] 策略2: 使用规则识别...")
-        common_selectors = [
-            # 中文文本匹配
-            'a:has-text("下一页")',
-            'button:has-text("下一页")',
-            'a:has-text("下页")',
-            'span:has-text("下一页") >> xpath=ancestor::a',
-            'span:has-text("下一页") >> xpath=ancestor::button',
-            # 英文文本匹配
-            'a:has-text("Next")',
-            'button:has-text("Next")',
-            'a:has-text("next")',
-            'button:has-text("next")',
-            # 符号匹配
-            'a:has-text(">")',
-            'button:has-text(">")',
-            'a:has-text("›")',
-            'a:has-text("»")',
-            # 图标按钮匹配（纯图标，无文本）
-            "button:has(.icon-right):not([disabled])",
-            'button:has([class*="icon-right"]):not([disabled])',
-            "a:has(.icon-right)",
-            'a:has([class*="icon-right"])',
-            "button:has(.icon-next):not([disabled])",
-            'button:has([class*="icon-next"]):not([disabled])',
-            "a:has(.icon-next)",
-            # 常见图标库的右箭头/下一页图标
-            "button:has(.gd-icon.icon-right):not([disabled])",  # GD Design
-            "button:has(.el-icon-arrow-right):not([disabled])",  # Element UI
-            "button:has(.el-icon-d-arrow-right):not([disabled])",
-            "a:has(.el-icon-arrow-right)",
-            "button:has(.anticon-right):not([disabled])",  # Ant Design
-            "button:has(.anticon-double-right):not([disabled])",
-            "a:has(.anticon-right)",
-            "button:has(.fa-chevron-right):not([disabled])",  # Font Awesome
-            "button:has(.fa-angle-right):not([disabled])",
-            "button:has(.fa-arrow-right):not([disabled])",
-            "a:has(.fa-chevron-right)",
-            'button:has(svg[class*="right"]):not([disabled])',  # SVG 图标
-            'a:has(svg[class*="right"])',
-            # 类名匹配（排除disabled状态）
-            '[class*="next"]:not([class*="disabled"]):not([disabled])',
-            '[class*="Next"]:not([class*="disabled"]):not([disabled])',
-            'a[class*="page-next"]:not([class*="disabled"])',
-            'button[class*="page-next"]:not([class*="disabled"])',
-            'button[class*="icon-only"]:has([class*="right"]):not([disabled])',
-            # ID 匹配
-            "#next-page",
-            "#nextPage",
-            'a[id*="next"]',
-            'button[id*="next"]',
-            # aria-label 匹配
-            'a[aria-label*="next" i]',
-            'button[aria-label*="next" i]',
-            'a[aria-label*="下一页"]',
-            'button[aria-label*="下一页"]',
-            'button[aria-label*="右" i]',
-            # 分页容器中的最后一个链接/按钮
-            '[class*="pagination"] a:not([class*="disabled"]):last-child',
-            '[class*="pagination"] button:not([class*="disabled"]):not([disabled]):last-child',
-            '[class*="pager"] a:not([class*="disabled"]):last-child',
-            '[class*="pager"] button:not([class*="disabled"]):not([disabled]):last-child',
-            ".pagination > li:last-child > a",
-            ".pagination > li:last-child > button",
-            ".pager > li:last-child > a",
-            ".pager > li:last-child > button",
-            # rel="next" 属性
-            'a[rel="next"]',
-            # title 属性匹配
-            'a[title*="下一页"]',
-            'button[title*="下一页"]',
-            'a[title*="next" i]',
-            'button[title*="next" i]',
-        ]
-
-        for selector in common_selectors:
+        for selector in _pagination_rule_selectors():
             try:
                 locator = self.page.locator(selector)
                 count = await locator.count()
@@ -522,54 +480,7 @@ class PaginationHandler:
 
         # 策略3: 增强的规则兜底
         logger.info("[Pagination] 策略3: 使用规则识别...")
-        common_selectors = [
-            # 中文文本
-            'a:has-text("下一页")',
-            'button:has-text("下一页")',
-            'a:has-text("下页")',
-            # 英文文本
-            'a:has-text("Next")',
-            'button:has-text("Next")',
-            'a:has-text("next")',
-            'button:has-text("next")',
-            # 符号
-            'a:has-text(">")',
-            'button:has-text(">")',
-            'a:has-text("›")',
-            'a:has-text("»")',
-            # 图标按钮（纯图标，无文本）
-            "button:has(.icon-right):not([disabled])",
-            'button:has([class*="icon-right"]):not([disabled])',
-            "a:has(.icon-right)",
-            "button:has(.icon-next):not([disabled])",
-            "button:has(.gd-icon.icon-right):not([disabled])",
-            "button:has(.el-icon-arrow-right):not([disabled])",
-            "button:has(.anticon-right):not([disabled])",
-            "button:has(.fa-chevron-right):not([disabled])",
-            'button:has(svg[class*="right"]):not([disabled])',
-            # 类名
-            '[class*="next"]:not([class*="disabled"]):not([disabled])',
-            '[class*="Next"]:not([class*="disabled"]):not([disabled])',
-            'a[class*="page-next"]:not([class*="disabled"])',
-            'button[class*="icon-only"]:has([class*="right"]):not([disabled])',
-            # ID
-            "#next-page",
-            "#nextPage",
-            # aria-label
-            'a[aria-label*="next" i]',
-            'button[aria-label*="next" i]',
-            'a[aria-label*="下一页"]',
-            'button[aria-label*="右" i]',
-            # 分页容器
-            '[class*="pagination"] a:not([class*="disabled"]):last-child',
-            '[class*="pagination"] button:not([class*="disabled"]):not([disabled]):last-child',
-            ".pagination > li:last-child > a",
-            ".pagination > li:last-child > button",
-            # rel 属性
-            'a[rel="next"]',
-        ]
-
-        for selector in common_selectors:
+        for selector in _pagination_rule_selectors():
             try:
                 locator = self.page.locator(selector)
                 count = await locator.count()

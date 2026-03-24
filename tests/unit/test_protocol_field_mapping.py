@@ -32,11 +32,8 @@ def test_parse_protocol_message_from_dict_payload():
     assert parsed["args"]["mark_id"] == 12
 
 
-def test_parse_protocol_message_missing_action_can_infer_action():
-    parsed = parse_protocol_message({"args": {"mark_id": 1}})
-    assert parsed is not None
-    assert parsed["action"] == "click"
-    assert parsed["args"]["mark_id"] == 1
+def test_parse_protocol_message_requires_explicit_action():
+    assert parse_protocol_message({"args": {"mark_id": 1}}) is None
     assert parse_protocol_message({}) is None
     assert parse_protocol_message(None) is None
 
@@ -56,22 +53,14 @@ def test_parse_json_dict_from_llm_parses_code_fence_with_trailing_comma():
     assert parsed["args"]["mark_id"] == 3
 
 
-def test_parse_json_dict_from_llm_salvages_broken_json_like_found_bool():
+def test_parse_json_dict_from_llm_rejects_broken_json_like_payload():
     text = """
     {
       "action": "extract",
       "args": {
-        "kind": "field",
-        "field_name": "招标项目名称",
-        "found"
-        :true,
-        "field_value": "示例值",
-        "confidence": 0.98
+        "kind": "field"
+        "field_name": "招标项目名称"
       }
     }
     """
-    parsed = parse_json_dict_from_llm(text)
-    assert isinstance(parsed, dict)
-    assert parsed["action"] == "extract"
-    assert parsed["args"]["found"] is True
-    assert parsed["args"]["field_value"] == "示例值"
+    assert parse_json_dict_from_llm(text) is None

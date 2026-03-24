@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from typing import Any
 
 
@@ -138,100 +137,6 @@ def _iter_json_candidates(text: str) -> list[str]:
     ]
 
 
-@dataclass
-class _FieldExtractor:
-    """从文本中提取 JSON 字段值的辅助类"""
-
-    text: str
-
-    def _match(self, pattern: str) -> re.Match[str] | None:
-        return re.search(pattern, self.text, flags=re.IGNORECASE)
-
-    def string(self, key: str) -> str | None:
-        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*["\']([^"\']*)["\']')
-        if m:
-            return m.group(1)
-        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*([A-Za-z_][\w\-]*)')
-        return m.group(1) if m else None
-
-    def integer(self, key: str) -> int | None:
-        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*"?(\d+)"?')
-        try:
-            return int(m.group(1)) if m else None
-        except ValueError:
-            return None
-
-    def boolean(self, key: str) -> bool | None:
-        m = self._match(
-            rf'["\']{re.escape(key)}["\']\s*:\s*(true|false|"true"|"false"|\'true\'|\'false\'|1|0)'
-        )
-        return _coerce_bool(m.group(1).strip('"\'')) if m else None
-
-    def floating(self, key: str) -> float | None:
-        m = self._match(rf'["\']{re.escape(key)}["\']\s*:\s*(-?\d+(?:\.\d+)?)')
-        try:
-            return float(m.group(1)) if m else None
-        except ValueError:
-            return None
-
-
-def _salvage_json_like_dict(text: str) -> dict[str, Any] | None:
-    """尽力从格式错误的文本中抢救关键信息"""
-    if not text:
-        return None
-
-    cleaned = _strip_code_fences(text)
-    ext = _FieldExtractor(cleaned)
-
-    action = ext.string("action")
-    if not action:
-        return None
-
-    # 提取 args 对象
-    args: dict[str, Any] = {}
-    args_match = re.search(r'"args"\s*:\s*\{', cleaned)
-    if args_match and (obj := _extract_balanced_object(cleaned, args_match.end() - 1)):
-        try:
-            args = json.loads(_cleanup_json_text(obj))
-        except Exception:
-            pass
-
-    # args 为空时提取常见字段
-    if not args:
-        for k in [
-            "kind",
-            "purpose",
-            "page_kind",
-            "target_text",
-            "text",
-            "key",
-            "url",
-            "reasoning",
-            "field_name",
-            "field_text",
-            "field_value",
-            "location_description",
-        ]:
-            if (v := ext.string(k)) is not None:
-                args[k] = v
-        if (v := ext.integer("mark_id")) is not None:
-            args["mark_id"] = v
-        if (v := ext.integer("selected_mark_id")) is not None:
-            args["selected_mark_id"] = v
-        if (v := ext.boolean("found")) is not None:
-            args["found"] = v
-        if (v := ext.floating("confidence")) is not None:
-            args["confidence"] = v
-        if sd := re.search(r'"scroll_delta"\s*:\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]', cleaned):
-            args["scroll_delta"] = [int(sd.group(1)), int(sd.group(2))]
-
-    # 构建输出
-    out: dict[str, Any] = {"action": action, "args": args}
-    if thinking := ext.string("thinking"):
-        out["thinking"] = thinking
-    return out
-
-
 def _try_parse_json_dict(text: str) -> dict[str, Any] | None:
     """尝试从文本中直接解析 JSON 字典（不做抢救）。"""
     for cand in _iter_json_candidates(text):
@@ -264,10 +169,7 @@ def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
     if normalized != cleaned and (parsed := _try_parse_json_dict(normalized)):
         return parsed
 
-    # 兜底2：抢救式解析（先原文，再归一化文本）
-    return _salvage_json_like_dict(cleaned) or (
-        _salvage_json_like_dict(normalized) if normalized != cleaned else None
-    )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -297,44 +199,8 @@ def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, An
             if action:
                 break
 
-    purpose = _normalize_action(args.get("purpose"))
-    kind = _normalize_action(args.get("kind"))
-    selection_purposes = {
-        "detail_links",
-        "field_match",
-        "pagination_next",
-        "next_page",
-        "jump_widget",
-        "page_jump",
-    }
-
     if not action:
-        if args.get("selected_mark_id") is not None:
-            action = "select"
-        elif isinstance(args.get("items"), list) and purpose in selection_purposes:
-            action = "select"
-        elif purpose in selection_purposes and (
-            args.get("mark_id") is not None
-            or args.get("input") is not None
-            or args.get("button") is not None
-        ):
-            action = "select"
-        elif kind in {"field", "fields"} or any(
-            k in args for k in ("field_name", "field_text", "field_value")
-        ):
-            action = "extract"
-        elif args.get("page_kind") is not None:
-            action = "report"
-        elif args.get("scroll_delta") is not None:
-            action = "scroll"
-        elif args.get("url"):
-            action = "navigate"
-        elif args.get("text") and (
-            args.get("mark_id") is not None or args.get("target_text")
-        ):
-            action = "type"
-        elif args.get("mark_id") is not None or args.get("target_text"):
-            action = "click"
+        return None
 
     action = _ACTION_ALIASES.get(action, action)
     if not action:

@@ -8,8 +8,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command, Send, interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
-
 from ...common.browser import BrowserSession
+from ...common.config import config
 from ...crawler.planner import TaskPlanner
 from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...pipeline.worker import SubTaskWorker
@@ -77,6 +77,16 @@ def _subtask_signature(payload: dict[str, Any]) -> tuple[str, str, str]:
 def _restore_subtask(payload: dict[str, Any]) -> SubTask:
     """从纯字典结构安全反序列化还原回 SubTask 模型实例。"""
     return SubTask.model_validate(dict(payload or {}))
+
+
+def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
+    params = dict(state.get("normalized_params") or {})
+    raw_value = params.get("max_concurrent")
+    try:
+        batch_size = int(raw_value) if raw_value is not None else config.planner.max_concurrent_subtasks
+    except (TypeError, ValueError):
+        batch_size = config.planner.max_concurrent_subtasks
+    return max(1, batch_size)
 
 
 def _build_subtask_result(
@@ -169,9 +179,10 @@ def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
 def prepare_dispatch_batch(state: MultiDispatchState) -> MultiDispatchState:
     """提取排队中的任务，送入当前的并行执行批次 current_batch 并清理之前衍生的数据槽。"""
     queue = list(state.get("dispatch_queue") or [])
+    batch_size = _resolve_dispatch_batch_size(state)
     return {
-        "current_batch": queue,
-        "dispatch_queue": [],
+        "current_batch": queue[:batch_size],
+        "dispatch_queue": queue[batch_size:],
         "spawned_subtasks": [],
     }
 

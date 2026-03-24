@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -17,7 +15,7 @@ from ...common.browser import BrowserSession, create_browser_session
 from ...common.config import config
 from ...common.storage.idempotent_io import write_json_idempotent
 from ...domain.fields import FieldDefinition
-from ...domain.planning import SubTask, TaskPlan
+from ...domain.planning import TaskPlan
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
 from ...crawler.explore.url_collector import collect_detail_urls
@@ -79,33 +77,6 @@ def _browser_session_options(state: dict[str, Any], params: dict[str, Any]) -> d
         "guard_intervention_mode": "interrupt",
         "guard_thread_id": str(state.get("thread_id") or ""),
     }
-
-
-def _build_fallback_plan(params: dict[str, Any]) -> TaskPlan:
-    list_url = str(params.get("site_url") or params.get("list_url") or "")
-    task_description = str(params.get("request") or params.get("task_description") or "")
-    shared_fields = list(params.get("fields") or [])
-    fallback_subtask = SubTask(
-        id="category_01",
-        name="默认任务",
-        list_url=list_url,
-        task_description=task_description,
-        fields=shared_fields,
-        max_pages=params.get("max_pages"),
-        target_url_count=params.get("target_url_count"),
-        created_by="fallback_plan",
-    )
-    plan_key = json.dumps({"list_url": list_url, "task_description": task_description}, ensure_ascii=False, sort_keys=True)
-    return TaskPlan(
-        plan_id=hashlib.sha1(plan_key.encode("utf-8")).hexdigest()[:16],
-        original_request=task_description,
-        site_url=list_url,
-        subtasks=[fallback_subtask],
-        total_subtasks=1,
-        shared_fields=shared_fields,
-        created_at="",
-        updated_at="",
-    )
 
 
 def _collection_config_payload(config_obj: Any) -> dict[str, Any]:
@@ -475,7 +446,10 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             await planner_session.stop()
 
         if not plan.subtasks:
-            plan = _build_fallback_plan(params)
+            return _fatal(
+                "planner_no_subtasks",
+                "规划阶段未生成任何可执行子任务，请检查站点结构识别结果或补充更明确的分类入口。",
+            )
 
         fields = list(params.get("fields") or [])
         plan.shared_fields = fields
