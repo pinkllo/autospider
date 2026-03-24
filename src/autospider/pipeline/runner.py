@@ -146,10 +146,6 @@ async def run_pipeline(
         1,
         int(consumer_concurrency or config.pipeline.consumer_concurrency),
     )
-    previous_max_pages: int | None = None
-    if max_pages is not None:
-        previous_max_pages = config.url_collector.max_pages
-        config.url_collector.max_pages = int(max_pages)
 
     channel, redis_manager = create_url_channel(
         mode=pipeline_mode,
@@ -222,6 +218,7 @@ async def run_pipeline(
                 url_channel=channel,
                 redis_manager=redis_manager,
                 target_url_count=target_url_count,
+                max_pages=max_pages,
                 persist_progress=False,
             )
             result = await collector.run()
@@ -395,8 +392,6 @@ async def run_pipeline(
             consumer(),
         )
     finally:
-        if previous_max_pages is not None:
-            config.url_collector.max_pages = previous_max_pages
         summary["finished_at"] = ""
         if state.get("plan_upgrade_request"):
             summary["plan_upgrade_request"] = state.get("plan_upgrade_request")

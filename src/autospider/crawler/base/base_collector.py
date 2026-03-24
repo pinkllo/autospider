@@ -62,6 +62,7 @@ class BaseCollector(ABC):
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
         target_url_count: int | None = None,
+        max_pages: int | None = None,
         persist_progress: bool = True,
     ):
         """初始化 BaseCollector 基类
@@ -97,6 +98,11 @@ class BaseCollector(ABC):
             int(target_url_count)
             if target_url_count is not None
             else config.url_collector.target_url_count
+        )
+        self.max_pages = (
+            int(max_pages)
+            if max_pages is not None
+            else config.url_collector.max_pages
         )
 
         # 自适应速率控制器：根据页面加载成功率动态调整抓取频率，降低封号风险
@@ -310,7 +316,7 @@ class BaseCollector(ABC):
             await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(1)
 
-        max_pages = config.url_collector.max_pages
+        max_pages = self.max_pages
         target_url_count = self.target_url_count
 
         logger.info(f"目标：收集 {target_url_count} 个 URL，最大翻页: {max_pages}")
@@ -428,7 +434,7 @@ class BaseCollector(ABC):
         max_scrolls = config.url_collector.max_scrolls
         no_new_threshold = config.url_collector.no_new_url_threshold
         target_url_count = self.target_url_count
-        max_pages = config.url_collector.max_pages
+        max_pages = self.max_pages
 
         logger.info(f"目标：收集 {target_url_count} 个 URL，最大翻页: {max_pages}")
 

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from autospider.common.config import config
 from autospider.common.types import TaskPlan
 from autospider.graph.nodes import capability_nodes
 
@@ -147,6 +148,73 @@ def test_batch_collect_node_can_use_collection_config_from_state(monkeypatch, tm
     assert result["collection_config"]["list_url"] == "https://example.com/list"
     assert result["collected_urls"] == ["https://example.com/a", "https://example.com/b"]
     assert result["collection_progress"]["collected_count"] == 2
+
+
+def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    original_max_pages = config.url_collector.max_pages
+
+    async def _fake_collect_detail_urls(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(collected_urls=["https://example.com/a"])
+
+    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
+    monkeypatch.setattr(capability_nodes, "collect_detail_urls", _fake_collect_detail_urls)
+
+    result = asyncio.run(
+        capability_nodes.collect_urls_node(
+            {
+                "thread_id": "thread-1",
+                "normalized_params": {
+                    "list_url": "https://example.com/list",
+                    "task": "采集公告",
+                    "explore_count": 2,
+                    "max_pages": 9,
+                    "output_dir": str(tmp_path),
+                },
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert captured["max_pages"] == 9
+    assert config.url_collector.max_pages == original_max_pages
+
+
+def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    original_max_pages = config.url_collector.max_pages
+
+    async def _fake_batch_collect_urls(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(collected_urls=["https://example.com/a"])
+
+    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
+    monkeypatch.setattr(capability_nodes, "batch_collect_urls", _fake_batch_collect_urls)
+
+    result = asyncio.run(
+        capability_nodes.batch_collect_node(
+            {
+                "thread_id": "thread-1",
+                "collection_config": {
+                    "list_url": "https://example.com/list",
+                    "task_description": "采集公告",
+                    "nav_steps": [],
+                    "common_detail_xpath": "//a[@class=\"detail\"]",
+                    "pagination_xpath": "//a[@class=\"next\"]",
+                    "jump_widget_xpath": {"input": "//input", "button": "//button"},
+                },
+                "normalized_params": {
+                    "output_dir": str(tmp_path),
+                    "max_pages": 7,
+                },
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert captured["max_pages"] == 7
+    assert config.url_collector.max_pages == original_max_pages
 
 
 def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):

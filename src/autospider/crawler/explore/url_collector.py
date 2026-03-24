@@ -67,6 +67,7 @@ class URLCollector(BaseCollector):
         explore_count: int = 3,
         max_nav_steps: int = 10,
         target_url_count: int | None = None,
+        max_pages: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
@@ -92,6 +93,7 @@ class URLCollector(BaseCollector):
             url_channel=url_channel,
             redis_manager=redis_manager,
             target_url_count=target_url_count,
+            max_pages=max_pages,
             persist_progress=persist_progress,
         )
 
@@ -309,6 +311,7 @@ class URLCollector(BaseCollector):
             page=self.page,
             config_path=self.output_dir / "collection_config.json",
             target_url_count=self.target_url_count,
+            max_pages=self.max_pages,
             output_dir=self.output_dir,
             url_channel=self.url_channel,
             redis_manager=self.redis_manager,
@@ -770,6 +773,7 @@ async def collect_detail_urls(
     task_description: str,
     explore_count: int = 3,
     target_url_count: int | None = None,
+    max_pages: int | None = None,
     output_dir: str = "output",
     persist_progress: bool = True,
 ) -> URLCollectorResult:
@@ -792,6 +796,7 @@ async def collect_detail_urls(
         task_description=task_description,
         explore_count=explore_count,
         target_url_count=target_url_count,
+        max_pages=max_pages,
         output_dir=output_dir,
         persist_progress=persist_progress,
     )

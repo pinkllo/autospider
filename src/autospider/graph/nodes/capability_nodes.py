@@ -256,10 +256,6 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
-        previous_max_pages: int | None = None
-        if params.get("max_pages") is not None:
-            previous_max_pages = config.url_collector.max_pages
-            config.url_collector.max_pages = int(params["max_pages"])
         try:
             async with create_browser_session(
                 close_engine=True,
@@ -271,14 +267,12 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
                     task_description=str(params.get("task") or ""),
                     explore_count=int(params.get("explore_count") or 3),
                     target_url_count=params.get("target_url_count"),
+                    max_pages=params.get("max_pages"),
                     output_dir=str(params.get("output_dir") or "output"),
                     persist_progress=False,
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
-        finally:
-            if previous_max_pages is not None:
-                config.url_collector.max_pages = previous_max_pages
 
         output_dir = Path(str(params.get("output_dir") or "output"))
         collected_urls = list(result.collected_urls)
@@ -352,10 +346,6 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
-        previous_max_pages: int | None = None
-        if params.get("max_pages") is not None:
-            previous_max_pages = config.url_collector.max_pages
-            config.url_collector.max_pages = int(params["max_pages"])
         collection_config = dict(state.get("collection_config") or {})
         config_path = str(params.get("config_path") or "").strip()
         if not config_path and collection_config:
@@ -374,14 +364,12 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
                     page=session.page,
                     config_path=config_path,
                     target_url_count=params.get("target_url_count"),
+                    max_pages=params.get("max_pages"),
                     output_dir=str(params.get("output_dir") or "output"),
                     persist_progress=False,
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
-        finally:
-            if previous_max_pages is not None:
-                config.url_collector.max_pages = previous_max_pages
 
         output_dir = Path(str(params.get("output_dir") or "output"))
         if not collection_config:

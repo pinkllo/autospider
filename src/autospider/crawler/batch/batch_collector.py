@@ -43,6 +43,7 @@ class BatchCollector(BaseCollector):
         page: "Page",
         config_path: str | Path,
         target_url_count: int | None = None,
+        max_pages: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
@@ -71,6 +72,7 @@ class BatchCollector(BaseCollector):
             url_channel=url_channel,
             redis_manager=redis_manager,
             target_url_count=target_url_count,
+            max_pages=max_pages,
             persist_progress=persist_progress,
         )
 
@@ -329,6 +331,7 @@ async def batch_collect_urls(
     page: "Page",
     config_path: str | Path,
     target_url_count: int | None = None,
+    max_pages: int | None = None,
     output_dir: str = "output",
     persist_progress: bool = True,
 ) -> URLCollectorResult:
@@ -347,6 +350,7 @@ async def batch_collect_urls(
         page=page,
         config_path=config_path,
         target_url_count=target_url_count,
+        max_pages=max_pages,
         output_dir=output_dir,
         persist_progress=persist_progress,
     )

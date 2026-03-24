@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from autospider.common.config import config
+from autospider.pipeline import runner as pipeline_runner
 from autospider.pipeline.runner import (
     _build_staged_record,
     _commit_items_file,
@@ -34,6 +36,30 @@ class _UnusedExtractor:
     async def _extract_from_url(self, url: str):
         self.called = True
         raise AssertionError(f"extractor should not run for {url}")
+
+
+class _FakePage:
+    async def goto(self, *args, **kwargs):
+        return None
+
+
+class _FakeBrowserSession:
+    def __init__(self, *args, **kwargs):
+        self.page = _FakePage()
+
+    async def start(self):
+        return None
+
+    async def stop(self):
+        return None
+
+
+class _ExplodingChannel:
+    async def close(self):
+        return None
+
+    async def get_task(self):
+        raise RuntimeError("stop consumer")
 
 
 def test_prepare_pipeline_workspace_resets_stale_attempt_outputs(tmp_path):
@@ -143,3 +169,46 @@ async def test_process_task_reuses_staged_record_without_reextract(tmp_path):
     assert extractor.called is False
     assert task.acked == 1
     assert task.failed == []
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    original_max_pages = config.url_collector.max_pages
+
+    class _FakeCollector:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def run(self):
+            return type(
+                "_Result",
+                (),
+                {
+                    "collected_urls": [],
+                    "plan_upgrade_requested": False,
+                    "plan_upgrade_reason": "",
+                    "plan_upgrade_site_url": "",
+                },
+            )()
+
+    monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
+    monkeypatch.setattr(pipeline_runner, "URLCollector", _FakeCollector)
+    monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
+    monkeypatch.setattr(pipeline_runner, "_load_staged_records", lambda staging_dir: {})
+    monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
+    monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
+
+    result = await pipeline_runner.run_pipeline(
+        list_url="https://example.com/list",
+        task_description="采集公告",
+        fields=[],
+        output_dir=str(tmp_path),
+        max_pages=11,
+        target_url_count=3,
+    )
+
+    assert captured["max_pages"] == 11
+    assert config.url_collector.max_pages == original_max_pages
+    assert result["total_urls"] == 0
+    assert result["success_count"] == 0
