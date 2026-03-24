@@ -16,12 +16,13 @@ from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.browser import BrowserSession, create_browser_session
 from ...common.config import config
 from ...common.storage.idempotent_io import write_json_idempotent
-from ...common.types import SubTask, TaskPlan
+from ...domain.fields import FieldDefinition
+from ...domain.planning import SubTask, TaskPlan
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
 from ...crawler.explore.url_collector import collect_detail_urls
 from ...crawler.planner import TaskPlanner
-from ...field import FieldDefinition, run_field_pipeline
+from ...field import run_field_pipeline
 from ...pipeline import run_pipeline
 from ...pipeline.aggregator import ResultAggregator
 

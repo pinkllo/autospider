@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
-from ..common.types import SubTask, SubTaskStatus, TaskPlan
+from ..domain.planning import SubTask, SubTaskStatus, TaskPlan
 
 logger = get_logger(__name__)
 

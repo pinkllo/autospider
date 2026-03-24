@@ -7,13 +7,8 @@
 - 批量提取和公共模式提取
 """
 
-from .models import (
-    FieldDefinition,
-    FieldExtractionResult,
-    PageExtractionRecord,
-    BatchExtractionResult,
-    CommonFieldXPath,
-)
+from ..domain.fields import FieldDefinition
+from .models import FieldExtractionResult, PageExtractionRecord, BatchExtractionResult, CommonFieldXPath
 from .field_extractor import FieldExtractor
 from .field_decider import FieldDecider
 from .xpath_pattern import FieldXPathExtractor, validate_xpath_pattern

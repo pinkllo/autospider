@@ -27,7 +27,11 @@ import json
 import time
 
 import redis.asyncio as aioredis
-from redis.asyncio.client import Script
+
+try:
+    from redis.asyncio.client import Script
+except ImportError:  # pragma: no cover - 兼容较新的 redis-py 导出变化
+    Script = Any
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

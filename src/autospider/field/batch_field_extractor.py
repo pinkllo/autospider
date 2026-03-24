@@ -18,9 +18,9 @@ from ..common.config import config
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage import RedisQueueManager
+from ..domain.fields import FieldDefinition
 
 from .models import (
-    FieldDefinition,
     BatchExtractionResult,
     PageExtractionRecord,
     FieldExtractionResult,

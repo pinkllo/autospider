@@ -25,10 +25,11 @@ from ..common.llm import LLMDecider
 from ..common.protocol import coerce_bool
 from ..common.som import capture_screenshot_with_marks
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
+from ..domain.fields import FieldDefinition
 from .field_decider import FieldDecider
 from .field_extractor import FieldExtractor
 
-from .models import FieldDefinition, FieldExtractionResult, PageExtractionRecord
+from .models import FieldExtractionResult, PageExtractionRecord
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

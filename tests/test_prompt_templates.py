@@ -7,7 +7,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from common.utils.prompt_template import get_template_sections, render_template
+from autospider.common.utils.prompt_template import get_template_sections, render_template
 
 
 PROMPTS_DIR = project_root / "src" / "autospider" / "prompts"

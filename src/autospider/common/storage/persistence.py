@@ -5,16 +5,13 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# 引入通用文件操作工具
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "common"))
-from utils.file_utils import ensure_directory, load_json, file_exists
 from autospider.common.logger import get_logger
+from ..utils.file_utils import ensure_directory, file_exists, load_json
 from .idempotent_io import write_json_idempotent, write_text_if_changed
 
 logger = get_logger(__name__)

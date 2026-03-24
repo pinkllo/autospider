@@ -27,9 +27,9 @@ from ..common.logger import get_logger
 from ..common.protocol import coerce_bool
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
+from ..domain.fields import FieldDefinition
 
 from .models import (
-    FieldDefinition,
     FieldExtractionResult,
     PageExtractionRecord,
 )

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ...field import FieldDefinition
+from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
+from ...domain.fields import FieldDefinition
 from ..config import config
 from ..protocol import parse_json_dict_from_llm
 from ..utils.paths import get_prompt_path
@@ -23,70 +23,6 @@ logger = get_logger(__name__)
 # 获取提示词模板路径和允许的字段类型
 PROMPT_TEMPLATE_PATH = get_prompt_path("task_clarifier.yaml")
 ALLOWED_FIELD_TYPES = {"text", "number", "date", "url"}
-
-
-@dataclass
-class DialogueMessage:
-    """
-    单条对话消息。
-    
-    Attributes:
-        role: 角色，如 'user' 或 'assistant'。
-        content: 消息内容。
-    """
-
-    role: str
-    content: str
-
-
-@dataclass
-class ClarifiedTask:
-    """
-    澄清后的任务配置。
-    
-    Attributes:
-        intent: 用户意图。
-        list_url: 目标列表页 URL。
-        task_description: 任务的自然语言描述。
-        fields: 字段定义列表。
-        max_pages: 最大爬取页数，可选。
-        target_url_count: 目标采集 URL 数量，可选。
-        consumer_concurrency: 消费者并发数，可选。
-        field_explore_count: 字段探索样本数，可选。
-        field_validate_count: 字段验证样本数，可选。
-    """
-
-    intent: str
-    list_url: str
-    task_description: str
-    fields: list[FieldDefinition]
-    max_pages: int | None = None
-    target_url_count: int | None = None
-    consumer_concurrency: int | None = None
-    field_explore_count: int | None = None
-    field_validate_count: int | None = None
-
-
-@dataclass
-class ClarificationResult:
-    """
-    澄清器输出结果。
-    
-    Attributes:
-        status: 状态，包括 'need_clarification', 'ready', 'reject'。
-        intent: 识别出的意图。
-        confidence: 置信度。
-        next_question: 下一轮对话的问题（用于澄清）。
-        reason: 拒绝执行的原因（status 为 'reject' 时使用）。
-        task: 解析出的任务配置（status 为 'ready' 时存在）。
-    """
-
-    status: str
-    intent: str
-    confidence: float
-    next_question: str
-    reason: str
-    task: ClarifiedTask | None
 
 
 class TaskClarifier:

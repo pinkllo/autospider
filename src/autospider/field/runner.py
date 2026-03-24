@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..common.config import config
-from .models import FieldDefinition
+from ..domain.fields import FieldDefinition
 from .batch_field_extractor import BatchFieldExtractor
 from .batch_xpath_extractor import BatchXPathExtractor
 

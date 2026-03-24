@@ -1,10 +1,4 @@
-"""
-通用风控挑战页处理器
-
-覆盖场景：
-- Cloudflare / hCaptcha / reCAPTCHA
-- 各类“验证你是人类”“robot check”挑战页
-"""
+"""通用风控挑战页处理器。"""
 
 from __future__ import annotations
 
@@ -17,7 +11,6 @@ from .base import BaseAnomalyHandler
 from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
 
-
 CHALLENGE_SELECTORS = [
     "iframe[src*='recaptcha']",
     "iframe[src*='hcaptcha']",
@@ -27,7 +20,6 @@ CHALLENGE_SELECTORS = [
     "[id*='challenge']",
     "[class*='challenge']",
 ]
-
 CHALLENGE_KEYWORDS = [
     "checking your browser",
     "verify you are human",
@@ -44,8 +36,6 @@ CHALLENGE_KEYWORDS = [
 
 
 class ChallengeHandler(BaseAnomalyHandler):
-    """通用挑战页接管处理器。"""
-
     priority = 30
 
     def __init__(self, detection_interval: float = 1.0, max_wait_time: float = 180.0):
@@ -60,28 +50,21 @@ class ChallengeHandler(BaseAnomalyHandler):
     async def detect(self, page: Page) -> bool:
         if page.is_closed():
             return False
-
         url_lower = (page.url or "").lower()
         if any(token in url_lower for token in ("challenge", "cf-challenge", "recaptcha", "hcaptcha")):
             return True
-
         for selector in CHALLENGE_SELECTORS:
             try:
                 element = await page.query_selector(selector)
                 if element and await element.is_visible():
-                    # 忽略 Guard 自身注入的提示层，避免自触发死循环
                     element_id = (await element.get_attribute("id") or "").strip()
                     if element_id.startswith("__guard_"):
                         continue
                     return True
             except Exception:
                 continue
-
         body_text = await self._safe_get_page_text(page)
-        if body_text and any(keyword in body_text for keyword in CHALLENGE_KEYWORDS):
-            return True
-
-        return False
+        return bool(body_text and any(keyword in body_text for keyword in CHALLENGE_KEYWORDS))
 
     async def handle(self, page: Page) -> None:
         logger.warning(">>> 触发通用风控挑战接管模式 <<<")
@@ -108,37 +91,29 @@ class ChallengeHandler(BaseAnomalyHandler):
                 confirm_task.cancel()
                 try:
                     await confirm_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
+                except (asyncio.CancelledError, Exception):
                     pass
             await self._remove_banner(page)
 
     async def _wait_until_cleared(self, page: Page) -> None:
         start = asyncio.get_running_loop().time()
         stable_not_detected = 0
-
         while True:
-            # 人工显式确认后直接退出等待，避免残留特征导致无法恢复
             if self._user_confirmed:
                 logger.success("[ChallengeHandler] 用户确认挑战已处理")
                 return
-
             elapsed = asyncio.get_running_loop().time() - start
             if elapsed >= self.max_wait_time:
                 logger.warning("[ChallengeHandler] 等待挑战页处理超时，继续后续流程")
                 return
-
             detected = await self.detect(page)
             if not detected:
                 stable_not_detected += 1
             else:
                 stable_not_detected = 0
-
             if stable_not_detected >= 2:
                 logger.success("[ChallengeHandler] 挑战页特征已消失，恢复执行")
                 return
-
             remaining = int(self.max_wait_time - elapsed)
             await self._update_banner(page, remaining)
             await asyncio.sleep(self.detection_interval)
@@ -181,11 +156,11 @@ class ChallengeHandler(BaseAnomalyHandler):
             return true;
         }}
         """
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 
@@ -196,22 +171,24 @@ class ChallengeHandler(BaseAnomalyHandler):
             if (el) el.textContent = '{remaining}';
         }}
         """
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 
     async def _poll_user_confirmation(self, page: Page) -> None:
         try:
             while not self._user_confirmed:
-                for p in page.context.pages:
-                    if p.is_closed():
+                for current_page in page.context.pages:
+                    if current_page.is_closed():
                         continue
                     try:
-                        confirmed = await p.evaluate("() => window.__guard_challenge_confirmed__ === true")
+                        confirmed = await current_page.evaluate(
+                            "() => window.__guard_challenge_confirmed__ === true"
+                        )
                         if confirmed:
                             self._user_confirmed = True
                             return
@@ -223,11 +200,11 @@ class ChallengeHandler(BaseAnomalyHandler):
 
     async def _remove_banner(self, page: Page) -> None:
         js = "() => document.getElementById('__guard_challenge_overlay__')?.remove()"
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 

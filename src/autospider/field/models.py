@@ -4,21 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
-@dataclass
-class FieldDefinition:
-    """字段定义
-
-    用于描述要提取的目标字段。
-    """
-
-    name: str  # 字段名称（如 "title", "price", "date"）
-    description: str  # 字段描述（供 LLM 理解，如 "招标项目的标题"）
-    required: bool = True  # 是否必填
-    data_type: str = "text"  # 数据类型: text, number, date, url
-    example: str | None = None  # 示例值（帮助 LLM 理解格式）
-    extraction_source: str | None = None  # 提取来源: xpath/task_url/subtask_context/constant
-    fixed_value: str | None = None  # 固定值（用于 constant/subtask_context）
+from ..domain.fields import FieldDefinition
 
 
 @dataclass

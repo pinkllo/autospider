@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, AsyncGenerator
 
 from playwright.async_api import Page
 
-# 引入新的浏览器引擎
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "common"))
-from browser_manager.engine import get_browser_engine, BrowserEngine
-from browser_manager.guarded_page import GuardedPage
-
 from ..config import config
+from .engine import BrowserEngine, get_browser_engine, shutdown_browser_engine
+from .guarded_page import GuardedPage
 
 if TYPE_CHECKING:
     pass
@@ -62,7 +57,7 @@ class BrowserSession:
                 "height": self.viewport_height,
             },
             timeout=config.browser.timeout_ms,
-            auth_file=str(Path.cwd() / ".auth" / "default.json"),
+            auth_file=".auth/default.json",
             guard_intervention_mode=self.guard_intervention_mode,
             guard_thread_id=self.guard_thread_id,
         )
@@ -104,27 +99,6 @@ class BrowserSession:
         except Exception:
             # 超时不算错误,继续执行
             pass
-
-
-async def shutdown_browser_engine() -> None:
-    """关闭全局浏览器引擎（兼容导出）。"""
-    try:
-        import browser_manager.engine as _engine_mod
-    except Exception:
-        return
-
-    engine = getattr(_engine_mod, "_browser_engine", None)
-    if engine is None:
-        return
-
-    try:
-        await engine.close()
-    finally:
-        try:
-            setattr(_engine_mod, "_browser_engine", None)
-        except Exception:
-            pass
-
 
 @asynccontextmanager
 async def create_browser_session(

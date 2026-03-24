@@ -17,8 +17,9 @@ from rich.table import Table
 from .common.validators import validate_url
 from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
-from .field import FieldDefinition
+from .domain.fields import FieldDefinition
 from .graph import GraphInput, GraphRunner
+from .common.config import config
 
 # 日志器
 logger = get_logger(__name__)
@@ -562,9 +563,9 @@ def chat_pipeline_command(
         help="多分类子任务最大并发数（用于 multi）",
     ),
     headless: bool = typer.Option(
-        False,
+        config.browser.headless,
         "--headless/--no-headless",
-        help="是否使用无头模式",
+        help="是否使用无头模式（默认读取 .env HEADLESS）",
     ),
     output_dir: str = typer.Option(
         "output",
@@ -677,9 +678,9 @@ def multi_pipeline_command(
         help="子任务最大并发数（默认取配置）",
     ),
     headless: bool = typer.Option(
-        False,
+        config.browser.headless,
         "--headless/--no-headless",
-        help="是否使用无头模式",
+        help="是否使用无头模式（默认读取 .env HEADLESS）",
     ),
     output_dir: str = typer.Option(
         "output",

@@ -1,16 +1,8 @@
-"""
-验证码/滑块异常处理器
-
-功能：
-1. 检测滑块、人机验证、验证码弹窗/iframe
-2. 在检测到后进入人工接管等待
-3. 验证完成后自动恢复流程
-"""
+"""验证码/滑块异常处理器。"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 from loguru import logger
 from playwright.async_api import Page
@@ -18,7 +10,6 @@ from playwright.async_api import Page
 from .base import BaseAnomalyHandler
 from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
-
 
 CAPTCHA_STRONG_SELECTORS = [
     "iframe[src*='captcha']",
@@ -35,36 +26,12 @@ CAPTCHA_STRONG_SELECTORS = [
     "[id*='yidun']",
     "canvas[id*='captcha']",
 ]
-
-# 弱信号：很多站点也会把轮播图命名为 slider，不能单独作为验证码依据
-CAPTCHA_WEAK_SLIDER_SELECTORS = [
-    "[id*='slider']",
-    "[class*='slider']",
-]
-
-CAPTCHA_STRONG_KEYWORDS = [
-    "请完成验证",
-    "安全验证",
-    "滑块验证",
-    "拖动滑块",
-    "向右滑动",
-    "请按住滑块",
-    "请拖动滑块",
-    "点击验证",
-    "验证码",
-    "人机验证",
-]
-
-CAPTCHA_HINT_KEYWORDS = [
-    "captcha",
-    "geetest",
-    "nocaptcha",
-]
+CAPTCHA_WEAK_SLIDER_SELECTORS = ["[id*='slider']", "[class*='slider']"]
+CAPTCHA_STRONG_KEYWORDS = ["请完成验证", "安全验证", "滑块验证", "拖动滑块", "向右滑动", "请按住滑块", "请拖动滑块", "点击验证", "验证码", "人机验证"]
+CAPTCHA_HINT_KEYWORDS = ["captcha", "geetest", "nocaptcha"]
 
 
 class CaptchaHandler(BaseAnomalyHandler):
-    """验证码/滑块处理器。"""
-
     priority = 20
 
     def __init__(self, detection_interval: float = 1.0, max_wait_time: float = 180.0):
@@ -80,25 +47,21 @@ class CaptchaHandler(BaseAnomalyHandler):
         if page.is_closed():
             return False
 
-        # URL 强特征
         url_lower = (page.url or "").lower()
         if any(token in url_lower for token in ("captcha", "nocaptcha", "geetest", "yidun")):
             logger.debug("[CaptchaHandler] 命中 URL 强特征")
             return True
 
-        # iframe URL 强特征
         for frame in page.frames:
             frame_url = (frame.url or "").lower()
             if any(token in frame_url for token in ("captcha", "nocaptcha", "geetest", "yidun")):
                 logger.debug("[CaptchaHandler] 命中 iframe URL 强特征")
                 return True
 
-        # DOM 强特征
         for selector in CAPTCHA_STRONG_SELECTORS:
             try:
                 element = await page.query_selector(selector)
                 if element and await self._is_actionable_visible(element):
-                    # 忽略 Guard 自身注入的提示层，避免自触发死循环
                     element_id = (await element.get_attribute("id") or "").strip()
                     if element_id.startswith("__guard_"):
                         continue
@@ -107,7 +70,6 @@ class CaptchaHandler(BaseAnomalyHandler):
             except Exception:
                 continue
 
-        # 弱信号：slider 仅作为辅助，必须与验证码关键词组合命中
         weak_slider_hit = False
         for selector in CAPTCHA_WEAK_SLIDER_SELECTORS:
             try:
@@ -121,27 +83,18 @@ class CaptchaHandler(BaseAnomalyHandler):
             except Exception:
                 continue
 
-        # 页面文本特征（关键词）
         body_text = await self._safe_get_page_text(page)
-        strong_keyword_hit = bool(
-            body_text and any(keyword in body_text for keyword in CAPTCHA_STRONG_KEYWORDS)
-        )
-        hint_keyword_hit = bool(
-            body_text and any(keyword in body_text for keyword in CAPTCHA_HINT_KEYWORDS)
-        )
-
+        strong_keyword_hit = bool(body_text and any(keyword in body_text for keyword in CAPTCHA_STRONG_KEYWORDS))
+        hint_keyword_hit = bool(body_text and any(keyword in body_text for keyword in CAPTCHA_HINT_KEYWORDS))
         if strong_keyword_hit:
             logger.debug("[CaptchaHandler] 命中文本强关键词特征")
             return True
-
         if weak_slider_hit and hint_keyword_hit:
             logger.debug("[CaptchaHandler] 命中 slider 弱特征 + 文本提示关键词特征")
             return True
-
         return False
 
     async def _is_actionable_visible(self, element) -> bool:
-        """可见且尺寸足够大，避免被轮播小组件/装饰节点误触发。"""
         try:
             if not await element.is_visible():
                 return False
@@ -165,7 +118,6 @@ class CaptchaHandler(BaseAnomalyHandler):
             )
         self._user_confirmed = False
         confirm_task = None
-
         try:
             await self._inject_banner(page)
             confirm_task = create_monitored_task(
@@ -178,38 +130,29 @@ class CaptchaHandler(BaseAnomalyHandler):
                 confirm_task.cancel()
                 try:
                     await confirm_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
+                except (asyncio.CancelledError, Exception):
                     pass
             await self._remove_banner(page)
 
     async def _wait_until_captcha_solved(self, page: Page) -> None:
         start = asyncio.get_running_loop().time()
         stable_not_detected = 0
-
         while True:
-            # 人工显式确认后直接退出等待，避免因站点残留特征导致无法恢复
             if self._user_confirmed:
                 logger.success("[CaptchaHandler] 用户确认已完成验证码")
                 return
-
             elapsed = asyncio.get_running_loop().time() - start
             if elapsed >= self.max_wait_time:
                 logger.warning("[CaptchaHandler] 等待验证码处理超时，继续后续流程")
                 return
-
-            # 连续两次未检测到，避免瞬时误判
             detected = await self.detect(page)
             if not detected:
                 stable_not_detected += 1
             else:
                 stable_not_detected = 0
-
             if stable_not_detected >= 2:
                 logger.success("[CaptchaHandler] 验证弹窗已消失，恢复执行")
                 return
-
             remaining = int(self.max_wait_time - elapsed)
             await self._update_banner(page, remaining)
             await asyncio.sleep(self.detection_interval)
@@ -252,11 +195,11 @@ class CaptchaHandler(BaseAnomalyHandler):
             return true;
         }}
         """
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 
@@ -267,22 +210,24 @@ class CaptchaHandler(BaseAnomalyHandler):
             if (el) el.textContent = '{remaining}';
         }}
         """
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 
     async def _poll_user_confirmation(self, page: Page) -> None:
         try:
             while not self._user_confirmed:
-                for p in page.context.pages:
-                    if p.is_closed():
+                for current_page in page.context.pages:
+                    if current_page.is_closed():
                         continue
                     try:
-                        confirmed = await p.evaluate("() => window.__guard_captcha_confirmed__ === true")
+                        confirmed = await current_page.evaluate(
+                            "() => window.__guard_captcha_confirmed__ === true"
+                        )
                         if confirmed:
                             self._user_confirmed = True
                             return
@@ -294,11 +239,11 @@ class CaptchaHandler(BaseAnomalyHandler):
 
     async def _remove_banner(self, page: Page) -> None:
         js = "() => document.getElementById('__guard_captcha_overlay__')?.remove()"
-        for p in page.context.pages:
-            if p.is_closed():
+        for current_page in page.context.pages:
+            if current_page.is_closed():
                 continue
             try:
-                await p.evaluate(js)
+                await current_page.evaluate(js)
             except Exception:
                 pass
 

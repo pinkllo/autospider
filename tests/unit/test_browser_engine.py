@@ -22,7 +22,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
-from common.browser_manager.engine import (
+from autospider.common.browser.engine import (
     BrowserEngine,
     get_browser_engine,
     shutdown_browser_engine,

@@ -10,8 +10,8 @@ from langgraph.types import Command, Send, interrupt
 from ...common.browser.intervention import BrowserInterventionRequired
 
 from ...common.browser import BrowserSession
-from ...common.types import SubTask, SubTaskStatus, TaskPlan
 from ...crawler.planner import TaskPlanner
+from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...pipeline.worker import SubTaskWorker
 
 
@@ -45,8 +45,7 @@ class SubTaskFlowState(TypedDict, total=False):
 
     作为 multi_dispatch 子节点启动的独立执行栈，维护单一子任务的状态。
     """
-    thread_id: str  # 继承自主图的线程 ID，保障多子图在同一个追踪下
-    normalized_params: dict[str, Any]  # 从主图透传的全局运行时环境参数
+    normalized_params: dict[str, Any]  # 从主图透传的全局运行时环境参数（含 _thread_id）
     task_plan: TaskPlan  # 包含基础配置的全局规划对象（只读，为 worker 提供字段引用背景等）
     subtask_payload: dict[str, Any]  # 被分配到当前分片节点运行的目标子任务配置字典
     subtask_result: dict[str, Any]   # 记录当前单独这个子任务完成后的成功与否及提取数量等结果信息
@@ -189,11 +188,12 @@ def route_dispatch_batch(state: MultiDispatchState):
 
     params = dict(state.get("normalized_params") or {})
     plan = state.get("task_plan")
+    # 将 thread_id 注入 params 中传递，避免子图并行写回时冲突
+    params["_thread_id"] = str(state.get("thread_id") or "")
     return [
         Send(
             "execute_subtask_flow",
             {
-                "thread_id": str(state.get("thread_id") or ""),
                 "normalized_params": params,
                 "task_plan": plan,
                 "subtask_payload": payload,
@@ -219,7 +219,7 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
             fields=shared_fields,
             output_dir=str(params.get("output_dir") or "output"),
             headless=bool(params.get("headless", False)),
-            thread_id=str(state.get("thread_id") or ""),
+            thread_id=str(params.get("_thread_id") or ""),
             guard_intervention_mode="interrupt",
         )
         result = await worker.execute()
@@ -280,7 +280,7 @@ async def runtime_replan_subtasks(state: SubTaskFlowState) -> SubTaskFlowState:
     planner_session = BrowserSession(
         headless=bool(params.get("headless", False)),
         guard_intervention_mode="interrupt",
-        guard_thread_id=str(state.get("thread_id") or ""),
+        guard_thread_id=str(params.get("_thread_id") or ""),
     )
     try:
         await planner_session.start()

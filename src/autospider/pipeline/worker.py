@@ -13,8 +13,8 @@ from pathlib import Path
 
 from ..common.config import config
 from ..common.logger import get_logger
-from ..common.types import SubTask
-from ..field import FieldDefinition
+from ..domain.fields import FieldDefinition
+from ..domain.planning import SubTask
 
 logger = get_logger(__name__)
 

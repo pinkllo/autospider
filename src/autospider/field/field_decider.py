@@ -17,7 +17,7 @@ from ..common.utils.prompt_template import render_template
 from ..common.logger import get_logger
 from ..common.utils.paths import get_prompt_path
 from ..common.protocol import parse_protocol_message, coerce_bool
-from .models import FieldDefinition
+from ..domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

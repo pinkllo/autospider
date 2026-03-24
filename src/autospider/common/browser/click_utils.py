@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
-    from browser_manager.guarded_page import GuardedPage
+    from .guarded_page import GuardedPage
 
 
 async def click_and_capture_new_page(

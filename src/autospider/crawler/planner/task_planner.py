@@ -22,7 +22,7 @@ from ...common.logger import get_logger
 from ...common.protocol import parse_json_dict_from_llm
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
 from ...common.som.text_first import resolve_single_mark_id
-from ...common.types import SubTask, SubTaskStatus, TaskPlan
+from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...common.utils.paths import get_prompt_path
 from ...common.utils.prompt_template import render_template
 from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent

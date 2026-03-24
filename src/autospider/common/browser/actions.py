@@ -11,7 +11,7 @@ from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
 from .click_utils import click_and_capture_new_page, press_and_capture_new_page
 
 if TYPE_CHECKING:
-    from browser_manager.guarded_page import GuardedPage
+    from .guarded_page import GuardedPage
 from autospider.common.logger import get_logger
 
 logger = get_logger(__name__)

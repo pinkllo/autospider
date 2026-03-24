@@ -7,9 +7,10 @@ from typing import Any
 
 from langgraph.types import interrupt
 
-from ...common.llm import ClarifiedTask, DialogueMessage, TaskClarifier
+from ...common.llm import TaskClarifier
+from ...domain.chat import ClarifiedTask, DialogueMessage
+from ...domain.fields import FieldDefinition
 from ...common.validators import validate_task_description, validate_url
-from ...field import FieldDefinition
 
 _DEFAULT_CHAT_FALLBACK = "请按常见默认方案继续，并明确你的默认假设。"
 

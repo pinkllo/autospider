@@ -24,7 +24,8 @@ from ..common.channel.factory import create_url_channel
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..common.channel.base import URLTask, URLChannel
 from ..crawler.explore.url_collector import URLCollector
-from ..field import FieldDefinition, BatchFieldExtractor, BatchXPathExtractor
+from ..domain.fields import FieldDefinition
+from ..field import BatchFieldExtractor, BatchXPathExtractor
 from autospider.common.logger import get_logger
 
 logger = get_logger(__name__)

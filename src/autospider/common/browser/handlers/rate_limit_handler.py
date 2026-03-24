@@ -1,11 +1,4 @@
-"""
-频率限制处理器（Rate Limit）
-
-功能：
-1. 检测“访问过快/限流/系统繁忙/429”等页面信号
-2. 自动退避等待并尝试刷新
-3. 按域名累积退避级别，降低再次触发概率
-"""
+"""频率限制处理器。"""
 
 from __future__ import annotations
 
@@ -16,7 +9,6 @@ from loguru import logger
 from playwright.async_api import Page
 
 from .base import BaseAnomalyHandler
-
 
 RATE_LIMIT_KEYWORDS = [
     "访问过于频繁",
@@ -29,7 +21,6 @@ RATE_LIMIT_KEYWORDS = [
     "rate limit",
     "429",
 ]
-
 RATE_LIMIT_SELECTORS = [
     "[class*='rate-limit']",
     "[class*='too-many']",
@@ -39,11 +30,7 @@ RATE_LIMIT_SELECTORS = [
 
 
 class RateLimitHandler(BaseAnomalyHandler):
-    """频率限制处理器。"""
-
     priority = 40
-
-    # 按域名记录退避级别
     _domain_strikes: dict[str, int] = {}
 
     def __init__(
@@ -64,11 +51,9 @@ class RateLimitHandler(BaseAnomalyHandler):
     async def detect(self, page: Page) -> bool:
         if page.is_closed():
             return False
-
         url_lower = (page.url or "").lower()
         if "/429" in url_lower or "too-many-requests" in url_lower:
             return True
-
         for selector in RATE_LIMIT_SELECTORS:
             try:
                 element = await page.query_selector(selector)
@@ -76,18 +61,12 @@ class RateLimitHandler(BaseAnomalyHandler):
                     return True
             except Exception:
                 continue
-
         text = await self._safe_get_page_text(page)
-        if text and any(keyword in text for keyword in RATE_LIMIT_KEYWORDS):
-            return True
-
-        return False
+        return bool(text and any(keyword in text for keyword in RATE_LIMIT_KEYWORDS))
 
     async def handle(self, page: Page) -> None:
         domain = self._get_domain(page.url)
         now = asyncio.get_running_loop().time()
-
-        # 长时间未触发则衰减级别，避免永久升高
         last = self._last_trigger_at.get(domain)
         if last is not None and now - last > self.recovery_decay_s:
             self._domain_strikes[domain] = max(0, self._domain_strikes.get(domain, 0) - 1)
@@ -103,16 +82,11 @@ class RateLimitHandler(BaseAnomalyHandler):
             strikes,
             backoff,
         )
-
         await asyncio.sleep(backoff)
-
-        # 统一刷新动作由 PageGuard 在 handler 完成后执行，避免重复 reload
 
     async def _safe_get_page_text(self, page: Page) -> str:
         try:
-            text = await page.evaluate(
-                "() => document.body ? document.body.innerText.slice(0, 5000) : ''"
-            )
+            text = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 5000) : ''")
             return (text or "").lower()
         except Exception:
             return ""
