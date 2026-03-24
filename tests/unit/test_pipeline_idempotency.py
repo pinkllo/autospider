@@ -212,3 +212,5 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     assert config.url_collector.max_pages == original_max_pages
     assert result["total_urls"] == 0
     assert result["success_count"] == 0
+    assert "started_at" not in result
+    assert "finished_at" not in result

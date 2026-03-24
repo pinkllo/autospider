@@ -9,8 +9,6 @@ DEFAULT_VOLATILE_KEYS = {
     "updated_at",
     "timestamp",
     "last_updated",
-    "started_at",
-    "finished_at",
 }
 
 

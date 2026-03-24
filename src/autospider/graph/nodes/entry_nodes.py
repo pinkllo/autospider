@@ -395,8 +395,6 @@ def chat_route_execution(state: dict[str, Any]) -> dict[str, Any]:
             cli_args.get("consumer_concurrency", task.get("consumer_concurrency")),
         ),
         "execution_mode_resolved": resolved_mode,
-        "runtime_subtasks": cli_args.get("runtime_subtasks"),
-        "runtime_subtask_max_depth": cli_args.get("runtime_subtask_max_depth"),
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
     }

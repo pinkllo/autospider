@@ -55,11 +55,6 @@ class SubTaskFlowState(TypedDict, total=False):
     subtask_results: Annotated[list[dict[str, Any]], operator.add]  # 向下个 finalize 节点投递结果（兼容合并）
     artifacts: Annotated[list[dict[str, str]], operator.add]  # 该子任务保存到本地结果等记录的制品文件信息
 
-
-# 当执行阶段大模型发觉任务泛化要求拆分任务时最大生成的子任务数量上限
-REPLAN_MAX_CHILDREN = 8
-
-
 def _artifact(label: str, path: str | Path) -> dict[str, str]:
     """快捷构造标准附件制品的字典记录。"""
     return {"label": label, "path": str(path)}
@@ -87,6 +82,26 @@ def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
     except (TypeError, ValueError):
         batch_size = config.planner.max_concurrent_subtasks
     return max(1, batch_size)
+
+
+def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
+    raw_value = params.get("runtime_subtask_max_children")
+    try:
+        value = int(raw_value) if raw_value is not None else config.planner.runtime_subtasks_max_children
+    except (TypeError, ValueError):
+        value = config.planner.runtime_subtasks_max_children
+    return max(1, value)
+
+
+def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
+    raw_value = params.get("runtime_subtasks_use_main_model")
+    if raw_value is None:
+        return bool(config.planner.runtime_subtasks_use_main_model)
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        return raw_value.strip().lower() == "true"
+    return bool(raw_value)
 
 
 def _build_subtask_result(
@@ -287,6 +302,8 @@ async def runtime_replan_subtasks(state: SubTaskFlowState) -> SubTaskFlowState:
     reason = str((state.get("subtask_result") or {}).get("error") or "").strip()
     if reason and reason not in planner_request:
         planner_request = f"{planner_request}\n\n执行阶段补充线索：{reason}"
+    max_children = _resolve_runtime_replan_max_children(params)
+    use_main_model = _resolve_runtime_subtasks_use_main_model(params)
 
     planner_session = BrowserSession(
         headless=bool(params.get("headless", False)),
@@ -300,7 +317,7 @@ async def runtime_replan_subtasks(state: SubTaskFlowState) -> SubTaskFlowState:
             site_url=str(subtask.list_url or "").strip(),
             user_request=planner_request,
             output_dir=str(Path(str(params.get("output_dir") or "output")) / f"subtask_{subtask.id}"),
-            use_main_model=bool(params.get("runtime_subtasks_use_main_model", False)),
+            use_main_model=use_main_model,
         )
         plan = await planner.plan()
     except BrowserInterventionRequired as exc:
@@ -316,7 +333,7 @@ async def runtime_replan_subtasks(state: SubTaskFlowState) -> SubTaskFlowState:
         await planner_session.stop()
 
     spawned_subtasks: list[dict[str, Any]] = []
-    for index, candidate in enumerate(list(plan.subtasks or [])[:REPLAN_MAX_CHILDREN], start=1):
+    for index, candidate in enumerate(list(plan.subtasks or [])[:max_children], start=1):
         child = candidate.model_copy(deep=True)
         child.parent_id = subtask.id
         child.depth = int(subtask.depth or 0) + 1

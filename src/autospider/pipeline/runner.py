@@ -179,8 +179,6 @@ async def run_pipeline(
         "success_count": 0,
         "consumer_concurrency": consumer_workers,
         "target_url_count": target_url_count,
-        "started_at": "",
-        "finished_at": "",
         "items_file": str(items_path),
         "summary_file": str(summary_path),
         "execution_id": execution_id,
@@ -393,7 +391,6 @@ async def run_pipeline(
             consumer(),
         )
     finally:
-        summary["finished_at"] = ""
         if state.get("plan_upgrade_request"):
             summary["plan_upgrade_request"] = state.get("plan_upgrade_request")
         if state.get("error"):
@@ -708,5 +705,5 @@ def _write_summary(path: Path, summary: dict) -> None:
         path,
         summary,
         identity_keys=("run_id", "list_url", "task_description"),
-        volatile_keys={"created_at", "updated_at", "timestamp", "last_updated", "started_at", "finished_at"},
+        volatile_keys={"created_at", "updated_at", "timestamp", "last_updated"},
     )
