@@ -5,14 +5,23 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
+from ...common.config import config
 from ...common.llm import TaskClarifier
+from ...common.logger import get_logger
+from ...common.protocol import parse_json_dict_from_llm
+from ...common.storage.task_registry import TaskRegistry
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ...common.validators import validate_task_description, validate_url
 
+logger = get_logger(__name__)
+
 _DEFAULT_CHAT_FALLBACK = "请按常见默认方案继续，并明确你的默认假设。"
+_MAX_HISTORY_CANDIDATES = 3
 
 
 def _ok(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -403,3 +412,178 @@ def chat_route_execution(state: dict[str, Any]) -> dict[str, Any]:
         **_ok({"execution_mode_resolved": "multi"}),
         "normalized_params": normalized,
     }
+
+
+# ---------------------------------------------------------------------------
+# 历史任务智能复用
+# ---------------------------------------------------------------------------
+
+
+def _parse_user_choice(answer: Any) -> int:
+    """从用户的回答中提取选项序号。"""
+    if isinstance(answer, int):
+        return answer
+    if isinstance(answer, dict):
+        raw = answer.get("choice") or answer.get("index") or answer.get("action")
+    else:
+        raw = answer
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return -1
+
+
+async def _llm_rank_history(
+    current_desc: str,
+    history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """用 LLM 从历史任务中筛选并排序最多 3 个与当前意图最相关的候选。
+
+    Returns:
+        按相关性从高到低排列的历史任务列表（最多 3 个），
+        如果都不相关则返回空列表。
+    """
+    # 构建候选列表文本
+    lines: list[str] = []
+    for i, h in enumerate(history):
+        fields = h.get("fields") or []
+        fields_text = ", ".join(fields) if fields else "未知"
+        count = h.get("collected_count", 0)
+        desc = h.get("task_description", "")
+        lines.append(f"{i + 1}. [{desc}] (采集字段: {fields_text}，已采集 {count} 条)")
+    candidates_text = "\n".join(lines)
+
+    prompt = (
+        "你是一个任务意图匹配助手。\n\n"
+        f"当前用户的新任务描述：[{current_desc}]\n\n"
+        f"该网站下曾经执行过的历史任务：\n{candidates_text}\n\n"
+        "请从历史任务中选出与当前任务**采集意图最相关**的，最多选 3 个。\n"
+        "按相关性从高到低排列，返回它们的序号列表。\n\n"
+        "判断标准：\n"
+        '- "采集新闻" 和 "帮我抓取新闻"是相关的（同义表达）\n'
+        '- "采集新闻标题" 和 "采集新闻正文" 是不同的任务（字段不同）\n'
+        "- 如果都不相关，返回空列表\n\n"
+        '返回格式（严格 JSON）：\n{"ranked": [序号1, 序号2, ...]}\n'
+        '例如：{"ranked": [2, 1]} 或 {"ranked": []}'
+    )
+
+    api_key = config.llm.planner_api_key or config.llm.api_key
+    api_base = config.llm.planner_api_base or config.llm.api_base
+    model = config.llm.planner_model or config.llm.model
+
+    llm = ChatOpenAI(
+        api_key=api_key,
+        base_url=api_base,
+        model=model,
+        temperature=0.0,
+        max_tokens=256,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
+
+    try:
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        parsed = parse_json_dict_from_llm(str(response.content))
+    except Exception as exc:
+        logger.warning("[HistoryMatch] LLM 排序历史任务失败: %s", exc)
+        return []
+
+    ranked_indices = list(parsed.get("ranked", [])) if parsed else []
+
+    # 校验并映射回历史任务对象
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for idx in ranked_indices:
+        try:
+            index = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if index < 1 or index > len(history) or index in seen:
+            continue
+        seen.add(index)
+        selected.append(history[index - 1])
+        if len(selected) >= _MAX_HISTORY_CANDIDATES:
+            break
+
+    return selected
+
+
+async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
+    """在澄清完成后、执行确认前，检查是否可以复用历史任务。
+
+    LLM 从历史任务中筛选最多 3 个最相关的候选，
+    加上"创建新任务"组成最多 4 个选项，interrupt 让用户选择。
+    """
+    task = dict(state.get("clarified_task") or {})
+    list_url = str(task.get("list_url") or "")
+    current_desc = str(task.get("task_description") or "")
+
+    if not list_url:
+        return _ok()
+
+    # 1. 查找历史任务
+    cli_args = dict(state.get("cli_args") or {})
+    output_dir = str(cli_args.get("output_dir") or "output")
+    registry = TaskRegistry(registry_path=f"{output_dir}/.task_registry.json")
+    history = registry.find_by_url(list_url)
+
+    if not history:
+        return _ok()
+
+    # 2. 调用 LLM 筛选最多 3 个最相关的候选
+    candidates = await _llm_rank_history(current_desc, history)
+
+    if not candidates:
+        return _ok()
+
+    # 3. 构建选项列表：最多 3 个历史 + 1 个新任务
+    options: list[dict[str, Any]] = []
+    for i, candidate in enumerate(candidates[:_MAX_HISTORY_CANDIDATES], start=1):
+        options.append({
+            "index": i,
+            "type": "history",
+            "label": (
+                f"复用历史任务：「{candidate['task_description']}」"
+                f"（已采集 {candidate.get('collected_count', 0)} 条）"
+            ),
+            "registry_id": candidate.get("registry_id", ""),
+            "task_description": candidate["task_description"],
+        })
+    options.append({
+        "index": len(options) + 1,
+        "type": "new",
+        "label": f"创建新任务：「{current_desc}」",
+    })
+
+    # 4. interrupt 让用户选择
+    answer = interrupt({
+        "type": "history_task_select",
+        "thread_id": str(state.get("thread_id") or ""),
+        "message": "检测到该网站下有历史采集任务，请选择：",
+        "options": options,
+    })
+
+    # 5. 解析用户选择
+    choice = _parse_user_choice(answer)
+
+    selected = None
+    for opt in options:
+        if opt["index"] == choice and opt["type"] == "history":
+            selected = opt
+            break
+
+    if selected:
+        # 保留用户原始描述，用历史描述覆盖以命中缓存/进度
+        task["original_task_description"] = task.get("task_description", "")
+        task["task_description"] = selected["task_description"]
+        logger.info(
+            "[HistoryMatch] 用户选择复用历史任务: %s (原始意图: %s)",
+            selected["task_description"][:60],
+            task["original_task_description"][:60],
+        )
+        return {
+            **_ok({"history_reused": True, "matched_registry_id": selected["registry_id"]}),
+            "clarified_task": task,
+        }
+
+    logger.info("[HistoryMatch] 用户选择创建新任务")
+    return _ok({"history_reused": False})

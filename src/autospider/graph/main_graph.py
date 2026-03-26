@@ -22,6 +22,7 @@ from .nodes.capability_nodes import (
 from .nodes.entry_nodes import (
     chat_clarify,
     chat_collect_user_input,
+    chat_history_match,
     chat_review_task,
     chat_route_execution,
     normalize_pipeline_params,
@@ -72,7 +73,7 @@ def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
     if flow_state == "needs_input":
         return "chat_collect_user_input"
     if flow_state == "ready":
-        return "chat_review_task"
+        return "chat_history_match"
     return "error"
 
 
@@ -101,6 +102,7 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("route_entry", route_entry)
     graph.add_node("chat_clarify", chat_clarify)
     graph.add_node("chat_collect_user_input", chat_collect_user_input)
+    graph.add_node("chat_history_match", chat_history_match)
     graph.add_node("chat_review_task", chat_review_task)
     graph.add_node("chat_route_execution", chat_route_execution)
     graph.add_node("multi_dispatch_subgraph", build_multi_dispatch_subgraph())
@@ -137,11 +139,12 @@ def build_main_graph(*, checkpointer: Any | None = None):
         resolve_chat_clarify_route,
         {
             "chat_collect_user_input": "chat_collect_user_input",
-            "chat_review_task": "chat_review_task",
+            "chat_history_match": "chat_history_match",
             "error": "build_artifact_index",
         },
     )
     graph.add_edge("chat_collect_user_input", "chat_clarify")
+    graph.add_edge("chat_history_match", "chat_review_task")
     graph.add_conditional_edges(
         "chat_review_task",
         resolve_chat_review_route,

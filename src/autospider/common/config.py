@@ -293,6 +293,29 @@ class PlannerConfig(BaseModel):
     )
 
 
+class DatabaseConfig(BaseModel):
+    """数据库配置（PostgreSQL）"""
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv("DB_ENABLED", "false").lower() == "true"
+    )
+    url: str = Field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_URL",
+            "postgresql+psycopg2://postgres:postgres@localhost:5432/autospider",
+        )
+    )
+    echo: bool = Field(
+        default_factory=lambda: os.getenv("DB_ECHO", "false").lower() == "true"
+    )
+    pool_size: int = Field(
+        default_factory=lambda: int(os.getenv("DB_POOL_SIZE", "5"))
+    )
+    max_overflow: int = Field(
+        default_factory=lambda: int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    )
+
+
 class Config(BaseModel):
     """全局配置"""
 
@@ -305,6 +328,7 @@ class Config(BaseModel):
     field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     planner: PlannerConfig = Field(default_factory=PlannerConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     @classmethod
     def load(cls) -> "Config":
