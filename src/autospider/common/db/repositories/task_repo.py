@@ -69,7 +69,7 @@ class TaskRepository:
         """
         registry_id = hashlib.sha1(
             f"{normalized_url}:{task_description}".encode("utf-8")
-        ).hexdigest()[:8]
+        ).hexdigest()[:16]
 
         now = datetime.now()
 

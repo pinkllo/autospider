@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 LUA_PUSH_TASK = """
 local is_new = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
 if is_new == 1 then
-    redis.call('XADD', KEYS[2], '*', 'data_id', ARGV[1])
+    redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[3], '*', 'data_id', ARGV[1])
     return 1
 end
 return 0
@@ -99,7 +99,7 @@ else
     data['final_error'] = ARGV[4]
     data['total_retries'] = retry_count
     redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(data))
-    redis.call('XADD', KEYS[3], '*', 
+    redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[7], '*', 
         'data_id', ARGV[1], 
         'url', data['url'] or '', 
         'error', ARGV[4], 
@@ -164,6 +164,8 @@ class RedisQueueManager:
         db: int = 0,
         key_prefix: str = "autospider:urls",
         logger: logging.Logger | None = None,
+        stream_maxlen: int = 100_000,
+        dead_letter_maxlen: int = 10_000,
     ):
         self.host = host
         self.port = port
@@ -177,6 +179,10 @@ class RedisQueueManager:
         self.data_key = f"{key_prefix}:data"
         self.stream_key = f"{key_prefix}:stream"
         self.group_name = f"{key_prefix}:workers"
+
+        # Stream 容量限制（近似裁剪，防止内存无限增长）
+        self.stream_maxlen = stream_maxlen
+        self.dead_letter_maxlen = dead_letter_maxlen
 
         # Lua 脚本实例
         self._lua_push: Script | None = None
@@ -318,7 +324,7 @@ class RedisQueueManager:
             # 使用 Lua 脚本执行原子 HSETNX + XADD
             is_new = await self._lua_push(
                 keys=[self.data_key, self.stream_key],
-                args=[hash_id, data_json]
+                args=[hash_id, data_json, self.stream_maxlen]
             )
 
             if is_new == 1:
@@ -367,7 +373,7 @@ class RedisQueueManager:
                     # 在 pipeline 中调用 Lua 脚本
                     self._lua_push(
                         keys=[self.data_key, self.stream_key],
-                        args=[hash_id, data_json],
+                        args=[hash_id, data_json, self.stream_maxlen],
                         client=pipe
                     )
 
@@ -492,7 +498,8 @@ class RedisQueueManager:
                     self.group_name, 
                     error_msg or "Unknown error", 
                     max_retries, 
-                    int(time.time())
+                    int(time.time()),
+                    self.dead_letter_maxlen,
                 ]
             )
 
@@ -661,3 +668,10 @@ class RedisQueueManager:
         except Exception as e:
             self.logger.error(f"获取统计信息失败: {e}")
             return {}
+
+    async def close(self) -> None:
+        """关闭 Redis 连接，释放资源。"""
+        if self.client:
+            await self.client.close()
+            self.client = None
+            self.logger.info("Redis 连接已关闭")

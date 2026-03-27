@@ -163,14 +163,16 @@ class RedisURLChannel(URLChannel):
         return wrapped
 
     async def close(self) -> None:
-        """安全干净地关闭通道。主要是取消之前启动的死循环扫描协程。"""
+        """安全干净地关闭通道及底层 Redis 连接。"""
         if self._recover_task is not None:
             task = self._recover_task
             self._recover_task = None
-            task.cancel()  # 发送取消信号，触发 CancelledError
+            task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
             except Exception:
                 pass
+        # 关闭底层 Redis 连接
+        await self.manager.close()

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import atexit
 from contextlib import contextmanager
 from typing import Generator
 
@@ -103,3 +104,6 @@ def close_db() -> None:
         logger.info("[DB] 引擎已关闭")
     _engine = None
     _SessionFactory = None
+
+
+atexit.register(close_db)

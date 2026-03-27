@@ -9,6 +9,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
 from .click_utils import click_and_capture_new_page, press_and_capture_new_page
+from .stuck_detector import StuckDetector
 
 if TYPE_CHECKING:
     from .guarded_page import GuardedPage
@@ -33,6 +34,7 @@ class ActionExecutor:
             page: GuardedPage 对象，已包装的页面代理。
         """
         self.page = page
+        self._stuck_detector = StuckDetector()
 
     async def execute(
         self,
@@ -54,6 +56,21 @@ class ActionExecutor:
                 - ScriptStep: 沉淀后的脚本步骤，如果动作为 DONE/RETRY/GO_BACK 等则可能为 None。
         """
         try:
+            # 记录操作指纹并检测卡死循环
+            self._stuck_detector.record(
+                action=action.action.value if hasattr(action.action, 'value') else str(action.action),
+                url=self.page.url if hasattr(self.page, 'url') else "",
+                mark_id=action.mark_id,
+                target_text=action.target_text or "",
+            )
+            if self._stuck_detector.is_stuck():
+                snapshot = self._stuck_detector.window_snapshot
+                self._stuck_detector.reset()
+                return ActionResult(
+                    success=False,
+                    error=f"检测到重复操作循环，已主动熔断。最近操作: {snapshot[-3:]}",
+                ), None
+
             if action.action == ActionType.CLICK:
                 return await self._execute_click(action, mark_id_to_xpath, step_index)
             elif action.action == ActionType.TYPE:

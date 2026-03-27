@@ -46,8 +46,8 @@ class TaskRecord(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     registry_id = Column(String(16), nullable=False, comment="hash(normalized_url:task_description)")
-    normalized_url = Column(String(2048), nullable=False, index=True, comment="归一化 URL")
-    original_url = Column(String(2048), nullable=False, comment="原始 URL")
+    normalized_url = Column(Text, nullable=False, index=True, comment="归一化 URL")
+    original_url = Column(Text, nullable=False, comment="原始 URL")
     task_description = Column(Text, nullable=False, comment="任务描述")
     fields = Column(JSONB, default=list, comment="提取字段名称列表")
     created_at = Column(DateTime, default=datetime.now, comment="首次创建时间")
@@ -149,7 +149,7 @@ class SubTaskRecord(Base):
     subtask_id = Column(String(64), nullable=False, index=True, comment="子任务 ID (如 category_01)")
     execution_id = Column(Integer, ForeignKey("task_executions.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(256), nullable=False, comment="子任务名称")
-    list_url = Column(String(2048), nullable=False, comment="列表页 URL")
+    list_url = Column(Text, nullable=False, comment="列表页 URL")
     task_description = Column(Text, default="", comment="任务描述")
     status = Column(String(20), default="pending", comment="状态")
     fields = Column(JSONB, default=list, comment="字段定义 JSON")
@@ -182,7 +182,7 @@ class CollectedURL(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     subtask_id = Column(Integer, ForeignKey("subtasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    url = Column(String(2048), nullable=False)
+    url = Column(Text, nullable=False)
     status = Column(String(20), default="pending", comment="pending/processing/completed/failed")
     failure_reason = Column(Text, nullable=True, comment="失败原因")
     retry_count = Column(Integer, default=0, comment="重试次数")
@@ -209,7 +209,7 @@ class ExtractedItem(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     subtask_id = Column(Integer, ForeignKey("subtasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    url = Column(String(2048), nullable=False, index=True, comment="详情页 URL")
+    url = Column(Text, nullable=False, index=True, comment="详情页 URL")
     success = Column(Boolean, default=False, comment="提取是否成功")
     data = Column(JSONB, default=dict, comment="提取到的字段数据")
     error = Column(Text, nullable=True, comment="错误信息")
@@ -217,6 +217,10 @@ class ExtractedItem(Base):
 
     # 关联
     subtask = relationship("SubTaskRecord", back_populates="extracted_items")
+
+    __table_args__ = (
+        Index("ix_extracted_items_data_gin", "data", postgresql_using="gin"),
+    )
 
 
 # ============================================================================

@@ -27,6 +27,7 @@ from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import BatchFieldExtractor, BatchXPathExtractor
 from autospider.common.logger import get_logger
+from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
 
@@ -190,6 +191,9 @@ async def run_pipeline(
     explore_tasks: list[URLTask] = []
     url_only_mode = len(fields) == 0
 
+    # 初始化进度追踪器（进度走 Redis，结果走 PG）
+    tracker = TaskProgressTracker(execution_id)
+
     # 初始化两个独立的浏览器会话，分别用于列表页和详情页，减少资源竞争
     list_session = BrowserSession(
         headless=headless,
@@ -222,6 +226,7 @@ async def run_pipeline(
             )
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
+            await tracker.set_total(len(result.collected_urls))
             if getattr(result, "plan_upgrade_requested", False):
                 request = {
                     "requested": True,
@@ -375,6 +380,7 @@ async def run_pipeline(
                         staging_dir=staging_dir,
                         staged_records=staged_records,
                         summary_lock=summary_lock,
+                        tracker=tracker,
                     )
             finally:
                 await session.stop()
@@ -401,6 +407,9 @@ async def run_pipeline(
         summary["success_count"] = committed_summary["success_count"]
         _commit_items_file(items_path, committed_records)
         _write_summary(summary_path, summary)
+        # 标记进度追踪完成
+        final_status = "failed" if state.get("error") else "completed"
+        await tracker.mark_done(final_status)
         await list_session.stop()
         await detail_session.stop()
 # await shutdown_browser_engine()
@@ -447,6 +456,7 @@ async def _process_task(
     staging_dir: Path,
     staged_records: dict[str, dict],
     summary_lock: asyncio.Lock,
+    tracker: TaskProgressTracker | None = None,
 ) -> None:
     """执行单条任务提取并保存结果。
 
@@ -508,6 +518,13 @@ async def _process_task(
         staged_records[url] = staged_record
 
     await _finalize_task_from_staged_record(task, staged_record)
+
+    # 同步进度到 Redis
+    if tracker:
+        if staged_record.get("success"):
+            await tracker.record_success(url)
+        else:
+            await tracker.record_failure(url, staged_record.get("failure_reason", ""))
 
 
 async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:
