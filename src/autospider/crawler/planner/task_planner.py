@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -110,7 +110,7 @@ class TaskPlanner:
         # 步骤 2: 注入 SoM 脚本并扫描页面元素，获取标注截图
         snapshot = await inject_and_scan(self.page)
         _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-        # 清除页面上的标注图层，以免干扰后续操作
+        # 清除 SoM 覆盖层，后续通过 snapshot 中的原生 XPath 定位元素，不依赖 data-som-id
         await clear_overlay(self.page)
 
         # 步骤 3: 将截图发送给 LLM 进行视觉分析，识别导航分类
@@ -328,19 +328,44 @@ class TaskPlanner:
             if mark_id is not None and hasattr(snapshot, "marks"):
                 for mark in snapshot.marks:
                     if mark.mark_id == mark_id and mark.href:
+                        _href_lower = str(mark.href).strip().lower()
+                        if _href_lower.startswith("javascript:") or _href_lower in ("#", ""):
+                            logger.info(
+                                "[Planner] [%s] 策略1：mark href 无效（已过滤）: %s", name, mark.href[:80]
+                            )
+                            break
                         list_url = urljoin(base_url, mark.href)
+                        if list_url.lower() == base_url.lower() or list_url.lower() == original_url.lower():
+                            logger.info(
+                                "[Planner] [%s] 策略1：mark href 指向当前页（已过滤）: %s", name, list_url[:80]
+                            )
+                            list_url = ""
+                            break
                         logger.info("[Planner] [%s] 策略1：从 mark href 获取 URL: %s", name, list_url[:80])
                         break
 
-            # 策略 2: 注入 JavaScript 读取元素的 href（处理一些 mark 注入后可能动态变化的属性）
+            # 策略 2: 注入 JavaScript 读取 DOM 元素的 href（通过原生 XPath 定位）
             if not list_url and mark_id is not None:
-                list_url = await self._get_href_by_js(mark_id, base_url)
+                list_url = await self._get_href_by_js(mark_id, base_url, snapshot)
                 if list_url:
-                    logger.info("[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, list_url[:80])
+                    # 过滤无效 URL（javascript:, #, 空白等）
+                    _lower = list_url.strip().lower()
+                    if (
+                        _lower.startswith("javascript:")
+                        or _lower in ("#", "")
+                        or _lower == base_url.lower()
+                        or _lower == original_url.lower()
+                    ):
+                        logger.info(
+                            "[Planner] [%s] 策略2：JS 返回无效 URL（已过滤）: %s", name, list_url[:80]
+                        )
+                        list_url = ""
+                    else:
+                        logger.info("[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, list_url[:80])
 
-            # 策略 3: SPA 兜底 — 实际模拟点击该元素，观察浏览器 URL 是否发生跳转
+            # 策略 3: SPA 兜底 — 模拟点击元素，观察 URL 或 DOM 变化（通过原生 XPath 定位）
             if not list_url and mark_id is not None:
-                list_url = await self._get_url_by_navigation(mark_id, original_url)
+                list_url = await self._get_url_by_navigation(mark_id, original_url, snapshot)
                 if list_url:
                     logger.info("[Planner] [%s] 策略3：通过 SPA 模拟点击获取 URL: %s", name, list_url[:80])
 
@@ -374,30 +399,53 @@ class TaskPlanner:
 
         return subtasks
 
-    async def _get_href_by_js(self, mark_id: int, base_url: str) -> str:
-        """通过执行 JavaScript 直接从页面 DOM 元素获取 href 属性。
+    def _get_best_xpath_for_mark(self, snapshot: object, mark_id: int) -> str | None:
+        """从 snapshot 中获取指定 mark_id 的最佳原生 XPath。
+
+        Args:
+            snapshot: SoM 扫描快照。
+            mark_id: 目标元素的 mark_id。
+
+        Returns:
+            str | None: 最高优先级的 XPath 字符串；找不到则返回 None。
+        """
+        marks = getattr(snapshot, "marks", None) or []
+        for mark in marks:
+            if mark.mark_id == mark_id:
+                candidates = getattr(mark, "xpath_candidates", None) or []
+                if candidates:
+                    return candidates[0].xpath
+        return None
+
+    async def _get_href_by_js(self, mark_id: int, base_url: str, snapshot: object) -> str:
+        """通过 XPath 定位 DOM 元素并读取其 href 属性。
 
         Args:
             mark_id: 元素的 SoM 标识。
             base_url: 当前页面 URL，用于拼接相对路径。
+            snapshot: SoM 快照，用于获取原生 XPath。
 
         Returns:
             str: 绝对地址 URL，如果未找到则返回空字符串。
         """
+        xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
+        if not xpath:
+            return ""
         try:
             href = await self.page.evaluate(
-                """(markId) => {
-                    // 使用 data-som-id 属性定位元素
-                    const el = document.querySelector(`[data-som-id="${markId}"]`);
+                """(xpath) => {
+                    const result = document.evaluate(
+                        xpath, document, null,
+                        XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                    );
+                    const el = result.singleNodeValue;
                     if (!el) return null;
-                    // 如果元素本身就是 A 标签或有 href 属性
                     if (el.href) return el.href;
-                    // 否则查找其最近的父级 A 标签
                     const anchor = el.closest('a');
                     if (anchor && anchor.href) return anchor.href;
                     return null;
                 }""",
-                mark_id,
+                xpath,
             )
             if href:
                 return urljoin(base_url, href)
@@ -405,54 +453,85 @@ class TaskPlanner:
             logger.debug("[Planner] JS 执行获取 mark_id=%d 的 href 失败: %s", mark_id, e)
         return ""
 
-    async def _get_url_by_navigation(self, mark_id: int, original_url: str) -> str:
-        """针对 SPA 网站的兜底策略：模拟点击元素并获取目标跳转 URL。
+    async def _get_url_by_navigation(
+        self, mark_id: int, original_url: str, snapshot: object
+    ) -> str:
+        """针对 SPA 网站的兜底策略：通过原生 XPath 定位元素，模拟点击并检测跳转。
 
-        该过程会：
-        1. 记录当前 URL。
-        2. 点击目标元素并等待浏览器 URL 状态更新。
-        3. 记录跳转后的新 URL。
-        4. 为了不破坏规划过程中的页面一致性，会重新导航回原始 URL 并重置 SoM。
+        检测逻辑：
+        1. 比较完整 URL 字符串是否变化。
+        2. 比较 URL 的 hash fragment 是否变化（捕获 hash-based SPA 路由）。
+        3. 若 URL 完全不变，检测页面 DOM 内容是否发生了更新
+           （捕获纯 Ajax 加载的 SPA，点击分类后 URL 不变但列表内容已刷新）。
 
         Args:
             mark_id: SoM 标注的 mark_id。
             original_url: 点击前的原始 URL (用于恢复页面)。
+            snapshot: SoM 快照，用于获取原生 XPath 定位元素。
 
         Returns:
-            str: 点击跳转后的新 URL；若 URL 未发生变化，则返回空字符串。
+            str: 点击跳转后的新 URL；若 URL 和 DOM 均未发生变化，则返回空字符串。
         """
+        xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
+        if not xpath:
+            logger.debug("[Planner]   mark_id=%d 在 snapshot 中无可用 XPath", mark_id)
+            return ""
+
         try:
-            logger.info("[Planner]   触发模拟点击 mark_id=%d 以识别 SPA 路由跳转...", mark_id)
+            logger.info("[Planner]   触发模拟点击 mark_id=%d (xpath=%s)...", mark_id, xpath[:60])
 
             url_before = self.page.url
-            locator = self.page.locator(f'[data-som-id="{mark_id}"]')
-            
+            dom_sig_before = await self._get_dom_signature()
+
+            locator = self.page.locator(f"xpath={xpath}")
+
             if await locator.count() == 0:
-                logger.debug("[Planner]   未找到对应 mark_id=%d 的元素", mark_id)
+                logger.warning("[Planner]   XPath 未匹配到元素: %s", xpath[:80])
                 return ""
 
-            # 执行点击
             await locator.first.click(timeout=5000)
-            # 等待前端路由或服务端渲染完成跳转
             await self.page.wait_for_timeout(2000)
 
             url_after = self.page.url
 
-            if url_after and url_after != url_before:
+            old_parsed = urlparse(url_before)
+            new_parsed = urlparse(url_after)
+            url_changed = (
+                url_after != url_before
+                or old_parsed.fragment != new_parsed.fragment
+            )
+
+            logger.info(
+                "[Planner]   URL 比较: before=%s | after=%s | fragment: %s -> %s | changed=%s",
+                url_before[:80], url_after[:80],
+                old_parsed.fragment[:40] if old_parsed.fragment else '(none)',
+                new_parsed.fragment[:40] if new_parsed.fragment else '(none)',
+                url_changed,
+            )
+
+            if url_changed and url_after:
                 logger.info("[Planner]   SPA 路由跳转成功: %s", url_after[:80])
-                # 回退到原页面，保证对下一个分类的识别环境依然是首页
-                await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
-                await self.page.wait_for_timeout(1500)
-                # 因为 DOM 发生了重载，必须重新注入 SoM 标注
-                await inject_and_scan(self.page)
-                await clear_overlay(self.page)
+                await self._restore_original_page(original_url)
                 return url_after
-            else:
-                logger.debug("[Planner]   模拟点击后 URL 未发生显著变化")
+
+            dom_sig_after = await self._get_dom_signature()
+            logger.info(
+                "[Planner]   DOM 签名比较: before=%s | after=%s | changed=%s",
+                dom_sig_before[:16] if dom_sig_before else '(empty)',
+                dom_sig_after[:16] if dom_sig_after else '(empty)',
+                dom_sig_before != dom_sig_after if (dom_sig_before and dom_sig_after) else 'N/A',
+            )
+            if dom_sig_after and dom_sig_after != dom_sig_before:
+                logger.info(
+                    "[Planner]   URL 未变但 DOM 内容已更新（纯 Ajax SPA），使用原始 URL"
+                )
+                await self._restore_original_page(original_url)
+                return url_before
+
+            logger.info("[Planner]   模拟点击后 URL 和 DOM 均未发生显著变化")
 
         except Exception as e:
             logger.debug("[Planner]   模拟点击导航 mark_id=%d 失败: %s", mark_id, e)
-            # 异常时尝试恢复至原页面
             try:
                 if self.page.url != original_url:
                     await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
@@ -461,6 +540,25 @@ class TaskPlanner:
                 pass
 
         return ""
+
+    async def _get_dom_signature(self) -> str:
+        """获取页面 DOM 内容签名，用于检测内容变化。"""
+        try:
+            text = await self.page.evaluate("""() => {
+                const body = document.body;
+                return body ? body.innerText.trim() : '';
+            }""")
+            return hashlib.md5(text.encode("utf-8")).hexdigest() if text else ""
+        except Exception:
+            return ""
+
+    async def _restore_original_page(self, original_url: str) -> None:
+        """回退到原始页面，等待 SPA 渲染完成。"""
+        try:
+            await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
+            await self.page.wait_for_timeout(2000)
+        except Exception as e:
+            logger.debug("[Planner] 恢复原始页面失败: %s", e)
 
     def _build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
         """构造 TaskPlan 响应对象。"""

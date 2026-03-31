@@ -15,6 +15,11 @@ from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...pipeline.worker import SubTaskWorker
 
 
+def _use_last(existing: Any, new: Any) -> Any:
+    """Reducer：并行分支 Fan-in 时取最后到达的值（用于所有分支值相同的只读透传字段）。"""
+    return new
+
+
 class MultiDispatchState(TypedDict, total=False):
     """主调度图的状态字典定义。
 
@@ -23,8 +28,8 @@ class MultiDispatchState(TypedDict, total=False):
     而不是默认的覆盖逻辑。
     """
     thread_id: str  # 当前图运行的唯一线程 ID，用于绑定执行上下文或断点恢复
-    normalized_params: dict[str, Any]  # 经过统一归一化后的运行参数（例如从 CLI 或 API 传入的全局配置）
-    task_plan: TaskPlan  # 全局任务规划数据结构，包含了待调度的所有子任务树
+    normalized_params: Annotated[dict[str, Any], _use_last]  # 经过统一归一化后的运行参数（例如从 CLI 或 API 传入的全局配置）
+    task_plan: Annotated[TaskPlan, _use_last]  # 全局任务规划数据结构，包含了待调度的所有子任务树
     dispatch_queue: list[dict[str, Any]]  # 尚未下发执行的子任务队列（等待进入下一批并行）
     current_batch: list[dict[str, Any]]  # 目前正被 Send API 分发在当前轮次被并行处理的一批子任务
     

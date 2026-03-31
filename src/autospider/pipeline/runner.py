@@ -410,9 +410,19 @@ async def run_pipeline(
         # 标记进度追踪完成
         final_status = "failed" if state.get("error") else "completed"
         await tracker.mark_done(final_status)
+
+        # 经验沉淀：将本次成功的采集经验转化为 Spider Skill
+        _try_sediment_skill(
+            list_url=list_url,
+            task_description=task_description,
+            fields=fields,
+            state=state,
+            summary=summary,
+            output_dir=output_dir,
+        )
+
         await list_session.stop()
         await detail_session.stop()
-# await shutdown_browser_engine()
 
     return summary
 
@@ -724,3 +734,71 @@ def _write_summary(path: Path, summary: dict) -> None:
         identity_keys=("run_id", "list_url", "task_description"),
         volatile_keys={"created_at", "updated_at", "timestamp", "last_updated"},
     )
+
+
+def _try_sediment_skill(
+    *,
+    list_url: str,
+    task_description: str,
+    fields: list[FieldDefinition],
+    state: dict[str, object],
+    summary: dict,
+    output_dir: str,
+) -> None:
+    """尝试将本次 Pipeline 执行的经验沉淀为 Spider Skill，不影响主流程。"""
+    try:
+        # 只在任务有成功记录时沉淀
+        if int(summary.get("success_count", 0) or 0) <= 0:
+            return
+
+        from ..common.experience import SkillSedimenter
+
+        # 从 output_dir 中读取已保存的配置文件
+        output_path = Path(output_dir)
+
+        collection_config: dict = {}
+        cc_path = output_path / "collection_config.json"
+        if cc_path.exists():
+            try:
+                collection_config = json.loads(cc_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        extraction_config: dict = {}
+        ec_path = output_path / "extraction_config.json"
+        if ec_path.exists():
+            try:
+                extraction_config = json.loads(ec_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        # 读取校验失败记录
+        validation_failures: list[dict] = []
+        er_path = output_path / "extraction_result.json"
+        if er_path.exists():
+            try:
+                er_data = json.loads(er_path.read_text(encoding="utf-8"))
+                validation_failures = er_data.get("validation_failures", [])
+            except Exception:
+                pass
+
+        # 字段定义转为 dict 列表
+        fields_dicts = [f.model_dump() for f in fields]
+
+        sedimenter = SkillSedimenter()
+        result_path = sedimenter.sediment_from_pipeline_result(
+            list_url=list_url,
+            task_description=task_description,
+            fields=fields_dicts,
+            collection_config=collection_config,
+            extraction_config=extraction_config,
+            summary=summary,
+            validation_failures=validation_failures,
+        )
+
+        if result_path:
+            logger.info("[Pipeline] 经验已沉淀为 Skill: %s", result_path)
+
+    except Exception as exc:
+        logger.debug("[Pipeline] 经验沉淀失败（不影响主流程）: %s", exc)
+

@@ -17,10 +17,10 @@ class LLMConfig(BaseModel):
 
     api_key: str = Field(default_factory=lambda: os.getenv("BAILIAN_API_KEY", ""))
     api_base: str = Field(
-        default_factory=lambda: os.getenv("BAILIAN_API_BASE", "https://api.siliconflow.cn/v1")
+        default_factory=lambda: os.getenv("BAILIAN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     )
     model: str = Field(
-        default_factory=lambda: os.getenv("BAILIAN_MODEL", "Qwen3-VL-235B-A22B-Instruct")
+        default_factory=lambda: os.getenv("BAILIAN_MODEL", "qwen3.5-plus")
     )
     # Planner 专用模型配置（可选，默认使用主模型）
     planner_model: str | None = Field(
@@ -40,7 +40,7 @@ class LLMConfig(BaseModel):
     )
     trace_max_chars: int = Field(default_factory=lambda: int(os.getenv("LLM_TRACE_MAX_CHARS", "20000")))
     enable_thinking: bool = Field(
-        default_factory=lambda: os.getenv("LLM_ENABLE_THINKING", "false").lower() == "true"
+        default_factory=lambda: os.getenv("LLM_ENABLE_THINKING", "true").lower() == "true"
     )
     temperature: float = 0.1
     max_tokens: int = 8192  # 增加 token 限制，避免 JSON 被截断
@@ -49,7 +49,7 @@ class LLMConfig(BaseModel):
 class BrowserConfig(BaseModel):
     """浏览器配置"""
 
-    headless: bool = Field(default_factory=lambda: os.getenv("HEADLESS", "false").lower() == "true")
+    headless: bool = Field(default_factory=lambda: os.getenv("HEADLESS", "true").lower() == "true")
     viewport_width: int = Field(default_factory=lambda: int(os.getenv("VIEWPORT_WIDTH", "1280")))
     viewport_height: int = Field(default_factory=lambda: int(os.getenv("VIEWPORT_HEIGHT", "720")))
     slow_mo: int = Field(default_factory=lambda: int(os.getenv("SLOW_MO", "0")))
