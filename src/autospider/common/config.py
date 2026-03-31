@@ -270,9 +270,9 @@ class PipelineConfig(BaseModel):
 class PlannerConfig(BaseModel):
     """任务规划器配置（多分类并行采集）"""
 
-    # 同时运行的子任务最大数量
+    # 同时运行的子任务最大数量（默认 1 = 串行，按需调大以并行）
     max_concurrent_subtasks: int = Field(
-        default_factory=lambda: int(os.getenv("PLANNER_MAX_CONCURRENT", "10"))
+        default_factory=lambda: int(os.getenv("PLANNER_MAX_CONCURRENT", "1"))
     )
     # 全局进度文件名
     progress_file: str = Field(
@@ -281,15 +281,6 @@ class PlannerConfig(BaseModel):
     # 子任务内部详情抽取消费者并发数（默认 1，避免资源过载）
     subtask_consumer_concurrency: int = Field(
         default_factory=lambda: int(os.getenv("PLANNER_SUBTASK_CONSUMER_CONCURRENCY", "1"))
-    )
-    # 单次运行时再规划最多新增子任务数
-    runtime_subtasks_max_children: int = Field(
-        default_factory=lambda: int(os.getenv("PLANNER_RUNTIME_SUBTASKS_MAX_CHILDREN", "20"))
-    )
-    # 运行时再规划是否强制使用当前执行模型（而非 planner 专用模型）
-    runtime_subtasks_use_main_model: bool = Field(
-        default_factory=lambda: os.getenv("PLANNER_RUNTIME_SUBTASKS_USE_MAIN_MODEL", "true").lower()
-        == "true"
     )
 
 

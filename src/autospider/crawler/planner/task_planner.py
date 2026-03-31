@@ -67,6 +67,7 @@ class TaskPlanner:
         self.site_url = site_url
         self.user_request = user_request
         self.output_dir = output_dir
+        self._knowledge_entries: list[dict] = []  # DFS 过程中收集的知识条目
 
         # 获取 LLM 配置：
         # - 默认优先使用 planner 专用配置（兼容现有逻辑）
@@ -92,43 +93,202 @@ class TaskPlanner:
         )
 
     async def plan(self) -> TaskPlan:
-        """执行完整的规划流程。
+        """通过 DFS 遍历站点分类结构，发现所有叶子级列表页，一次性写入 Plan。
 
-        该方法驱动整个分析过程，最终返回一个包含多个子任务的 TaskPlan。
+        DFS 在单个浏览器会话中完成，像人浏览网站一样顺序访问每个分类：
+        - 如果是分支节点（分类页）：提取子分类，逐个 DFS 递归
+        - 如果是叶子节点（列表页）：记录到 subtasks
 
         Returns:
-            TaskPlan: 包含子任务列表和元数据的任务计划对象。
+            TaskPlan: 包含所有叶子子任务的计划。
         """
-        logger.info("[Planner] 开始分析网站结构: %s", self.site_url)
+        logger.info("[Planner] 开始 DFS 遍历网站结构: %s", self.site_url)
 
-        # 步骤 1: 访问目标网站，等待 DOM 内容加载完成
+        # 步骤 1: 访问目标网站
         await self.page.goto(self.site_url, wait_until="domcontentloaded", timeout=30000)
-        # 等待额外的时间以确保动态内容（如异步加载的菜单）渲染出来
         await self.page.wait_for_timeout(2000)
         logger.info("[Planner] 页面已加载: %s", self.page.url)
 
-        # 步骤 2: 注入 SoM 脚本并扫描页面元素，获取标注截图
+        # 步骤 2: DFS 遍历
+        all_subtasks: list[SubTask] = []
+        visited_urls: set[str] = set()
+
+        await self._dfs_explore(
+            current_url=self.page.url,
+            user_request=self.user_request,
+            subtasks_out=all_subtasks,
+            visited_urls=visited_urls,
+            depth=0,
+        )
+
+        # 步骤 3: 构建并保存 Plan
+        plan = self._build_plan(all_subtasks)
+        plan = self._save_plan(plan)
+
+        # 步骤 4: 写出知识文档并生成初始 Skill
+        self._write_knowledge_doc(plan)
+        self._sediment_draft_skill(plan)
+
+        logger.info("[Planner] DFS 遍历完成，发现 %d 个叶子任务", len(plan.subtasks))
+        return plan
+
+    async def _dfs_explore(
+        self,
+        current_url: str,
+        user_request: str,
+        subtasks_out: list[SubTask],
+        visited_urls: set[str],
+        depth: int,
+        parent_nav_steps: list[dict] | None = None,
+    ) -> None:
+        """DFS 递归探索一个页面节点。
+
+        对当前页面做 SoM + LLM 分析，判断页面类型：
+        - list_page（叶子）：记录到 subtasks_out
+        - category（分支）：提取每个子分类 URL，逐个 DFS 递归
+
+        Args:
+            current_url: 当前页面 URL。
+            user_request: 用户需求描述（可能随深度细化）。
+            subtasks_out: 收集结果的列表（引用传递）。
+            visited_urls: 已访问 URL 集合（防止环路）。
+            depth: 当前遍历深度。
+            parent_nav_steps: 从首页到达当前页面的导航步骤（用于 Ajax 站）。
+        """
+        if current_url in visited_urls:
+            logger.info("[Planner] DFS(depth=%d) 跳过已访问 URL: %s", depth, current_url[:80])
+            return
+        visited_urls.add(current_url)
+
+        logger.info("[Planner] DFS(depth=%d) 分析页面: %s", depth, current_url[:80])
+
+        # 1. SoM 分析当前页面
         snapshot = await inject_and_scan(self.page)
         _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-        # 清除 SoM 覆盖层，后续通过 snapshot 中的原生 XPath 定位元素，不依赖 data-som-id
         await clear_overlay(self.page)
 
-        # 步骤 3: 将截图发送给 LLM 进行视觉分析，识别导航分类
+        # 2. LLM 判断页面类型
         analysis = await self._analyze_site_structure(screenshot_base64, snapshot)
 
         if not analysis:
-            logger.warning("[Planner] LLM 分析失败或未识别到有效结构，将生成空计划")
-            return self._create_empty_plan()
+            logger.warning("[Planner] DFS(depth=%d) LLM 分析失败，跳过", depth)
+            return
 
-        # 步骤 4: 结合 SoM 快照和 LLM 的解析结果，提取每个子任务的真实 URL
-        subtasks = await self._extract_subtask_urls(analysis, snapshot)
+        page_type = str(analysis.get("page_type", "category")).strip().lower()
+        node_name = str(analysis.get("name", "")).strip() or f"页面_{depth}"
+        observations = str(analysis.get("observations", "")).strip()
 
-        # 步骤 5: 构建 TaskPlan 对象并将其保存到本地文件系统
-        plan = self._build_plan(subtasks)
-        plan = self._save_plan(plan)
+        # 记录知识条目（每个 DFS 节点都记录）
+        entry_index = len(self._knowledge_entries)
+        self._knowledge_entries.append({
+            "depth": depth,
+            "url": current_url,
+            "page_type": page_type,
+            "name": node_name,
+            "observations": observations,
+            "children_count": 0,
+            "is_leaf": False,
+        })
 
-        logger.info("[Planner] 规划完成，识别并生成了 %d 个子任务", len(plan.subtasks))
-        return plan
+        # 3. 叶子节点：当前页就是列表页
+        if page_type == "list_page":
+            self._knowledge_entries[entry_index]["is_leaf"] = True
+            subtask = SubTask(
+                id=f"leaf_{len(subtasks_out) + 1:03d}",
+                name=node_name,
+                list_url=current_url,
+                task_description=analysis.get("task_description", user_request),
+                nav_steps=list(parent_nav_steps or []),
+                depth=depth,
+                priority=len(subtasks_out),
+            )
+            subtasks_out.append(subtask)
+            logger.info(
+                "[Planner] DFS(depth=%d) ✓ 发现叶子任务: %s → %s",
+                depth, subtask.name, current_url[:80],
+            )
+            return
+
+        # 4. 分支节点：提取子分类并逐个 DFS 递归
+        raw_children = analysis.get("subtasks", [])
+        if not raw_children:
+            # LLM 说是分类页但没识别到子分类 → 当列表页兜底
+            self._knowledge_entries[entry_index]["is_leaf"] = True
+            subtask = SubTask(
+                id=f"leaf_{len(subtasks_out) + 1:03d}",
+                name=node_name,
+                list_url=current_url,
+                task_description=user_request,
+                nav_steps=list(parent_nav_steps or []),
+                depth=depth,
+                priority=len(subtasks_out),
+            )
+            subtasks_out.append(subtask)
+            logger.info(
+                "[Planner] DFS(depth=%d) ✓ 无子分类，兜底为叶子任务: %s",
+                depth, current_url[:80],
+            )
+            return
+
+        # 复用现有的 URL 提取逻辑获取每个子分类的 URL
+        children_with_urls = await self._extract_subtask_urls(analysis, snapshot)
+
+        if not children_with_urls:
+            # 提取全部失败 → 兜底
+            self._knowledge_entries[entry_index]["is_leaf"] = True
+            subtask = SubTask(
+                id=f"leaf_{len(subtasks_out) + 1:03d}",
+                name=node_name,
+                list_url=current_url,
+                task_description=user_request,
+                nav_steps=list(parent_nav_steps or []),
+                depth=depth,
+                priority=len(subtasks_out),
+            )
+            subtasks_out.append(subtask)
+            logger.info(
+                "[Planner] DFS(depth=%d) ✓ URL 提取全部失败，兜底为叶子任务: %s",
+                depth, current_url[:80],
+            )
+            return
+
+        # 更新知识条目的子分类数
+        self._knowledge_entries[entry_index]["children_count"] = len(children_with_urls)
+
+        logger.info(
+            "[Planner] DFS(depth=%d) 发现 %d 个子分类，开始逐个递归",
+            depth, len(children_with_urls),
+        )
+
+        for child in children_with_urls:
+            child_url = child.list_url
+            child_desc = child.task_description
+
+            if child_url == current_url:
+                # 纯 Ajax：URL 不变，通过 nav_steps 区分
+                child_nav_steps = list(parent_nav_steps or []) + child.nav_steps
+            else:
+                child_nav_steps = list(parent_nav_steps or [])
+
+            # DFS：进入子分类
+            if child_url != current_url:
+                await self.page.goto(child_url, wait_until="domcontentloaded", timeout=30000)
+                await self.page.wait_for_timeout(1500)
+
+            await self._dfs_explore(
+                current_url=child_url,
+                user_request=child_desc,
+                subtasks_out=subtasks_out,
+                visited_urls=visited_urls,
+                depth=depth + 1,
+                parent_nav_steps=child_nav_steps,
+            )
+
+            # 回退到当前节点
+            if self.page.url != current_url:
+                await self.page.goto(current_url, wait_until="domcontentloaded", timeout=15000)
+                await self.page.wait_for_timeout(1500)
+
 
     def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
         """构建提供给 LLM 的候选分类元素列表（文本优先，不依赖截图框号）。"""
@@ -615,3 +775,112 @@ class TaskPlanner:
         )
         logger.info("[Planner] 任务计划已成功持久化至: %s", plan_file)
         return TaskPlan.model_validate(persisted)
+
+    def _write_knowledge_doc(self, plan: TaskPlan) -> None:
+        """将 DFS 发现过程写成层次化的 Markdown 知识文档。
+
+        文档结构反映 DFS 遍历的树形层级，每个节点记录：
+        - URL、页面类型
+        - LLM 的自由观察（observations）
+
+        该文档会被 SkillSedimenter 读取，作为生成 Site Skill 的上下文。
+        """
+        if not self._knowledge_entries:
+            return
+
+        domain = urlparse(self.site_url).netloc
+        leaf_count = sum(1 for e in self._knowledge_entries if e["is_leaf"])
+
+        lines: list[str] = []
+
+        # 站点概况
+        lines.append(f"# 采集计划: {domain}")
+        lines.append("")
+        lines.append("## 站点概况")
+        lines.append(f"- URL: {self.site_url}")
+        lines.append(f"- 需求: {self.user_request}")
+        lines.append(f"- 发现时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"- 叶子任务数: {leaf_count}")
+        lines.append("")
+
+        # 发现过程
+        lines.append("## 发现过程")
+        lines.append("")
+
+        for entry in self._knowledge_entries:
+            depth = entry["depth"]
+            heading_level = "#" * (depth + 3)  # depth=0 -> ###, depth=1 -> ####
+            leaf_mark = " ✅" if entry["is_leaf"] else ""
+            children_info = ""
+            if not entry["is_leaf"] and entry["children_count"] > 0:
+                children_info = f"（{entry['children_count']} 个子分类）"
+
+            lines.append(f"{heading_level} {entry['name']}{leaf_mark}{children_info}")
+            lines.append(f"- URL: {entry['url']}")
+            lines.append(f"- 类型: {entry['page_type']}")
+            if entry["observations"]:
+                lines.append(f"- 观察: {entry['observations']}")
+            lines.append("")
+
+        # 写文件
+        doc_path = Path(self.output_dir) / "plan_knowledge.md"
+        doc_path.parent.mkdir(parents=True, exist_ok=True)
+        doc_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.info("[Planner] 知识文档已写入: %s", doc_path)
+
+    def _sediment_draft_skill(self, plan: TaskPlan) -> None:
+        """DFS 完成后立即生成 draft Skill，不等 Worker 执行。
+
+        draft Skill 只包含站点结构和 DFS 观察，没有 XPath 等执行数据。
+        后续 Worker 执行完成后会覆盖更新为 validated Skill。
+        """
+        if not self._knowledge_entries:
+            return
+
+        try:
+            from ...common.experience import SkillStore
+
+            domain = urlparse(self.site_url).netloc
+            subtask_names = [s.name for s in plan.subtasks]
+
+            # 渲染标准 SKILL.md 内容
+            lines: list[str] = []
+            lines.append("---")
+            lines.append(f"name: {domain} 站点采集")
+            lines.append(f"description: {domain} 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。")
+            lines.append("---")
+            lines.append("")
+            lines.append(f"# {domain} 采集指南（草稿）")
+            lines.append("")
+            lines.append("## 基本信息")
+            lines.append("")
+            lines.append(f"- **列表页 URL**: `{self.site_url}`")
+            lines.append(f"- **任务描述**: {self.user_request}")
+            lines.append(f"- **状态**: 📝 draft")
+            lines.append("")
+
+            if subtask_names:
+                lines.append("## 子任务")
+                lines.append("")
+                lines.append(f"本站共 {len(subtask_names)} 个子任务分类：")
+                lines.append("")
+                for sn in subtask_names:
+                    lines.append(f"- {sn}")
+                lines.append("")
+
+            # 嵌入 DFS 发现过程文档
+            knowledge_path = Path(self.output_dir) / "plan_knowledge.md"
+            if knowledge_path.exists():
+                knowledge = knowledge_path.read_text(encoding="utf-8")
+                lines.append("## DFS 发现过程")
+                lines.append("")
+                lines.append(knowledge.strip())
+                lines.append("")
+
+            content = "\n".join(lines)
+            store = SkillStore()
+            skill_path = store.save(domain, content)
+            logger.info("[Planner] Draft Skill 已生成: %s", skill_path)
+
+        except Exception as exc:
+            logger.debug("[Planner] Draft Skill 生成失败（不影响主流程）: %s", exc)

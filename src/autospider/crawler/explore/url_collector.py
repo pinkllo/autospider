@@ -105,9 +105,6 @@ class URLCollector(BaseCollector):
         self.step_index = 0  # 当前操作步数索引
         self.visited_detail_urls: set[str] = set()  # 已访问过的详情页 URL，用于去重
         self.common_pattern: CommonPattern | None = None  # 提取出的公共模式（XPath 等）
-        self.plan_upgrade_requested: bool = False
-        self.plan_upgrade_reason: str = ""
-        self.plan_upgrade_site_url: str = ""
 
         # 初始化额外组件
         self.decider = LLMDecider()  # LLM 决策核心组件
@@ -212,19 +209,7 @@ class URLCollector(BaseCollector):
             new_list_url = self.navigation_handler.list_url or new_page.url
             self._sync_page_references(new_page, list_url=new_list_url)
 
-        if self.navigation_handler and self.navigation_handler.plan_upgrade_requested:
-            self.plan_upgrade_requested = True
-            self.plan_upgrade_reason = self.navigation_handler.plan_upgrade_reason
-            self.plan_upgrade_site_url = self.page.url
 
-            logger.info("\n[Phase 2] 模型主动请求升级为 Planner，进入子任务拆分流程")
-            logger.info("[Phase 2] 升级原因: %s", self.plan_upgrade_reason[:300])
-            self._save_progress_status(
-                status="FAILED",
-                pause_reason="plan_upgrade_requested",
-                append_urls=True,
-            )
-            return self._create_result()
 
         # 3. 探索阶段
         if is_resume and self.common_detail_xpath:
@@ -704,9 +689,6 @@ class URLCollector(BaseCollector):
             list_page_url=self.list_url,
             task_description=self.task_description,
             created_at="",
-            plan_upgrade_requested=self.plan_upgrade_requested,
-            plan_upgrade_reason=self.plan_upgrade_reason,
-            plan_upgrade_site_url=self.plan_upgrade_site_url,
         )
 
     async def _save_result(self, result: URLCollectorResult, crawler_script: str = "") -> None:
@@ -723,9 +705,6 @@ class URLCollector(BaseCollector):
             "list_page_url": result.list_page_url,
             "task_description": result.task_description,
             "collected_urls": result.collected_urls,
-            "plan_upgrade_requested": result.plan_upgrade_requested,
-            "plan_upgrade_reason": result.plan_upgrade_reason,
-            "plan_upgrade_site_url": result.plan_upgrade_site_url,
             "nav_steps": self.nav_steps,
             "detail_visits": [
                 {

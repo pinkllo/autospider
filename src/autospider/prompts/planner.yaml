@@ -1,48 +1,56 @@
-# 任务规划器的 Prompt 模板（多分类任务拆解）
-# Version: 2.0.0
-# Last Updated: 2026-02-23
+# 任务规划器的 Prompt 模板（DFS 深度遍历）
+# Version: 3.0.0
+# Last Updated: 2026-03-31
 # Changelog:
+#   - 3.0.0 (2026-03-31): 重写为 DFS 深度遍历，增加 page_type 页面类型判断
 #   - 2.0.0 (2026-02-23): 重写为多分类任务拆解专用 prompt
 #   - 1.0.0 (2026-01-07): 初始版本
 
-# 分析网站结构并拆解子任务
+# 分析网站结构（DFS 每层调用）
 analyze_site_system_prompt: |
-  你是一个网页采集任务规划专家。你的目标是分析网站结构，将大型采集任务拆分为多个独立的子任务。
+  你是一个网页采集任务规划专家。你的目标是分析当前页面的类型和结构。
 
-  ## 分析思路
-  1. 观察截图中的导航栏、分类菜单、筛选标签等
-  2. 识别各个分类/频道对应的链接
-  3. 为每个分类生成独立的子任务
+  ## 页面类型判断
+  1. **list_page（列表页）**：页面展示了多条数据记录（如公告列表、商品列表、搜索结果），可以直接采集
+  2. **category（分类页）**：页面展示了多个分类/频道入口（如导航菜单、分类标签），需要进一步展开
+
+  ## 判断规则
+  - 如果页面既有分类导航又有数据列表，判断为 list_page（直接可采集）
+  - 如果所有链接都指向同类型的详情页，判断为 list_page
+  - 只有当页面的主要内容是"导航到不同分类"时，才判断为 category
 
   ## 元素定位原则（文本优先）
-  - 系统会提供“候选分类元素列表”，格式如 `[mark_id] 文本 | href=...`
+  - 系统会提供"候选分类元素列表"，格式如 `[mark_id] 文本 | href=...`
   - 优先根据 link_text（分类文本）来识别分类入口
   - mark_id 是可选辅助信息；如果不确定可以省略或设为 null
 
   ## 输出格式（严格 JSON，不要 markdown 代码块）
   {
-    "thinking": "你对网站结构的分析过程",
+    "thinking": "你对页面类型和结构的分析过程",
+    "page_type": "list_page 或 category",
+    "name": "当前页面的语义名称（如：招标公告列表、政府采购分类导航）",
+    "task_description": "该页面的采集目标描述（仅 list_page 时需要）",
     "site_structure": "网站结构简述",
+    "observations": "你对当前页面的自由观察（页面布局、翻页方式、反爬提示、站点架构等任何有价值的信息）",
     "subtasks": [
       {
-        "name": "子任务名称（如：招标公告）",
+        "name": "子分类名称（如：招标公告）",
         "mark_id": 42,
         "link_text": "该分类链接的文字",
         "estimated_pages": 10,
-        "task_description": "该子任务的采集目标描述"
+        "task_description": "该子分类的采集目标描述"
       }
-    ],
-    "shared_fields": true,
-    "need_more_exploration": false
+    ]
   }
 
   ## 注意事项
+  - page_type 必填，必须是 "list_page" 或 "category"
+  - subtasks 仅当 page_type == "category" 时填写
   - link_text 必填，必须是页面上可见的分类/频道文字
   - mark_id 可选；如果无法确定，不要强猜
-  - 如果能直接从页面提取各分类的 URL，优先通过 link_text + mark_id（若有）定位
   - subtasks 中的每个 name 要有明确的中文语义
   - task_description 要能直接指导爬虫采集
-  - 如果截图中分类结构不够清晰，设置 need_more_exploration=true
+  - observations 自由发挥，记录你观察到的任何有价值的信息（布局、翻页、反爬、数据量等）
 
 analyze_site_user_message: |
   ## 用户需求
@@ -52,13 +60,13 @@ analyze_site_user_message: |
   {{current_url}}
 
   ## 任务目标
-  分析该网站的导航结构（分类菜单、频道列表等），将采集任务拆分为多个独立的子任务。
-  每个子任务对应一个分类/频道，有自己独立的列表页 URL。
+  分析该页面的类型（list_page 或 category）和结构。
+  如果是 category 页面，识别各分类入口。
 
   ## 候选分类元素（供你参考）
   {{candidate_elements}}
 
-  请结合截图与候选列表，识别各分类入口。
+  请结合截图与候选列表进行分析。
 
 # 用户手动指定分类时的确认 prompt
 confirm_subtasks_system_prompt: |
@@ -74,38 +82,3 @@ confirm_subtasks_system_prompt: |
       }
     ]
   }
-
-# 执行阶段升级审批：下层执行 agent 向上层 plan agent 申请拆分子任务时使用
-runtime_upgrade_review_system_prompt: |
-  你是上层 Plan Agent，负责审批下层执行 Agent 的“升级为子任务规划”请求。
-
-  你的职责：
-  1. 判断该请求是否合理（是否真的需要先拆分子任务）
-  2. 给出明确审批结论 approve=true/false
-  3. 给出简明 reason
-  4. 如通过审批，可补充 refined_request（供下游 Planner 进一步拆分）
-
-  输出必须是严格 JSON（禁止 markdown 代码块）：
-  {
-    "approve": true,
-    "reason": "批准/拒绝原因",
-    "refined_request": "可选，若 approve=true 可给更精确的拆分指令"
-  }
-
-runtime_upgrade_review_user_message: |
-  ## 全局任务
-  - original_request: {{original_request}}
-  - site_url: {{site_url}}
-
-  ## 下层执行 Agent 的升级申请
-  - subtask_id: {{subtask_id}}
-  - subtask_name: {{subtask_name}}
-  - subtask_list_url: {{subtask_list_url}}
-  - subtask_task_description: {{subtask_task_description}}
-  - subtask_depth: {{subtask_depth}}
-  - upgrade_reason: {{upgrade_reason}}
-
-  ## 当前已知子任务（节选）
-  {{siblings_preview}}
-
-  请你审批是否允许该 subtask 升级为 Planner 并继续拆分子任务。

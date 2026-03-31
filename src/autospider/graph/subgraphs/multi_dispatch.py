@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import operator
-from pathlib import Path
 from typing import Any, Annotated, TypedDict
 
 from langgraph.graph import END, StateGraph
-from langgraph.types import Command, Send, interrupt
+from langgraph.types import Send, interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
-from ...common.browser import BrowserSession
 from ...common.config import config
-from ...crawler.planner import TaskPlanner
 from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...pipeline.worker import SubTaskWorker
 
@@ -89,24 +86,6 @@ def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
     return max(1, batch_size)
 
 
-def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
-    raw_value = params.get("runtime_subtask_max_children")
-    try:
-        value = int(raw_value) if raw_value is not None else config.planner.runtime_subtasks_max_children
-    except (TypeError, ValueError):
-        value = config.planner.runtime_subtasks_max_children
-    return max(1, value)
-
-
-def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
-    raw_value = params.get("runtime_subtasks_use_main_model")
-    if raw_value is None:
-        return bool(config.planner.runtime_subtasks_use_main_model)
-    if isinstance(raw_value, bool):
-        return raw_value
-    if isinstance(raw_value, str):
-        return raw_value.strip().lower() == "true"
-    return bool(raw_value)
 
 
 def _build_subtask_result(
@@ -128,7 +107,6 @@ def _build_subtask_result(
         "retry_count": int(subtask.retry_count or 0),
         "result_file": str(run_result.get("items_file") or subtask.result_file or ""),
         "collected_count": int(run_result.get("total_urls", 0) or subtask.collected_count or 0),
-        "plan_upgrade_request": run_result.get("plan_upgrade_request"),
     }
 
 
@@ -260,19 +238,6 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     except Exception as exc:  # noqa: BLE001
         result = {"error": str(exc), "items_file": "", "total_urls": 0}
 
-    plan_upgrade_request = result.get("plan_upgrade_request")
-    if isinstance(plan_upgrade_request, dict) and bool(plan_upgrade_request.get("requested")):
-        return Command(
-            goto="runtime_replan_subtasks",
-            update={
-                "subtask_result": _build_subtask_result(
-                    subtask,
-                    status=SubTaskStatus.SKIPPED,
-                    error=str(plan_upgrade_request.get("reason") or "plan_upgrade_requested")[:500],
-                    result=result,
-                ),
-            },
-        )
 
     pipeline_error = str(result.get("error") or "").strip()
     if pipeline_error:
@@ -295,87 +260,6 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     }
 
 
-async def runtime_replan_subtasks(state: SubTaskFlowState) -> SubTaskFlowState:
-    """(子任务态) 运行时阶段由目标子任务抛出的泛化拆分。
-
-    当被执行的任务比较宽泛导致 Worker 建议拆分时被命中进入此节点，
-    会重新拉起 BrowserSession 和 Planner 重新在子站内分化次级任务，然后将其合并提交。
-    """
-    subtask = _restore_subtask(dict(state.get("subtask_payload") or {}))
-    params = dict(state.get("normalized_params") or {})
-    planner_request = str(subtask.task_description or "").strip()
-    reason = str((state.get("subtask_result") or {}).get("error") or "").strip()
-    if reason and reason not in planner_request:
-        planner_request = f"{planner_request}\n\n执行阶段补充线索：{reason}"
-    max_children = _resolve_runtime_replan_max_children(params)
-    use_main_model = _resolve_runtime_subtasks_use_main_model(params)
-
-    planner_session = BrowserSession(
-        headless=bool(params.get("headless", False)),
-        guard_intervention_mode="interrupt",
-        guard_thread_id=str(params.get("_thread_id") or ""),
-    )
-    try:
-        await planner_session.start()
-        planner = TaskPlanner(
-            page=planner_session.page,
-            site_url=str(subtask.list_url or "").strip(),
-            user_request=planner_request,
-            output_dir=str(Path(str(params.get("output_dir") or "output")) / f"subtask_{subtask.id}"),
-            use_main_model=use_main_model,
-        )
-        plan = await planner.plan()
-    except BrowserInterventionRequired as exc:
-        interrupt(exc.payload)
-        return await runtime_replan_subtasks(state)
-    except Exception as exc:  # noqa: BLE001
-        message = f"runtime_replan_failed: {exc}"[:500]
-        return {
-            "subtask_result": _build_subtask_result(subtask, status=SubTaskStatus.FAILED, error=message),
-            "spawned_subtasks": [],
-        }
-    finally:
-        await planner_session.stop()
-
-    spawned_subtasks: list[dict[str, Any]] = []
-    for index, candidate in enumerate(list(plan.subtasks or [])[:max_children], start=1):
-        child = candidate.model_copy(deep=True)
-        child.parent_id = subtask.id
-        child.depth = int(subtask.depth or 0) + 1
-        child.created_by = "runtime_plan"
-        child.runtime_plan_attempted = False
-        child.priority = int(subtask.priority or 0) * 100 + index
-        child.status = SubTaskStatus.PENDING
-        child.retry_count = 0
-        child.error = None
-        child.result_file = None
-        child.collected_count = 0
-        if not child.fields:
-            child.fields = list(subtask.fields or [])
-        if child.max_pages is None:
-            child.max_pages = subtask.max_pages
-        if child.target_url_count is None:
-            child.target_url_count = subtask.target_url_count or params.get("target_url_count")
-        spawned_subtasks.append(child.model_dump(mode="python"))
-
-    if not spawned_subtasks:
-        return {
-            "subtask_result": _build_subtask_result(
-                subtask,
-                status=SubTaskStatus.FAILED,
-                error="plan_upgrade_requested_but_no_subtasks_generated",
-            ),
-            "spawned_subtasks": [],
-        }
-
-    return {
-        "subtask_result": _build_subtask_result(
-            subtask,
-            status=SubTaskStatus.SKIPPED,
-            error=f"delegated_to_runtime_plan: spawned={len(spawned_subtasks)}",
-        ),
-        "spawned_subtasks": spawned_subtasks,
-    }
 
 
 def finalize_subtask_flow(state: SubTaskFlowState) -> SubTaskFlowState:
@@ -459,11 +343,9 @@ def build_multi_dispatch_subgraph():
     # 1. 内部独立执行单个子任务的小状态图
     subtask_flow = StateGraph(SubTaskFlowState)
     subtask_flow.add_node("run_subtask_worker", run_subtask_worker_node)
-    subtask_flow.add_node("runtime_replan_subtasks", runtime_replan_subtasks)
     subtask_flow.add_node("finalize_subtask_flow", finalize_subtask_flow)
     subtask_flow.set_entry_point("run_subtask_worker")
     subtask_flow.add_edge("run_subtask_worker", "finalize_subtask_flow")
-    subtask_flow.add_edge("runtime_replan_subtasks", "finalize_subtask_flow")
     subtask_flow.add_edge("finalize_subtask_flow", END)
 
     # 2. 外部主调度引擎编排图

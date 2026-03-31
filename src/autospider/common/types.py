@@ -117,7 +117,6 @@ class ActionType(str, Enum):
     EXTRACT = "extract"
     GO_BACK = "go_back"  # 返回当前标签页上一页
     GO_BACK_TAB = "go_back_tab"  # 返回上一标签页
-    PLAN_SUBTASKS = "plan_subtasks"  # 执行阶段主动升级为 plan agent 并拆分子任务
     DONE = "done"
     RETRY = "retry"
 

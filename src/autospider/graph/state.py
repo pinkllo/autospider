@@ -24,6 +24,7 @@ class GraphState(TypedDict, total=False):
     chat_pending_question: str
     chat_flow_state: str
     chat_review_state: str
+    history_match_done: bool
 
     collection_config: dict[str, Any]
     collection_progress: dict[str, Any]

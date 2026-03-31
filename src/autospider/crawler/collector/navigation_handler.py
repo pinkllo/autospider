@@ -46,8 +46,6 @@ class NavigationHandler:
         self.screenshots_dir = screenshots_dir
         self.executor: ActionExecutor | None = None
         self.nav_steps: list[dict] = []
-        self.plan_upgrade_requested: bool = False
-        self.plan_upgrade_reason: str = ""
 
     async def run_navigation_phase(self) -> bool:
         """
@@ -150,26 +148,7 @@ class NavigationHandler:
                 filter_done = True
                 break
 
-            if action.action == ActionType.PLAN_SUBTASKS:
-                self.plan_upgrade_requested = True
-                self.plan_upgrade_reason = (
-                    str(action.summary or action.expectation or action.thinking or "").strip()
-                    or "模型判断当前任务应先拆分子任务"
-                )
-                self.nav_steps.append(
-                    {
-                        "step": nav_step,
-                        "action": action.action.value,
-                        "mark_id": action.mark_id,
-                        "target_text": action.target_text,
-                        "thinking": action.thinking,
-                        "summary": action.summary,
-                        "success": True,
-                    }
-                )
-                logger.info("[Nav] 模型请求升级为 Planner: %s", self.plan_upgrade_reason[:200])
-                filter_done = True
-                break
+
 
             if action.action == ActionType.RETRY:
                 logger.info("[Nav] 重试")

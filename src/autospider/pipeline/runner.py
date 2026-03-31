@@ -187,7 +187,7 @@ async def run_pipeline(
 
     producer_done = asyncio.Event()
     xpath_ready = asyncio.Event()
-    state: dict[str, object] = {"fields_config": None, "error": None, "plan_upgrade_request": None}
+    state: dict[str, object] = {"fields_config": None, "error": None}
     explore_tasks: list[URLTask] = []
     url_only_mode = len(fields) == 0
 
@@ -227,15 +227,7 @@ async def run_pipeline(
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
             await tracker.set_total(len(result.collected_urls))
-            if getattr(result, "plan_upgrade_requested", False):
-                request = {
-                    "requested": True,
-                    "reason": str(getattr(result, "plan_upgrade_reason", "") or "").strip(),
-                    "site_url": str(getattr(result, "plan_upgrade_site_url", "") or "").strip(),
-                }
-                state["plan_upgrade_request"] = request
-                _set_state_error(state, "plan_upgrade_requested")
-                summary["plan_upgrade_request"] = request
+
         except BrowserInterventionRequired:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -397,8 +389,7 @@ async def run_pipeline(
             consumer(),
         )
     finally:
-        if state.get("plan_upgrade_request"):
-            summary["plan_upgrade_request"] = state.get("plan_upgrade_request")
+
         if state.get("error"):
             summary["error"] = state.get("error")
         committed_records = _load_staged_records(staging_dir)
@@ -785,6 +776,16 @@ def _try_sediment_skill(
         # 字段定义转为 dict 列表
         fields_dicts = [f.model_dump() for f in fields]
 
+        # 读取 DFS 知识文档（Worker 在子目录运行，plan_knowledge.md 在父目录）
+        plan_knowledge = ""
+        for candidate in [output_path / "plan_knowledge.md", output_path.parent / "plan_knowledge.md"]:
+            if candidate.exists():
+                try:
+                    plan_knowledge = candidate.read_text(encoding="utf-8")
+                    break
+                except Exception:
+                    pass
+
         sedimenter = SkillSedimenter()
         result_path = sedimenter.sediment_from_pipeline_result(
             list_url=list_url,
@@ -794,6 +795,7 @@ def _try_sediment_skill(
             extraction_config=extraction_config,
             summary=summary,
             validation_failures=validation_failures,
+            plan_knowledge=plan_knowledge,
         )
 
         if result_path:

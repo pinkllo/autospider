@@ -87,9 +87,6 @@ class ActionExecutor:
                 return await self._execute_go_back(action, step_index)
             elif action.action == ActionType.GO_BACK_TAB:
                 return await self._execute_go_back_tab(step_index)
-            elif action.action == ActionType.PLAN_SUBTASKS:
-                # 升级为 Planner 的决策由上层调度器处理，这里视为无浏览器动作成功返回。
-                return ActionResult(success=True), None
             elif action.action == ActionType.DONE:
                 return ActionResult(success=True), None
             elif action.action == ActionType.RETRY:

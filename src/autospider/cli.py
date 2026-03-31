@@ -434,6 +434,35 @@ def _handle_browser_intervention_interrupt(payload: dict[str, Any]) -> dict[str,
     return {"action": "continue", "intervention_type": intervention_type}
 
 
+def _handle_history_task_select_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
+    """处理历史任务选择 interrupt。"""
+    message = str(payload.get("message") or "检测到历史采集任务，请选择：")
+    options = list(payload.get("options") or [])
+    if not options:
+        return {"choice": 1}
+
+    console.print(Panel(f"[yellow]{message}[/yellow]", title="历史任务匹配", style="yellow"))
+    for opt in options:
+        index = opt.get("index", "")
+        label = opt.get("label", "")
+        console.print(f"  [cyan]{index}[/cyan]. {label}")
+    console.print()
+
+    while True:
+        choice_text = typer.prompt(
+            f"请输入选项序号（1-{len(options)}）",
+            default="1",
+        ).strip()
+        try:
+            choice = int(choice_text)
+        except ValueError:
+            console.print("[yellow]请输入有效数字。[/yellow]")
+            continue
+        if 1 <= choice <= len(options):
+            return {"choice": choice}
+        console.print(f"[yellow]请输入 1 到 {len(options)} 之间的数字。[/yellow]")
+
+
 def _continue_chat_interrupts(result: dict, *, runner: GraphRunner | None = None) -> dict:
     """在 CLI 中继续处理 chat-pipeline interrupt。"""
     active_runner = runner or GraphRunner()
@@ -451,6 +480,8 @@ def _continue_chat_interrupts(result: dict, *, runner: GraphRunner | None = None
             resume_payload = _handle_chat_review_interrupt(payload)
         elif interrupt_type == "browser_intervention":
             resume_payload = _handle_browser_intervention_interrupt(payload)
+        elif interrupt_type == "history_task_select":
+            resume_payload = _handle_history_task_select_interrupt(payload)
         else:
             break
 

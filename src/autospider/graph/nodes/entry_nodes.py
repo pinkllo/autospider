@@ -512,13 +512,18 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
 
     LLM 从历史任务中筛选最多 3 个最相关的候选，
     加上"创建新任务"组成最多 4 个选项，interrupt 让用户选择。
+    如果用户已在本轮对话中完成过选择（补充需求重新生成场景），则直接跳过。
     """
+    # 已经选择过，跳过重复匹配
+    if state.get("history_match_done"):
+        return _ok({"history_reused": False, "skipped": True})
+
     task = dict(state.get("clarified_task") or {})
     list_url = str(task.get("list_url") or "")
     current_desc = str(task.get("task_description") or "")
 
     if not list_url:
-        return _ok()
+        return {**_ok(), "history_match_done": True}
 
     # 1. 查找历史任务
     cli_args = dict(state.get("cli_args") or {})
@@ -527,13 +532,13 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     history = registry.find_by_url(list_url)
 
     if not history:
-        return _ok()
+        return {**_ok(), "history_match_done": True}
 
     # 2. 调用 LLM 筛选最多 3 个最相关的候选
     candidates = await _llm_rank_history(current_desc, history)
 
     if not candidates:
-        return _ok()
+        return {**_ok(), "history_match_done": True}
 
     # 3. 构建选项列表：最多 3 个历史 + 1 个新任务
     options: list[dict[str, Any]] = []
@@ -583,7 +588,8 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
         return {
             **_ok({"history_reused": True, "matched_registry_id": selected["registry_id"]}),
             "clarified_task": task,
+            "history_match_done": True,
         }
 
     logger.info("[HistoryMatch] 用户选择创建新任务")
-    return _ok({"history_reused": False})
+    return {**_ok({"history_reused": False}), "history_match_done": True}
