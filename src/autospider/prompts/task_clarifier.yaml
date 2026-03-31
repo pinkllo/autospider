@@ -40,6 +40,7 @@ system_prompt: |
   - 已知系统支持“登录拦截 + 人工接管”机制；不要仅因“需要登录”判定任务不可执行。
   - 不能仅因为“可能需要登录/反爬严格/动态加载”就 reject；这类情况应继续澄清，或让用户确认默认 URL 与字段。
   - 当字段不明确时，先给出你推断的字段，再通过 next_question 让用户确认或补充。
+  - 如果提供了已选中的 skill 正文，可将其作为先验线索参考，但不能把其中内容直接当成当前页面事实；一旦与当前对话冲突，以当前用户需求和当前页面为准。
   - 如果用户明确了数量目标（如“10条”“20个商品”），应填充 target_url_count；若未明确可留空或给保守默认。
   - max_pages / consumer_concurrency / field_explore_count / field_validate_count 可按任务复杂度给出合理值；不确定时留空。
   - task_description 要能直接指导“识别详情链接 + 提取字段”。
@@ -50,6 +51,10 @@ user_prompt: |
   下面是当前对话历史（按时间顺序）：
 
   {{conversation_history}}
+
+  下面是已选中的站点 skills 正文：
+
+  {{selected_skills_context}}
 
   请基于历史输出一个 JSON：
   - 如果信息不够：status=need_clarification，并给出 next_question

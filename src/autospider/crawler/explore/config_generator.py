@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-
 from ...common.config import config
+from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
@@ -58,6 +58,9 @@ class ConfigGenerator:
         explore_count: int = 3,
         max_nav_steps: int = 10,
         output_dir: str = "output",
+        skill_runtime: SkillRuntime | None = None,
+        selected_skills_context: str = "",
+        selected_skills: list[dict] | None = None,
     ):
         """初始化配置生成器
 
@@ -76,6 +79,9 @@ class ConfigGenerator:
         self.max_nav_steps = max_nav_steps
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.selected_skills_context = str(selected_skills_context or "")
+        self.selected_skills = list(selected_skills or [])
 
         # 截图目录
         self.screenshots_dir = self.output_dir / "screenshots"
@@ -113,6 +119,7 @@ class ConfigGenerator:
         logger.info(f"[ConfigGenerator] 任务描述: {self.task_description}")
         logger.info(f"[ConfigGenerator] 列表页: {self.list_url}")
         logger.info(f"[ConfigGenerator] 将探索 {self.explore_count} 个详情页")
+        await self._prepare_skill_context()
 
         # 1. 导航到列表页
         logger.info("\n[Phase 1] 导航到列表页...")
@@ -198,6 +205,8 @@ class ConfigGenerator:
             collected_urls=[],
             visited_detail_urls=self.visited_detail_urls,
             list_url=self.list_url,
+            selected_skills_context=self.selected_skills_context,
+            selected_skills=self.selected_skills,
         )
 
         self.navigation_handler = NavigationHandler(
@@ -238,6 +247,30 @@ class ConfigGenerator:
             self.pagination_handler.page = page
             if list_url:
                 self.pagination_handler.list_url = list_url
+
+    async def _prepare_skill_context(self) -> None:
+        selected = await self.skill_runtime.get_or_select(
+            phase="url_collector",
+            url=self.list_url,
+            task_context={
+                "task_description": self.task_description,
+                "mode": "generate_config",
+            },
+            llm=self.decider.llm,
+            preselected_skills=self.selected_skills,
+        )
+        self.selected_skills = [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": skill.path,
+                "domain": skill.domain,
+            }
+            for skill in selected
+        ]
+        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
+            self.skill_runtime.load_selected_bodies(selected)
+        )
 
     async def _explore_phase(self) -> None:
         """探索阶段：进入多个详情页"""
@@ -538,6 +571,8 @@ async def generate_collection_config(
     explore_count: int = 3,
     output_dir: str = "output",
     persist_progress: bool = True,
+    skill_runtime: SkillRuntime | None = None,
+    selected_skills: list[dict] | None = None,
 ) -> CollectionConfig:
     """生成爬取配置的便捷函数
 
@@ -557,5 +592,7 @@ async def generate_collection_config(
         task_description=task_description,
         explore_count=explore_count,
         output_dir=output_dir,
+        skill_runtime=skill_runtime,
+        selected_skills=selected_skills,
     )
     return await generator.generate_config()

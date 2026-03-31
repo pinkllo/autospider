@@ -25,6 +25,8 @@ class GraphState(TypedDict, total=False):
     chat_flow_state: str
     chat_review_state: str
     history_match_done: bool
+    matched_skills: list[dict[str, str]]
+    selected_skills: list[dict[str, str]]
 
     collection_config: dict[str, Any]
     collection_progress: dict[str, Any]

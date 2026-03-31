@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ...common.config import config
+from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
@@ -72,6 +73,9 @@ class URLCollector(BaseCollector):
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
         persist_progress: bool = True,
+        skill_runtime: SkillRuntime | None = None,
+        selected_skills_context: str = "",
+        selected_skills: list[dict] | None = None,
     ):
         """初始化 URLCollector
 
@@ -99,6 +103,9 @@ class URLCollector(BaseCollector):
 
         self.explore_count = explore_count
         self.max_nav_steps = max_nav_steps
+        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.selected_skills_context = str(selected_skills_context or "")
+        self.selected_skills = list(selected_skills or [])
 
         # 探索阶段特有状态
         self.detail_visits: list[DetailPageVisit] = []  # 记录每次详情页访问的详细信息
@@ -118,6 +125,7 @@ class URLCollector(BaseCollector):
         logger.info(f"[URLCollector] 任务描述: {self.task_description}")
         logger.info(f"[URLCollector] 列表页: {self.list_url}")
         logger.info(f"[URLCollector] 将探索 {self.explore_count} 个详情页")
+        await self._prepare_skill_context()
 
         # 0.5 加载历史进度和配置信息
         previous_progress = self.progress_persistence.load_progress()
@@ -330,6 +338,8 @@ class URLCollector(BaseCollector):
             collected_urls=self.collected_urls,
             visited_detail_urls=self.visited_detail_urls,
             list_url=self.list_url,
+            selected_skills_context=self.selected_skills_context,
+            selected_skills=self.selected_skills,
         )
 
         # 调用基类初始化（初始化 url_extractor 和 pagination_handler）
@@ -343,6 +353,31 @@ class URLCollector(BaseCollector):
             max_nav_steps=self.max_nav_steps,
             decider=self.decider,
             screenshots_dir=self.screenshots_dir,
+        )
+
+    async def _prepare_skill_context(self) -> None:
+        """为当前列表页选择并加载已选中的 skills 正文。"""
+        selected = await self.skill_runtime.get_or_select(
+            phase="url_collector",
+            url=self.list_url,
+            task_context={
+                "task_description": self.task_description,
+                "target_url_count": self.target_url_count,
+            },
+            llm=self.decider.llm,
+            preselected_skills=self.selected_skills,
+        )
+        self.selected_skills = [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": skill.path,
+                "domain": skill.domain,
+            }
+            for skill in selected
+        ]
+        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
+            self.skill_runtime.load_selected_bodies(selected)
         )
 
     async def _explore_phase(self) -> None:
@@ -755,6 +790,8 @@ async def collect_detail_urls(
     max_pages: int | None = None,
     output_dir: str = "output",
     persist_progress: bool = True,
+    skill_runtime: SkillRuntime | None = None,
+    selected_skills: list[dict] | None = None,
 ) -> URLCollectorResult:
     """收集详情页 URL 的便捷入口函数
 
@@ -778,5 +815,7 @@ async def collect_detail_urls(
         max_pages=max_pages,
         output_dir=output_dir,
         persist_progress=persist_progress,
+        skill_runtime=skill_runtime,
+        selected_skills=selected_skills,
     )
     return await collector.run()

@@ -40,6 +40,8 @@ class FieldDecider:
         self,
         page: "Page",
         decider: "LLMDecider",
+        selected_skills_context: str = "",
+        selected_skills: list[dict] | None = None,
     ):
         """
         初始化字段决策器
@@ -50,6 +52,8 @@ class FieldDecider:
         """
         self.page = page
         self.decider = decider
+        self.selected_skills_context = str(selected_skills_context or "")
+        self.selected_skills = list(selected_skills or [])
 
     def _parse_response_json(self, response_text: str) -> dict | None:
         # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
@@ -313,6 +317,7 @@ class FieldDecider:
                 "input_candidates": input_candidates_text,
                 "input_candidates_count": input_candidates_count,
                 "page_text_hit": page_text_hit_text,
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
 
@@ -392,6 +397,7 @@ class FieldDecider:
                 "field_description": field.description,
                 "field_data_type": field.data_type,
                 "field_example": field.example or "",
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
 
@@ -480,6 +486,7 @@ class FieldDecider:
                 "field_name": field.name,
                 "field_description": field.description,
                 "candidates": candidates,
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
 

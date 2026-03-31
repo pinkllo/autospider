@@ -39,6 +39,7 @@ ask_llm_decision_system_prompt: |
   - 不要选择筛选条件、分类标签、按钮等
   - 如果元素文本很短（如"查看"、"详情"等），通常不是标题链接
   - 文本必须准确摘自截图中的目标元素，避免返回模糊描述
+  - 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
 
 
   输出格式：严格 JSON，不要 markdown 代码块（不要包含 protocol 字段）。
@@ -55,6 +56,9 @@ ask_llm_decision_user_message: |
 
   ## 已收集的 URL 示例（避免重复）
   {{collected_urls_str}}
+
+  ## 已选中的站点 skills
+  {{selected_skills_context}}
 
   请观察截图中的页面元素，**只选择列表中的项目标题链接**，不要选择筛选标签或其他按钮。
 
@@ -77,6 +81,7 @@ pagination_llm_system_prompt: |
        1) 文本为"下一页"或"Next"的元素
        2) 带有箭头符号且未禁用的元素
        3) 位于分页区域最右侧的元素
+  4. 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
   
   ## 返回格式（不含 protocol 字段）
   
@@ -87,6 +92,9 @@ pagination_llm_system_prompt: |
 
 pagination_llm_user_message: |
   请仔细观察截图，找到"下一页"分页按钮，并返回其文本（text）。
+
+  ## 已选中的站点 skills
+  {{selected_skills_context}}
   
   注意：
   - 关注页面底部的分页区域
@@ -158,6 +166,7 @@ jump_widget_llm_system_prompt: |
        1) 位于分页区域的元素
        2) 有明确"页码"相关 placeholder 的输入框
        3) 文本为"确定"、"跳转"等的按钮
+  6. 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
 
   ## 返回格式（不含 protocol 字段）
 
@@ -169,6 +178,9 @@ jump_widget_llm_system_prompt: |
 
 jump_widget_llm_user_message: |
   请仔细观察截图，找到页码跳转控件，并返回输入框与按钮的文本（text）。
+
+  ## 已选中的站点 skills
+  {{selected_skills_context}}
 
   需要识别两个元素：
   1. 页码输入框：用于输入要跳转的页码数字

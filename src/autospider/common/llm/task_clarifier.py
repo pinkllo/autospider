@@ -49,25 +49,42 @@ class TaskClarifier:
             extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
-    async def clarify(self, history: list[DialogueMessage]) -> ClarificationResult:
+    async def clarify(
+        self,
+        history: list[DialogueMessage],
+        *,
+        available_skills: list[dict[str, str]] | None = None,
+        selected_skills: list[dict[str, str]] | None = None,
+        selected_skills_context: str | None = None,
+    ) -> ClarificationResult:
         """
         基于当前会话历史返回下一步澄清结果。
         
         Args:
             history: 对话历史列表。
+            available_skills: 当前 URL 可用的 skills metadata，仅用于 trace。
+            selected_skills: 本轮被 selector 选中的 skills metadata，仅用于 trace。
+            selected_skills_context: 选中的 SKILL.md 正文上下文。
             
         Returns:
             ClarificationResult: 澄清结果，指示是继续提问、生成任务还是拒绝。
         """
         # 格式化对话历史供模型参考
         conversation_history = self._format_history(history)
+        selected_context = (
+            str(selected_skills_context or "").strip()
+            or "当前未选择任何站点 skills。"
+        )
         
         # 渲染系统提示词和用户提示词
         system_prompt = render_template(PROMPT_TEMPLATE_PATH, section="system_prompt")
         user_prompt = render_template(
             PROMPT_TEMPLATE_PATH,
             section="user_prompt",
-            variables={"conversation_history": conversation_history},
+            variables={
+                "conversation_history": conversation_history,
+                "selected_skills_context": selected_context,
+            },
         )
 
         # 调用 LLM 获取响应
@@ -88,6 +105,14 @@ class TaskClarifier:
                     "system_prompt": system_prompt,
                     "user_prompt": user_prompt,
                     "conversation_history": conversation_history,
+                    "available_skills": available_skills or [],
+                    "selected_skills": selected_skills or [],
+                    "selected_skill_paths": [
+                        str(item.get("path") or "")
+                        for item in list(selected_skills or [])
+                        if isinstance(item, dict)
+                    ],
+                    "selected_skills_context": selected_context,
                 },
                 "output": {
                     "raw_response": str(response.content),

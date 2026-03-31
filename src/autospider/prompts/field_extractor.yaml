@@ -57,6 +57,7 @@ navigate_to_field_system_prompt: |
   - 如果全量文本未命中字段，优先点击候选元素尝试展开/切换，再考虑滚动
   - 如果不确定字段是否存在，优先选择滚动或点击探索
   - 输出格式：严格 JSON，不要使用 markdown 代码块（不要包含 protocol 字段）
+  - 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
 
 navigate_to_field_user_message: |
   ## 目标字段信息
@@ -94,6 +95,10 @@ navigate_to_field_user_message: |
   - **数量**：{{input_candidates_count}}
   {{input_candidates}}
 
+  ## 已选中的站点 skills
+
+  {{selected_skills_context}}
+
   请观察截图，判断目标字段是否可见，并决定下一步操作。
 
 # ============================================================================
@@ -126,6 +131,7 @@ extract_field_text_system_prompt: |
   - 提取的 **field_value** 必须是截图中的精确文本，不要修改或推断
   - 如果字段值包含特殊字符、空格或换行，也要如实保留
   - confidence 应反映你对提取结果的把握程度
+  - 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
 
 extract_field_text_user_message: |
   ## 目标字段信息
@@ -136,6 +142,10 @@ extract_field_text_user_message: |
   {% if field_example %}
   - **示例值**：{{ field_example }}
   {% endif %}
+
+  ## 已选中的站点 skills
+
+  {{selected_skills_context}}
 
   请在截图中找到该字段，并精确提取其文本值。
 
@@ -173,6 +183,7 @@ select_match_system_prompt: |
   - mark_id 以候选列表中的编号为准
   - 如果多个候选都可能是目标字段，选择最符合字段语义的那个
   - 例如：提取"标题"时，应选择看起来像标题的元素（通常较大、加粗、位于顶部）
+  - 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前 DOM 为准
 
 select_match_user_message: |
   ## 目标字段信息
@@ -187,6 +198,10 @@ select_match_user_message: |
   {% for c in candidates %}
   - **[{{ c.mark_id }}]** {{ c.text }}
   {% endfor %}
+
+  ## 已选中的站点 skills
+
+  {{selected_skills_context}}
 
   请观察截图，选择最可能是目标字段的元素。
 

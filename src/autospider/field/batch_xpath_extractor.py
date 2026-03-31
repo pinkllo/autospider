@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ..common.config import config
+from ..common.experience import SkillRuntime
 from ..common.llm import LLMDecider
 from ..common.protocol import coerce_bool
 from ..common.som import capture_screenshot_with_marks
@@ -50,6 +51,7 @@ class BatchXPathExtractor:
         fields_config: list[dict],
         output_dir: str = "output",
         timeout_ms: int = 5000,
+        skill_runtime: SkillRuntime | None = None,
     ):
         """
         初始化批量提取器
@@ -64,6 +66,9 @@ class BatchXPathExtractor:
         self.fields_config = fields_config
         self.output_dir = Path(output_dir)
         self.timeout_ms = timeout_ms
+        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.selected_skills_context = ""
+        self.selected_skills: list[dict[str, str]] = []
         
         # 批量提取时页面经常异步渲染，增加统一的页面稳定等待
         # 该配置通过 config.url_collector.page_load_delay 获取
@@ -97,6 +102,8 @@ class BatchXPathExtractor:
                 self.salvage_field_decider = FieldDecider(
                     page=self.page,
                     decider=self.salvage_llm_decider,
+                    selected_skills_context=self.selected_skills_context,
+                    selected_skills=self.selected_skills,
                 )
             except Exception as e:
                 # 若模型不可用，自动降级为纯 XPath 模式，避免阻塞批处理
@@ -158,6 +165,7 @@ class BatchXPathExtractor:
     async def _extract_from_url(self, url: str) -> PageExtractionRecord:
         """从单个 URL 提取定义的字段值"""
         record = PageExtractionRecord(url=url)
+        await self._prepare_skill_context(url)
 
         try:
             # 导航至页面
@@ -261,6 +269,31 @@ class BatchXPathExtractor:
         record.success = required_fields_ok
 
         return record
+
+    async def _prepare_skill_context(self, url: str) -> None:
+        """为当前详情页选择并加载 skill 正文。"""
+        llm = self.salvage_llm_decider.llm if self.salvage_llm_decider else None
+        selected = await self.skill_runtime.get_or_select(
+            phase="field_extractor",
+            url=url,
+            task_context={"fields": list(self.fields_config)},
+            llm=llm,
+        )
+        self.selected_skills = [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": skill.path,
+                "domain": skill.domain,
+            }
+            for skill in selected
+        ]
+        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
+            self.skill_runtime.load_selected_bodies(selected)
+        )
+        if self.salvage_field_decider:
+            self.salvage_field_decider.selected_skills = list(self.selected_skills)
+            self.salvage_field_decider.selected_skills_context = self.selected_skills_context
 
     def _required_fields_ok(self, record: PageExtractionRecord) -> bool:
         """判断当前页面是否已满足全部必填字段。"""
@@ -369,6 +402,7 @@ class BatchXPathExtractor:
                     fields=field_defs,
                     output_dir=str(self.output_dir),
                     max_nav_steps=config.field_extractor.max_nav_steps,
+                    skill_runtime=self.skill_runtime,
                 )
             else:
                 self.explore_upgrade_extractor.page = self.page

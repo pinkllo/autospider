@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -114,9 +115,22 @@ class SubTaskWorker:
         """解析子任务的通道模式与 redis key 前缀。"""
         if config.redis.enabled:
             base_prefix = (config.redis.key_prefix or "autospider:urls").strip()
-            redis_key_prefix = f"{base_prefix}:subtask:{self.subtask.id}"
+            run_namespace = self._build_run_namespace()
+            redis_key_prefix = f"{base_prefix}:run:{run_namespace}:subtask:{self.subtask.id}"
             return "redis", redis_key_prefix
         return "memory", None
+
+    def _build_run_namespace(self) -> str:
+        """构建稳定的运行命名空间，避免不同运行间 Redis 队列串台。"""
+        if self.thread_id:
+            return self.thread_id
+        payload = {
+            "list_url": str(self.subtask.list_url or ""),
+            "task_description": str(self.subtask.task_description or ""),
+            "output_dir": str(self.output_dir or ""),
+        }
+        raw = "|".join(f"{key}={value}" for key, value in payload.items())
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
     async def execute(self) -> dict:
         """执行子任务，返回 run_pipeline 的汇总结果。"""

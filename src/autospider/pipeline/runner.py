@@ -15,11 +15,13 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from ..common.browser.intervention import BrowserInterventionRequired
 
 from ..common.browser import BrowserSession
 from ..common.config import config
+from ..common.experience import SkillRuntime
 from ..common.channel.factory import create_url_channel
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..common.channel.base import URLTask, URLChannel
@@ -94,6 +96,60 @@ def _set_state_error(state: dict[str, object], error: str) -> None:
         state["error"] = error
 
 
+def _find_output_draft_skill(list_url: str, output_dir: str) -> tuple[str, Path] | None:
+    """在当前输出目录附近查找 planner 生成的 draft Skill。"""
+    domain = urlparse(str(list_url or "")).netloc.strip().lower()
+    if not domain:
+        return None
+
+    output_path = Path(output_dir)
+    candidates = [
+        output_path / "draft_skills" / domain / "SKILL.md",
+        output_path.parent / "draft_skills" / domain / "SKILL.md",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return domain, candidate
+    return None
+
+
+def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
+    """移除 output 中的 draft Skill，避免最终产物重复保留。"""
+    located = _find_output_draft_skill(list_url, output_dir)
+    if located is None:
+        return
+
+    _, draft_path = located
+    try:
+        draft_path.unlink(missing_ok=True)
+        logger.info("[Pipeline] 已清理输出目录中的 Draft Skill: %s", draft_path)
+    except Exception as exc:
+        logger.debug("[Pipeline] 清理 Draft Skill 失败（不影响主流程）: %s", exc)
+
+
+def _promote_output_draft_skill(list_url: str, output_dir: str) -> Path | None:
+    """将 output 中的 draft Skill 提升到 .agents/skills，作为流程结束后的最终回填。"""
+    located = _find_output_draft_skill(list_url, output_dir)
+    if located is None:
+        return None
+
+    try:
+        from ..common.experience import SkillStore
+
+        domain, draft_path = located
+        content = draft_path.read_text(encoding="utf-8")
+        if not content.strip():
+            return None
+
+        result_path = SkillStore().save(domain, content)
+        draft_path.unlink(missing_ok=True)
+        logger.info("[Pipeline] Draft Skill 已迁移到 skills 目录: %s", result_path)
+        return result_path
+    except Exception as exc:
+        logger.debug("[Pipeline] Draft Skill 迁移失败（不影响主流程）: %s", exc)
+        return None
+
+
 
 async def run_pipeline(
     list_url: str,
@@ -110,6 +166,7 @@ async def run_pipeline(
     redis_key_prefix: str | None = None,
     guard_intervention_mode: str = "blocking",
     guard_thread_id: str = "",
+    selected_skills: list[dict[str, str]] | None = None,
 ) -> dict:
     """并发运行列表采集和详情提取。
 
@@ -170,6 +227,7 @@ async def run_pipeline(
         task_description=task_description,
     )
     staged_records = _load_staged_records(staging_dir)
+    skill_runtime = SkillRuntime()
 
     summary = {
         "run_id": execution_id,
@@ -223,6 +281,8 @@ async def run_pipeline(
                 target_url_count=target_url_count,
                 max_pages=max_pages,
                 persist_progress=False,
+                skill_runtime=skill_runtime,
+                selected_skills=selected_skills,
             )
             result = await collector.run()
             summary["collected_urls"] = len(result.collected_urls)
@@ -278,6 +338,7 @@ async def run_pipeline(
             explore_count=explore_count,
             validate_count=validate_count,
             output_dir=output_dir,
+            skill_runtime=skill_runtime,
         )
 
         result = await extractor.run(urls=urls)
@@ -359,6 +420,7 @@ async def run_pipeline(
                 page=session.page,
                 fields_config=fields_config,
                 output_dir=output_dir,
+                skill_runtime=skill_runtime,
             )
 
             try:
@@ -403,7 +465,7 @@ async def run_pipeline(
         await tracker.mark_done(final_status)
 
         # 经验沉淀：将本次成功的采集经验转化为 Spider Skill
-        _try_sediment_skill(
+        sedimented_skill_path = _try_sediment_skill(
             list_url=list_url,
             task_description=task_description,
             fields=fields,
@@ -411,6 +473,10 @@ async def run_pipeline(
             summary=summary,
             output_dir=output_dir,
         )
+        if sedimented_skill_path:
+            _cleanup_output_draft_skill(list_url=list_url, output_dir=output_dir)
+        else:
+            _promote_output_draft_skill(list_url=list_url, output_dir=output_dir)
 
         await list_session.stop()
         await detail_session.stop()
@@ -735,12 +801,12 @@ def _try_sediment_skill(
     state: dict[str, object],
     summary: dict,
     output_dir: str,
-) -> None:
+) -> Path | None:
     """尝试将本次 Pipeline 执行的经验沉淀为 Spider Skill，不影响主流程。"""
     try:
         # 只在任务有成功记录时沉淀
         if int(summary.get("success_count", 0) or 0) <= 0:
-            return
+            return None
 
         from ..common.experience import SkillSedimenter
 
@@ -800,7 +866,9 @@ def _try_sediment_skill(
 
         if result_path:
             logger.info("[Pipeline] 经验已沉淀为 Skill: %s", result_path)
+        return result_path
 
     except Exception as exc:
         logger.debug("[Pipeline] 经验沉淀失败（不影响主流程）: %s", exc)
+        return None
 

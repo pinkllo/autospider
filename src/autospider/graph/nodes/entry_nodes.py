@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -10,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
 from ...common.config import config
+from ...common.experience import SkillRuntime
 from ...common.llm import TaskClarifier
 from ...common.logger import get_logger
 from ...common.protocol import parse_json_dict_from_llm
@@ -22,6 +24,7 @@ logger = get_logger(__name__)
 
 _DEFAULT_CHAT_FALLBACK = "请按常见默认方案继续，并明确你的默认假设。"
 _MAX_HISTORY_CANDIDATES = 3
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
 
 
 def _ok(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -102,6 +105,51 @@ def _history_from_state(raw_history: Any, initial_request: str) -> list[Dialogue
 
 def _history_to_state(history: list[DialogueMessage]) -> list[dict[str, str]]:
     return [{"role": item.role, "content": item.content} for item in history]
+
+
+def _extract_urls_from_history(history: list[DialogueMessage]) -> list[str]:
+    """从对话历史中提取 URL，保留出现顺序。"""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for item in history:
+        text = str(item.content or "")
+        for raw in _URL_PATTERN.findall(text):
+            candidate = raw.rstrip(").,;!?]}>\"'")
+            try:
+                normalized = validate_url(candidate)
+            except Exception:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            urls.append(normalized)
+    return urls
+
+
+def _serialize_skill_metadata(items: list[Any]) -> list[dict[str, str]]:
+    """将 SkillMetadata 序列化为可入图状态的字典。"""
+    serialized: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for item in items:
+        path = str(getattr(item, "path", "") or "")
+        if not path or path in seen_paths:
+            continue
+        seen_paths.add(path)
+        serialized.append({
+            "name": str(getattr(item, "name", "") or ""),
+            "description": str(getattr(item, "description", "") or ""),
+            "path": path,
+            "domain": str(getattr(item, "domain", "") or ""),
+        })
+    return serialized
+
+
+def _latest_history_url(history: list[DialogueMessage]) -> str:
+    """取历史中最新一个合法 URL。"""
+    urls = _extract_urls_from_history(history)
+    if not urls:
+        return ""
+    return urls[-1]
 
 
 
@@ -254,9 +302,31 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
 
     max_turns = _to_positive_int(state.get("chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
     turn_count = _to_non_negative_int(state.get("chat_turn_count"), 0)
-
     clarifier = TaskClarifier()
-    result = await clarifier.clarify(history)
+    runtime = SkillRuntime()
+    latest_url = _latest_history_url(history)
+    matched_skill_meta = runtime.discover_by_url(latest_url) if latest_url else []
+    matched_skills = _serialize_skill_metadata(matched_skill_meta)
+    selected_skill_meta = await runtime.get_or_select(
+        phase="clarifier",
+        url=latest_url,
+        task_context={
+            "request": initial_request,
+            "history": _history_to_state(history),
+        },
+        llm=clarifier.llm,
+    ) if latest_url else []
+    selected_skills = _serialize_skill_metadata(selected_skill_meta)
+    selected_context = runtime.format_selected_skills_context(
+        runtime.load_selected_bodies(selected_skill_meta)
+    )
+
+    result = await clarifier.clarify(
+        history,
+        available_skills=matched_skills,
+        selected_skills=selected_skills,
+        selected_skills_context=selected_context,
+    )
     if result.status == "reject":
         return _fatal("clarifier_reject", result.reason or "该任务暂不支持自动执行")
 
@@ -269,6 +339,8 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
             "chat_max_turns": max_turns,
             "chat_pending_question": "",
             "chat_flow_state": "ready",
+            "matched_skills": matched_skills,
+            "selected_skills": selected_skills,
         }
 
     if turn_count >= max_turns:
@@ -282,6 +354,8 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
         "chat_max_turns": max_turns,
         "chat_pending_question": question,
         "chat_flow_state": "needs_input",
+        "matched_skills": matched_skills,
+        "selected_skills": selected_skills,
     }
 
 
@@ -406,6 +480,7 @@ def chat_route_execution(state: dict[str, Any]) -> dict[str, Any]:
         "execution_mode_resolved": resolved_mode,
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
+        "selected_skills": list(state.get("selected_skills") or []),
     }
 
     return {

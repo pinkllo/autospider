@@ -35,6 +35,8 @@ class LLMDecisionMaker:
         collected_urls: list[str],
         visited_detail_urls: set[str],
         list_url: str,
+        selected_skills_context: str = "",
+        selected_skills: list[dict] | None = None,
     ):
         self.page = page
         self.decider = decider
@@ -42,6 +44,8 @@ class LLMDecisionMaker:
         self.collected_urls = collected_urls
         self.visited_detail_urls = visited_detail_urls
         self.list_url = list_url
+        self.selected_skills_context = str(selected_skills_context or "")
+        self.selected_skills = list(selected_skills or [])
 
     async def ask_for_decision(
         self,
@@ -86,6 +90,7 @@ class LLMDecisionMaker:
                 "current_url": current_url,
                 "visited_count": len(self.visited_detail_urls),
                 "collected_urls_str": collected_urls_str,
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
 
@@ -170,6 +175,9 @@ class LLMDecisionMaker:
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="jump_widget_llm_user_message",
+            variables={
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+            },
         )
 
         messages = [
@@ -212,6 +220,9 @@ class LLMDecisionMaker:
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="pagination_llm_user_message",
+            variables={
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+            },
         )
 
         messages = [

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
+from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage import RedisQueueManager
@@ -53,6 +54,7 @@ class BatchFieldExtractor:
         explore_count: int = 3,
         validate_count: int = 2,
         output_dir: str = "output",
+        skill_runtime: SkillRuntime | None = None,
     ):
         """
         初始化批量字段提取器
@@ -71,6 +73,7 @@ class BatchFieldExtractor:
         self.explore_count = explore_count
         self.validate_count = validate_count
         self.output_dir = Path(output_dir)
+        self.skill_runtime = skill_runtime or SkillRuntime()
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -80,6 +83,7 @@ class BatchFieldExtractor:
             page=page,
             fields=fields,
             output_dir=output_dir,
+            skill_runtime=self.skill_runtime,
         )
         self.xpath_extractor = FieldXPathExtractor()
         # 语义校验已禁用：此处保持 None，validate_xpath_pattern 不再依赖 LLM。

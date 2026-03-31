@@ -1,5 +1,6 @@
 import asyncio
 
+from autospider.common.experience import SkillMetadata
 from autospider.graph.nodes import entry_nodes
 
 
@@ -11,7 +12,17 @@ class _NeedClarificationResult:
 
 
 class _FakeClarifierNeedQuestion:
-    async def clarify(self, history):
+    def __init__(self):
+        self.llm = object()
+
+    async def clarify(
+        self,
+        history,
+        *,
+        available_skills=None,
+        selected_skills=None,
+        selected_skills_context=None,
+    ):
         assert history[0].content == "帮我抓取公告"
         return _NeedClarificationResult()
 
@@ -26,7 +37,17 @@ class _ReadyResult:
 
 
 class _FakeClarifierReady:
-    async def clarify(self, history):
+    def __init__(self):
+        self.llm = object()
+
+    async def clarify(
+        self,
+        history,
+        *,
+        available_skills=None,
+        selected_skills=None,
+        selected_skills_context=None,
+    ):
         return _ReadyResult(
             entry_nodes.ClarifiedTask(
                 intent="采集公告",
@@ -144,3 +165,98 @@ def test_chat_clarify_ready_from_override(monkeypatch):
     assert result["chat_flow_state"] == "ready"
     assert result["clarified_task"]["list_url"] == "https://example.com/list"
     assert result["clarified_task"]["fields"][0]["name"] == "title"
+
+
+class _FakeClarifierWithSkills:
+    def __init__(self):
+        self.llm = object()
+
+    async def clarify(
+        self,
+        history,
+        *,
+        available_skills=None,
+        selected_skills=None,
+        selected_skills_context=None,
+    ):
+        assert history[0].content == "帮我抓取 https://www.doubao.com/chat/38419498708783618 的内容"
+        assert available_skills == [
+            {
+                "name": "doubao-chat",
+                "description": "抖包聊天页采集技能",
+                "path": "d:/autospider/.agents/skills/www.doubao.com/SKILL.md",
+                "domain": "www.doubao.com",
+            }
+        ]
+        assert selected_skills == available_skills
+        assert "抖包聊天页采集技能" in (selected_skills_context or "")
+        return _NeedClarificationResult()
+
+
+class _FakeSkillRuntime:
+    def discover_by_url(self, url):
+        assert url == "https://www.doubao.com/chat/38419498708783618"
+        return [
+            SkillMetadata(
+                name="doubao-chat",
+                description="抖包聊天页采集技能",
+                path="d:/autospider/.agents/skills/www.doubao.com/SKILL.md",
+                domain="www.doubao.com",
+            )
+        ]
+
+    async def get_or_select(self, **kwargs):
+        return self.discover_by_url(kwargs["url"])
+
+    def load_selected_bodies(self, selected_skills):
+        return [
+            type(
+                "LoadedSkill",
+                (),
+                {
+                    "name": selected_skills[0].name,
+                    "description": selected_skills[0].description,
+                    "path": selected_skills[0].path,
+                    "domain": selected_skills[0].domain,
+                    "content": "# doubao-chat\n正文",
+                },
+            )()
+        ]
+
+    def format_selected_skills_context(self, loaded_skills):
+        skill = loaded_skills[0]
+        return (
+            "以下是已选中的站点 skills。\n"
+            f"- name: {skill.name}\n"
+            f"- description: {skill.description}\n"
+            f"{skill.content}"
+        )
+
+
+def test_chat_clarify_discovers_same_host_skills(monkeypatch):
+    monkeypatch.setattr(entry_nodes, "TaskClarifier", _FakeClarifierWithSkills)
+    monkeypatch.setattr(entry_nodes, "SkillRuntime", _FakeSkillRuntime)
+
+    result = asyncio.run(
+        entry_nodes.chat_clarify(
+            {
+                "cli_args": {
+                    "request": "帮我抓取 https://www.doubao.com/chat/38419498708783618 的内容",
+                    "max_turns": 3,
+                },
+                "chat_history": [],
+                "chat_turn_count": 0,
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert result["matched_skills"] == [
+        {
+            "name": "doubao-chat",
+            "description": "抖包聊天页采集技能",
+            "path": "d:/autospider/.agents/skills/www.doubao.com/SKILL.md",
+            "domain": "www.doubao.com",
+        }
+    ]
+    assert result["selected_skills"] == result["matched_skills"]

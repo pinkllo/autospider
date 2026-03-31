@@ -23,6 +23,7 @@ from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
+from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
 from ..common.protocol import coerce_bool
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
@@ -58,6 +59,7 @@ class FieldExtractor:
         fields: list[FieldDefinition],
         output_dir: str = "output",
         max_nav_steps: int = 10,
+        skill_runtime: SkillRuntime | None = None,
     ):
         """
         初始化字段提取器
@@ -72,6 +74,9 @@ class FieldExtractor:
         self.fields = fields
         self.output_dir = Path(output_dir)
         self.max_nav_steps = max_nav_steps
+        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.selected_skills_context = ""
+        self.selected_skills: list[dict[str, str]] = []
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +99,8 @@ class FieldExtractor:
         self.field_decider = FieldDecider(
             page=self.page,
             decider=self.llm_decider,
+            selected_skills_context=self.selected_skills_context,
+            selected_skills=self.selected_skills,
         )
 
         # 动作执行器
@@ -169,6 +176,7 @@ class FieldExtractor:
         record = PageExtractionRecord(url=url)
 
         try:
+            await self._prepare_skill_context(url)
             # 导航到页面
             await self.page.goto(url, wait_until="domcontentloaded")
             await asyncio.sleep(1.5)  # 等待页面加载
@@ -199,6 +207,31 @@ class FieldExtractor:
             traceback.print_exc()
 
         return record
+
+    async def _prepare_skill_context(self, url: str) -> None:
+        """为当前详情页选择并加载适用的 skill 正文。"""
+        selected = await self.skill_runtime.get_or_select(
+            phase="field_extractor",
+            url=url,
+            task_context={
+                "fields": [field.model_dump(mode="python") for field in self.fields],
+            },
+            llm=self.llm_decider.llm,
+        )
+        self.selected_skills = [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": skill.path,
+                "domain": skill.domain,
+            }
+            for skill in selected
+        ]
+        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
+            self.skill_runtime.load_selected_bodies(selected)
+        )
+        self.field_decider.selected_skills = list(self.selected_skills)
+        self.field_decider.selected_skills_context = self.selected_skills_context
 
     async def _extract_single_field(
         self,

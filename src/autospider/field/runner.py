@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..common.config import config
+from ..common.experience import SkillRuntime
 from ..domain.fields import FieldDefinition
 from .batch_field_extractor import BatchFieldExtractor
 from .batch_xpath_extractor import BatchXPathExtractor
@@ -24,6 +25,7 @@ async def run_field_pipeline(
     explore_count: int | None = None,
     validate_count: int | None = None,
     run_xpath: bool = True,
+    selected_skills: list[dict[str, str]] | None = None,
 ) -> dict:
     """运行字段提取流水线，包含探索规则和（可选的）批量 XPath 提取。
 
@@ -46,6 +48,15 @@ async def run_field_pipeline(
     # 从配置中读取默认值
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
+    skill_runtime = SkillRuntime()
+    if selected_skills and urls:
+        await skill_runtime.get_or_select(
+            phase="field_extractor",
+            url=str(urls[0]),
+            task_context={"fields": [field.model_dump(mode="python") for field in fields]},
+            llm=None,
+            preselected_skills=selected_skills,
+        )
     # 1. 初始化批量字段提取器，用于探索和生成 XPath 规则
     batch_extractor = BatchFieldExtractor(
         page=page,
@@ -53,6 +64,7 @@ async def run_field_pipeline(
         explore_count=explore_count,
         validate_count=validate_count,
         output_dir=output_dir,
+        skill_runtime=skill_runtime,
     )
 
     # 2. 运行探索流程，生成提取配置
@@ -67,6 +79,7 @@ async def run_field_pipeline(
             page=page,
             fields_config=fields_config,
             output_dir=output_dir,
+            skill_runtime=skill_runtime,
         )
         xpath_result = await xpath_extractor.run(urls=urls)
 

@@ -13,6 +13,7 @@ from ...common.browser.intervention import BrowserInterventionRequired
 
 from ...common.browser import BrowserSession, create_browser_session
 from ...common.config import config
+from ...common.experience import SkillRuntime
 from ...common.storage.idempotent_io import write_json_idempotent
 from ...domain.fields import FieldDefinition
 from ...domain.planning import TaskPlan
@@ -194,6 +195,7 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
                 pipeline_mode=params.get("pipeline_mode"),
                 guard_intervention_mode="interrupt",
                 guard_thread_id=str(state.get("thread_id") or ""),
+                selected_skills=list(params.get("selected_skills") or []),
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -242,6 +244,7 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
                     max_pages=params.get("max_pages"),
                     output_dir=str(params.get("output_dir") or "output"),
                     persist_progress=False,
+                    selected_skills=list(params.get("selected_skills") or []),
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -285,6 +288,7 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
                     explore_count=int(params.get("explore_count") or 3),
                     output_dir=str(params.get("output_dir") or "output"),
                     persist_progress=False,
+                    selected_skills=list(params.get("selected_skills") or []),
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -393,6 +397,7 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
                     explore_count=use_explore,
                     validate_count=use_validate,
                     run_xpath=True,
+                    selected_skills=list(params.get("selected_skills") or []),
                 )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -433,11 +438,35 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
         planner_session = BrowserSession(**_browser_session_options(state, params))
         await planner_session.start()
         try:
+            runtime = SkillRuntime()
             planner = TaskPlanner(
                 page=planner_session.page,
                 site_url=str(params.get("site_url") or params.get("list_url") or ""),
                 user_request=str(params.get("request") or params.get("task_description") or ""),
                 output_dir=str(params.get("output_dir") or "output"),
+            )
+            planner_url = str(params.get("site_url") or params.get("list_url") or "")
+            selected_skill_meta = await runtime.get_or_select(
+                phase="planner",
+                url=planner_url,
+                task_context={
+                    "request": str(params.get("request") or params.get("task_description") or ""),
+                    "fields": list(params.get("fields") or []),
+                },
+                llm=planner.llm,
+                preselected_skills=list(params.get("selected_skills") or []),
+            ) if planner_url else []
+            planner.selected_skills = [
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "path": skill.path,
+                    "domain": skill.domain,
+                }
+                for skill in selected_skill_meta
+            ]
+            planner.selected_skills_context = runtime.format_selected_skills_context(
+                runtime.load_selected_bodies(selected_skill_meta)
             )
             plan = await planner.plan()
         except BrowserInterventionRequired as exc:
@@ -458,6 +487,7 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             **_ok({"task_plan": plan}),
             "task_plan": plan,
             "summary": {"total_subtasks": len(plan.subtasks)},
+            "selected_skills": list(planner.selected_skills or []),
         }
 
     node_result = await _run_with_retry(_runner, error_code="plan_failed")

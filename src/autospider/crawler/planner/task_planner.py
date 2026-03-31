@@ -53,6 +53,8 @@ class TaskPlanner:
         user_request: str,
         output_dir: str = "output",
         use_main_model: bool = False,
+        selected_skills_context: str = "",
+        selected_skills: list[dict] | None = None,
     ):
         """初始化任务规划器。
 
@@ -67,6 +69,8 @@ class TaskPlanner:
         self.site_url = site_url
         self.user_request = user_request
         self.output_dir = output_dir
+        self.selected_skills_context = str(selected_skills_context or "")
+        self.selected_skills = list(selected_skills or [])
         self._knowledge_entries: list[dict] = []  # DFS 过程中收集的知识条目
 
         # 获取 LLM 配置：
@@ -357,6 +361,7 @@ class TaskPlanner:
                 "user_request": self.user_request,
                 "current_url": self.page.url,
                 "candidate_elements": self._build_planner_candidates(snapshot),
+                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
 
@@ -832,7 +837,8 @@ class TaskPlanner:
         """DFS 完成后立即生成 draft Skill，不等 Worker 执行。
 
         draft Skill 只包含站点结构和 DFS 观察，没有 XPath 等执行数据。
-        后续 Worker 执行完成后会覆盖更新为 validated Skill。
+        为避免当前运行中的 Skill 发现链路读取到草稿，先写入 output/draft_skills；
+        后续由 Pipeline 收尾阶段再决定是否提升到 .agents/skills。
         """
         if not self._knowledge_entries:
             return
@@ -878,9 +884,9 @@ class TaskPlanner:
                 lines.append("")
 
             content = "\n".join(lines)
-            store = SkillStore()
+            store = SkillStore(skills_dir=Path(self.output_dir) / "draft_skills")
             skill_path = store.save(domain, content)
-            logger.info("[Planner] Draft Skill 已生成: %s", skill_path)
+            logger.info("[Planner] Draft Skill 已写入输出目录: %s", skill_path)
 
         except Exception as exc:
             logger.debug("[Planner] Draft Skill 生成失败（不影响主流程）: %s", exc)

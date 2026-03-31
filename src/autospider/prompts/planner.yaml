@@ -51,6 +51,7 @@ analyze_site_system_prompt: |
   - subtasks 中的每个 name 要有明确的中文语义
   - task_description 要能直接指导爬虫采集
   - observations 自由发挥，记录你观察到的任何有价值的信息（布局、翻页、反爬、数据量等）
+  - 如果用户消息里提供了已选中的站点 skills，它们只提供先验线索；一切以当前截图和当前页面为准
 
 analyze_site_user_message: |
   ## 用户需求
@@ -65,6 +66,9 @@ analyze_site_user_message: |
 
   ## 候选分类元素（供你参考）
   {{candidate_elements}}
+
+  ## 已选中的站点 skills
+  {{selected_skills_context}}
 
   请结合截图与候选列表进行分析。
 

@@ -13,6 +13,14 @@ def test_chat_route_execution_only_forwards_runtime_subtask_params_that_are_cons
                 "runtime_subtask_max_children": 6,
                 "runtime_subtasks_use_main_model": False,
             },
+            "selected_skills": [
+                {
+                    "name": "notice-skill",
+                    "description": "公告采集技能",
+                    "path": "d:/autospider/.agents/skills/example.com/SKILL.md",
+                    "domain": "example.com",
+                }
+            ],
             "clarified_task": {
                 "list_url": "https://example.com/list",
                 "task_description": "抓取公告详情",
@@ -27,3 +35,4 @@ def test_chat_route_execution_only_forwards_runtime_subtask_params_that_are_cons
     assert "runtime_subtask_max_depth" not in normalized
     assert normalized["runtime_subtask_max_children"] == 6
     assert normalized["runtime_subtasks_use_main_model"] is False
+    assert normalized["selected_skills"][0]["name"] == "notice-skill"
