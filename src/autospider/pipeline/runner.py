@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+import yaml
+
 from ..common.browser.intervention import BrowserInterventionRequired
 
 from ..common.browser import BrowserSession
@@ -127,6 +129,41 @@ def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
         logger.debug("[Pipeline] 清理 Draft Skill 失败（不影响主流程）: %s", exc)
 
 
+def _strip_draft_markers_from_skill_content(content: str) -> str:
+    """将提升到 .agents/skills 的 draft Skill 正文去除草稿标记。"""
+    text = str(content or "")
+    if not text.strip():
+        return text
+
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            try:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+            except Exception:
+                frontmatter = None
+            if isinstance(frontmatter, dict):
+                description = str(frontmatter.get("description") or "").strip()
+                if description:
+                    frontmatter["description"] = description.replace("（草稿）", "").replace("草稿", "").strip()
+                rendered = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()
+                text = f"---\n{rendered}\n---{parts[2]}"
+
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line
+        if line.startswith("# ") and "（草稿）" in line:
+            line = line.replace("（草稿）", "")
+        if line.startswith("- **状态**:") and ("draft" in line.lower() or "草稿" in line):
+            continue
+        lines.append(line)
+
+    cleaned = "\n".join(lines).strip()
+    if cleaned:
+        cleaned += "\n"
+    return cleaned
+
+
 def _promote_output_draft_skill(list_url: str, output_dir: str) -> Path | None:
     """将 output 中的 draft Skill 提升到 .agents/skills，作为流程结束后的最终回填。"""
     located = _find_output_draft_skill(list_url, output_dir)
@@ -141,7 +178,8 @@ def _promote_output_draft_skill(list_url: str, output_dir: str) -> Path | None:
         if not content.strip():
             return None
 
-        result_path = SkillStore().save(domain, content)
+        cleaned_content = _strip_draft_markers_from_skill_content(content)
+        result_path = SkillStore().save(domain, cleaned_content)
         draft_path.unlink(missing_ok=True)
         logger.info("[Pipeline] Draft Skill 已迁移到 skills 目录: %s", result_path)
         return result_path

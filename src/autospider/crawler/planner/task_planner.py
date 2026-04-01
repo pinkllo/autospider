@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
+import yaml
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -850,10 +851,18 @@ class TaskPlanner:
             subtask_names = [s.name for s in plan.subtasks]
 
             # 渲染标准 SKILL.md 内容
+            frontmatter = yaml.safe_dump(
+                {
+                    "name": f"{domain} 站点采集",
+                    "description": f"{domain} 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。",
+                },
+                allow_unicode=True,
+                sort_keys=False,
+            ).strip()
+
             lines: list[str] = []
             lines.append("---")
-            lines.append(f"name: {domain} 站点采集")
-            lines.append(f"description: {domain} 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。")
+            lines.extend(frontmatter.splitlines())
             lines.append("---")
             lines.append("")
             lines.append(f"# {domain} 采集指南（草稿）")

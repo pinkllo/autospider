@@ -87,20 +87,15 @@ def _parse_frontmatter(content: str) -> dict[str, str]:
     }
 
 
-def _is_draft_skill(content: str, frontmatter: dict[str, str] | None = None) -> bool:
-    """判断 Skill 是否为草稿状态，草稿不应暴露给 LLM。"""
-    text = str(content or "")
-    meta = frontmatter or _parse_frontmatter(text)
-    description = str(meta.get("description") or "").strip()
-    lowered = text.lower()
-    return (
-        "草稿" in description
-        or "status: 草稿" in description.lower()
-        or "状态: 草稿" in text
-        or "（草稿）" in text
-        or "📝 draft" in lowered
-        or "status: draft" in lowered
-    )
+def _is_draft_skill_path(path: str | Path) -> bool:
+    """仅按路径判断 Skill 是否为 output/draft_skills 下的草稿。"""
+    parts = [part.lower() for part in Path(path).parts]
+    for index, part in enumerate(parts):
+        if part != "output":
+            continue
+        if index + 1 < len(parts) and parts[index + 1] == "draft_skills":
+            return True
+    return False
 
 
 class SkillStore:
@@ -169,10 +164,10 @@ class SkillStore:
 
     def is_llm_eligible_path(self, path: str | Path) -> bool:
         """判断指定 Skill 文件是否可以暴露给 LLM。"""
-        content = self.load_by_path(path)
-        if not content:
+        filepath = Path(path)
+        if not filepath.exists():
             return False
-        return not _is_draft_skill(content)
+        return not _is_draft_skill_path(filepath)
 
     def find_by_url(self, url: str) -> str | None:
         """按 URL 查找精确 host 匹配的 Skill。
@@ -248,6 +243,10 @@ class SkillStore:
 
     def _load_metadata(self, *, skill_file: Path, domain: str) -> SkillMetadata | None:
         """从 skill 文件加载元信息。"""
+        if not self.is_llm_eligible_path(skill_file):
+            logger.debug("[SkillStore] 跳过 draft skill 路径（不暴露给 LLM）: %s", skill_file)
+            return None
+
         content = self.load_by_path(skill_file)
         if not content:
             return None
@@ -257,9 +256,6 @@ class SkillStore:
         description = frontmatter.get("description", "")
         if not name or not description:
             logger.debug("[SkillStore] Skill frontmatter 不完整: %s", skill_file)
-            return None
-        if _is_draft_skill(content, frontmatter):
-            logger.debug("[SkillStore] 跳过 draft skill（不暴露给 LLM）: %s", skill_file)
             return None
 
         return SkillMetadata(

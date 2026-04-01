@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+import yaml
 
 from ..config import config
 from ..logger import get_logger
@@ -283,10 +284,15 @@ class SkillSedimenter:
             f"状态: {status_label}。"
         )
 
+        frontmatter = yaml.safe_dump(
+            {"name": fm_name, "description": fm_desc},
+            allow_unicode=True,
+            sort_keys=False,
+        ).strip()
+
         lines: list[str] = []
         lines.append("---")
-        lines.append(f"name: {fm_name}")
-        lines.append(f"description: {fm_desc}")
+        lines.extend(frontmatter.splitlines())
         lines.append("---")
         lines.append("")
 

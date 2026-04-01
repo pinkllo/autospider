@@ -12,6 +12,7 @@ from autospider.pipeline.runner import (
     _load_staged_records,
     _prepare_pipeline_workspace,
     _process_task,
+    _strip_draft_markers_from_skill_content,
     _write_staged_record,
 )
 
@@ -60,6 +61,25 @@ class _ExplodingChannel:
 
     async def get_task(self):
         raise RuntimeError("stop consumer")
+
+
+def test_strip_draft_markers_from_skill_content_for_promoted_skills():
+    content = (
+        "---\n"
+        "name: ygp.gdzwfw.gov.cn 站点采集\n"
+        "description: ygp.gdzwfw.gov.cn 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。\n"
+        "---\n\n"
+        "# ygp.gdzwfw.gov.cn 采集指南（草稿）\n\n"
+        "## 基本信息\n\n"
+        "- **状态**: 📝 draft\n"
+    )
+
+    cleaned = _strip_draft_markers_from_skill_content(content)
+
+    assert "（草稿）" not in cleaned
+    assert "📝 draft" not in cleaned
+    assert "# ygp.gdzwfw.gov.cn 采集指南" in cleaned
+    assert "description: ygp.gdzwfw.gov.cn 数据采集技能。" in cleaned
 
 
 def test_prepare_pipeline_workspace_resets_stale_attempt_outputs(tmp_path):
