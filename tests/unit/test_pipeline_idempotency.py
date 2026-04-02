@@ -5,6 +5,7 @@ import json
 import pytest
 
 from autospider.common.config import config
+from autospider.domain.fields import FieldDefinition
 from autospider.pipeline import runner as pipeline_runner
 from autospider.pipeline.runner import (
     _build_staged_record,
@@ -12,7 +13,9 @@ from autospider.pipeline.runner import (
     _load_staged_records,
     _prepare_pipeline_workspace,
     _process_task,
+    _should_promote_skill,
     _strip_draft_markers_from_skill_content,
+    _try_sediment_skill,
     _write_staged_record,
 )
 
@@ -80,6 +83,29 @@ def test_strip_draft_markers_from_skill_content_for_promoted_skills():
     assert "📝 draft" not in cleaned
     assert "# ygp.gdzwfw.gov.cn 采集指南" in cleaned
     assert "description: ygp.gdzwfw.gov.cn 数据采集技能。" in cleaned
+
+
+def test_should_promote_skill_requires_clean_success():
+    assert _should_promote_skill(
+        state={},
+        summary={"success_count": 3, "total_urls": 3},
+        validation_failures=[],
+    )
+    assert not _should_promote_skill(
+        state={"error": "boom"},
+        summary={"success_count": 3, "total_urls": 3},
+        validation_failures=[],
+    )
+    assert not _should_promote_skill(
+        state={},
+        summary={"success_count": 2, "total_urls": 3},
+        validation_failures=[],
+    )
+    assert not _should_promote_skill(
+        state={},
+        summary={"success_count": 3, "total_urls": 3},
+        validation_failures=[{"url": "https://example.com/1"}],
+    )
 
 
 def test_prepare_pipeline_workspace_resets_stale_attempt_outputs(tmp_path):
@@ -234,3 +260,24 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     assert result["success_count"] == 0
     assert "started_at" not in result
     assert "finished_at" not in result
+
+
+def test_try_sediment_skill_skips_low_quality_run(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "extraction_result.json").write_text(
+        json.dumps({"validation_failures": [{"url": "https://example.com/detail/1"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = _try_sediment_skill(
+        list_url="https://example.com/list",
+        task_description="采集公告",
+        fields=[FieldDefinition(name="title", description="标题")],
+        state={},
+        summary={"success_count": 2, "total_urls": 2},
+        output_dir=str(output_dir),
+    )
+
+    assert result is None
+

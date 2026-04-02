@@ -46,6 +46,11 @@ logs/
 screenshots/
 scripts/
 
+.pytest_tmp*/
+.tmp_pytest*/
+.pytest_tmp_run*/
+CLAUDE.md
+
 # Playwright
 playwright-report/
 test-results/
