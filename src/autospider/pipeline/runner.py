@@ -129,6 +129,24 @@ def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
         logger.debug("[Pipeline] 清理 Draft Skill 失败（不影响主流程）: %s", exc)
 
 
+def _should_promote_skill(
+    *,
+    state: dict[str, object],
+    summary: dict,
+    validation_failures: list[dict],
+) -> bool:
+    """判断本次运行是否满足正式 skill 的提升条件。"""
+    success_count = int(summary.get("success_count", 0) or 0)
+    total_urls = int(summary.get("total_urls", 0) or 0)
+    if success_count <= 0 or total_urls <= 0:
+        return False
+    if state.get("error"):
+        return False
+    if validation_failures:
+        return False
+    return success_count == total_urls
+
+
 def _strip_draft_markers_from_skill_content(content: str) -> str:
     """将提升到 .agents/skills 的 draft Skill 正文去除草稿标记。"""
     text = str(content or "")
@@ -502,7 +520,7 @@ async def run_pipeline(
         final_status = "failed" if state.get("error") else "completed"
         await tracker.mark_done(final_status)
 
-        # 经验沉淀：将本次成功的采集经验转化为 Spider Skill
+        # 经验沉淀：仅高质量成功运行会写入正式 Skill
         sedimented_skill_path = _try_sediment_skill(
             list_url=list_url,
             task_description=task_description,
@@ -513,8 +531,6 @@ async def run_pipeline(
         )
         if sedimented_skill_path:
             _cleanup_output_draft_skill(list_url=list_url, output_dir=output_dir)
-        else:
-            _promote_output_draft_skill(list_url=list_url, output_dir=output_dir)
 
         await list_session.stop()
         await detail_session.stop()
@@ -842,10 +858,6 @@ def _try_sediment_skill(
 ) -> Path | None:
     """尝试将本次 Pipeline 执行的经验沉淀为 Spider Skill，不影响主流程。"""
     try:
-        # 只在任务有成功记录时沉淀
-        if int(summary.get("success_count", 0) or 0) <= 0:
-            return None
-
         from ..common.experience import SkillSedimenter
 
         # 从 output_dir 中读取已保存的配置文件
@@ -877,6 +889,14 @@ def _try_sediment_skill(
             except Exception:
                 pass
 
+        if not _should_promote_skill(
+            state=state,
+            summary=summary,
+            validation_failures=validation_failures,
+        ):
+            logger.info("[Pipeline] 本次运行未达到 Skill 提升条件，保留 draft skill")
+            return None
+
         # 字段定义转为 dict 列表
         fields_dicts = [f.model_dump() for f in fields]
 
@@ -900,6 +920,7 @@ def _try_sediment_skill(
             summary=summary,
             validation_failures=validation_failures,
             plan_knowledge=plan_knowledge,
+            status="validated",
         )
 
         if result_path:

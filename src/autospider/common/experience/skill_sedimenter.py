@@ -4,22 +4,25 @@
 1. 从任务结果中提取结构化硬数据（XPath、导航步骤等）—— 零成本，纯代码
 2. 汇总多子任务的错误轨迹和提取结果 —— Map-Reduce 合并
 3. 调取一次 LLM 生成软经验总结 —— 仅一次调用
-4. 渲染为标准 SKILL.md（name + description frontmatter + 操作指南正文）
+4. 产出结构化 SkillDocument 并统一交给 SkillStore 渲染/合并/保存
 """
 
 from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-import yaml
 
 from ..config import config
 from ..logger import get_logger
-from .skill_store import SkillStore
+from .skill_store import (
+    SkillDocument,
+    SkillFieldRule,
+    SkillRuleData,
+    SkillStore,
+)
 
 logger = get_logger(__name__)
 
@@ -33,22 +36,10 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-def _extract_url_pattern(url: str) -> str:
-    """从 URL 提取路径模式（将具体 ID 替换为通配符）。"""
-    try:
-        parsed = urlparse(url)
-        path = parsed.path.rstrip("/")
-        import re
-        pattern = re.sub(r"/\d+", "/*", path)
-        return pattern or "/"
-    except Exception:
-        return "/"
-
-
 class SkillSedimenter:
     """经验沉淀器。
 
-    将 Pipeline 执行产物转化为标准 Agent Skills 格式的 SKILL.md 文件。
+    将 Pipeline 执行产物转化为结构化 SkillDocument，并交给 SkillStore 保存。
     """
 
     def __init__(self, skills_dir: str | Path | None = None):
@@ -66,6 +57,7 @@ class SkillSedimenter:
         validation_failures: list[dict[str, Any]] | None = None,
         subtask_names: list[str] | None = None,
         plan_knowledge: str = "",
+        status: str = "validated",
     ) -> Path | None:
         """从单个 Pipeline 运行结果沉淀 Skill。
 
@@ -88,8 +80,8 @@ class SkillSedimenter:
                 logger.debug("[SkillSedimenter] 无法从 URL 提取域名，跳过沉淀")
                 return None
 
-            # 第一步：提取结构化硬数据
-            skill_data = self._extract_structured_data(
+            # 第一步：提取结构化规则层
+            rules = self._build_rule_data(
                 domain=domain,
                 list_url=list_url,
                 task_description=task_description,
@@ -98,6 +90,7 @@ class SkillSedimenter:
                 extraction_config=extraction_config,
                 summary=summary,
                 subtask_names=subtask_names,
+                status=status,
             )
 
             # 第二步：生成软经验总结
@@ -110,9 +103,9 @@ class SkillSedimenter:
                 plan_knowledge=plan_knowledge,
             )
 
-            # 第三步：渲染为标准 SKILL.md 并保存
-            content = self._render_skill_md(skill_data, insights)
-            return self.store.save(domain, content)
+            # 第三步：产出结构化文档并统一保存
+            document = self._build_skill_document(rules=rules, insights=insights)
+            return self.store.save_document(domain, document)
 
         except Exception as exc:
             logger.debug("[SkillSedimenter] 沉淀失败（不影响主流程）: %s", exc)
@@ -170,7 +163,7 @@ class SkillSedimenter:
 
     # ===== 内部方法 =====
 
-    def _extract_structured_data(
+    def _build_rule_data(
         self,
         *,
         domain: str,
@@ -181,15 +174,16 @@ class SkillSedimenter:
         extraction_config: dict[str, Any],
         summary: dict[str, Any],
         subtask_names: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """提取结构化硬数据（纯代码逻辑，不用 LLM）。"""
+        status: str = "validated",
+    ) -> SkillRuleData:
+        """提取结构化规则层（纯代码逻辑，不用 LLM）。"""
         field_desc_map = {
             str(f.get("name", "")): str(f.get("description", ""))
             for f in fields
             if isinstance(f, dict) and f.get("name")
         }
 
-        fields_experience = []
+        field_rules: dict[str, SkillFieldRule] = {}
         extraction_fields = extraction_config.get("fields", [])
         for ef in extraction_fields:
             if not isinstance(ef, dict):
@@ -198,237 +192,85 @@ class SkillSedimenter:
             if not name:
                 continue
 
-            fields_experience.append({
-                "field_name": name,
-                "original_description": field_desc_map.get(name, ""),
-                "primary_xpath": ef.get("xpath"),
-                "fallback_xpaths": ef.get("xpath_fallbacks", []),
-                "confidence": 0.9 if ef.get("xpath_validated") else 0.6,
-                "validated": bool(ef.get("xpath_validated")),
-                "data_type": ef.get("data_type", "text"),
-                "extraction_source": ef.get("extraction_source"),
-                "fixed_value": ef.get("fixed_value"),
-            })
+            validated = bool(ef.get("xpath_validated"))
+            field_rules[name] = SkillFieldRule(
+                name=name,
+                description=field_desc_map.get(name, ""),
+                primary_xpath=str(ef.get("xpath") or "").strip(),
+                fallback_xpaths=[
+                    str(xpath).strip()
+                    for xpath in ef.get("xpath_fallbacks", [])
+                    if str(xpath).strip()
+                ],
+                confidence=0.9 if validated else 0.6,
+                validated=validated,
+                data_type=str(ef.get("data_type") or "text"),
+                extraction_source=str(ef.get("extraction_source") or ""),
+                fixed_value=str(ef.get("fixed_value") or ""),
+            )
 
-        nav_steps = []
+        nav_steps: list[dict[str, str]] = []
         for step in collection_config.get("nav_steps", []):
             if not isinstance(step, dict):
                 continue
             nav_steps.append({
                 "action": str(step.get("action", "")),
-                "xpath": step.get("xpath") or step.get("target_xpath"),
-                "value": step.get("value"),
+                "xpath": str(step.get("xpath") or step.get("target_xpath") or ""),
+                "value": str(step.get("value") or ""),
                 "description": str(step.get("description", "")),
             })
 
         success_count = int(summary.get("success_count", 0) or 0)
         total_urls = int(summary.get("total_urls", 0) or 0)
+        success_rate = round(success_count / max(total_urls, 1), 2)
+        success_rate_text = ""
+        if total_urls > 0:
+            success_rate_text = f"{success_rate * 100:.0f}% ({success_count}/{total_urls})"
 
-        data: dict[str, Any] = {
-            "domain": domain,
-            "list_url": list_url,
-            "url_pattern": _extract_url_pattern(list_url),
-            "task_description": task_description,
-            "status": "validated",
-            "confidence": round(success_count / max(total_urls, 1), 2),
-            "total_executions": 1,
-            "total_urls_processed": total_urls,
-            "success_rate": round(success_count / max(total_urls, 1), 2),
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-        }
+        jump_widget = collection_config.get("jump_widget_xpath")
+        jump_input_selector = ""
+        jump_button_selector = ""
+        if isinstance(jump_widget, dict):
+            jump_input_selector = str(jump_widget.get("input") or "")
+            jump_button_selector = str(jump_widget.get("button") or "")
 
-        if nav_steps:
-            data["nav_steps"] = nav_steps
-        if collection_config.get("common_detail_xpath"):
-            data["detail_link_xpath"] = collection_config["common_detail_xpath"]
-        if collection_config.get("pagination_xpath"):
-            data["pagination_xpath"] = collection_config["pagination_xpath"]
-        if collection_config.get("jump_widget_xpath"):
-            data["jump_widget_xpath"] = collection_config["jump_widget_xpath"]
-
-        if fields_experience:
-            data["fields_experience"] = fields_experience
-
-        if subtask_names:
-            data["subtask_count"] = len(subtask_names)
-            data["subtask_names"] = subtask_names
-
-        return data
-
-    def _render_skill_md(
-        self,
-        skill_data: dict[str, Any],
-        insights: str,
-    ) -> str:
-        """将结构化数据和软经验渲染为标准 SKILL.md 内容。
-
-        输出格式遵循 Agent Skills 标准：
-        - YAML frontmatter: name + description
-        - Markdown 正文: 结构化的站点采集操作指南
-        """
-        domain = skill_data["domain"]
-        list_url = skill_data.get("list_url", "")
-        task_description = skill_data.get("task_description", "")
-        status = skill_data.get("status", "unknown")
-        success_rate = skill_data.get("success_rate", 0)
-        total_urls = skill_data.get("total_urls_processed", 0)
-        success_count = round(total_urls * success_rate) if total_urls else 0
-
-        # --- Frontmatter ---
-        status_label = "已验证" if status == "validated" else "草稿"
-        fm_name = f"{domain} 站点采集"
-        fm_desc = (
-            f"{domain} 数据采集技能。"
-            f"包含列表页导航、分页处理和字段提取的操作指南。"
-            f"状态: {status_label}。"
+        return SkillRuleData(
+            domain=domain,
+            name=f"{domain} 站点采集",
+            description=(
+                f"{domain} 数据采集技能。"
+                f"包含列表页导航、分页处理和字段提取的操作指南。"
+                f"状态: {'已验证' if status == 'validated' else '草稿'}。"
+            ),
+            list_url=list_url,
+            task_description=task_description,
+            status=str(status or "draft"),
+            success_rate=success_rate,
+            success_rate_text=success_rate_text,
+            detail_xpath=str(collection_config.get("common_detail_xpath") or ""),
+            pagination_xpath=str(collection_config.get("pagination_xpath") or ""),
+            jump_input_selector=jump_input_selector,
+            jump_button_selector=jump_button_selector,
+            nav_steps=nav_steps,
+            subtask_names=subtask_names or [],
+            fields=field_rules,
         )
 
-        frontmatter = yaml.safe_dump(
-            {"name": fm_name, "description": fm_desc},
-            allow_unicode=True,
-            sort_keys=False,
-        ).strip()
-
-        lines: list[str] = []
-        lines.append("---")
-        lines.extend(frontmatter.splitlines())
-        lines.append("---")
-        lines.append("")
-
-        # --- 标题 ---
-        lines.append(f"# {domain} 采集指南")
-        lines.append("")
-
-        # --- 基本信息 ---
-        lines.append("## 基本信息")
-        lines.append("")
-        lines.append(f"- **列表页 URL**: `{list_url}`")
-        lines.append(f"- **任务描述**: {task_description}")
-        status_icon = "✅" if status == "validated" else "📝"
-        lines.append(f"- **状态**: {status_icon} {status}")
-        if total_urls > 0:
-            lines.append(
-                f"- **成功率**: {success_rate * 100:.0f}% ({success_count}/{total_urls})"
-            )
-        lines.append("")
-
-        # --- 列表页导航 ---
-        detail_xpath = skill_data.get("detail_link_xpath")
-        pagination_xpath = skill_data.get("pagination_xpath")
-        jump_widget = skill_data.get("jump_widget_xpath")
-        nav_steps = skill_data.get("nav_steps", [])
-
-        has_nav = detail_xpath or pagination_xpath or jump_widget or nav_steps
-        if has_nav:
-            lines.append("## 列表页导航")
-            lines.append("")
-
-            if detail_xpath:
-                lines.append("### 详情链接定位")
-                lines.append("")
-                lines.append("使用以下 XPath 从列表页中定位每个详情条目的入口：")
-                lines.append("")
-                lines.append("```xpath")
-                lines.append(detail_xpath)
-                lines.append("```")
-                lines.append("")
-
-            if isinstance(jump_widget, dict) and jump_widget:
-                lines.append("### 分页处理（跳转式）")
-                lines.append("")
-                lines.append("本站使用跳转式分页控件，操作步骤：")
-                lines.append("")
-                if jump_widget.get("input"):
-                    lines.append(
-                        f"1. 在页码输入框中输入目标页码，选择器: `{jump_widget['input']}`"
-                    )
-                if jump_widget.get("button"):
-                    lines.append(
-                        f"2. 点击跳转按钮，选择器: `{jump_widget['button']}`"
-                    )
-                lines.append("")
-            elif pagination_xpath:
-                lines.append("### 分页处理")
-                lines.append("")
-                lines.append(f"分页控件 XPath: `{pagination_xpath}`")
-                lines.append("")
-
-            if nav_steps:
-                lines.append("### 导航步骤")
-                lines.append("")
-                for i, step in enumerate(nav_steps, 1):
-                    action = step.get("action", "")
-                    xpath = step.get("xpath", "")
-                    value = step.get("value", "")
-                    desc = step.get("description", "")
-                    step_line = f"{i}. **{action}**"
-                    if desc:
-                        step_line += f" — {desc}"
-                    lines.append(step_line)
-                    if xpath:
-                        lines.append(f"   - XPath: `{xpath}`")
-                    if value:
-                        lines.append(f"   - 值: `{value}`")
-                lines.append("")
-
-        # --- 字段提取规则 ---
-        fields_exp = skill_data.get("fields_experience", [])
-        if fields_exp:
-            lines.append("## 字段提取规则")
-            lines.append("")
-
-            for fe in fields_exp:
-                name = fe.get("field_name", "")
-                desc = fe.get("original_description", "")
-                data_type = fe.get("data_type", "text")
-                primary_xpath = fe.get("primary_xpath", "")
-                fallbacks = fe.get("fallback_xpaths", [])
-                validated = fe.get("validated", False)
-                confidence = fe.get("confidence", 0)
-                extraction_source = fe.get("extraction_source")
-                fixed_value = fe.get("fixed_value")
-
-                heading = f"### {name}"
-                if desc:
-                    heading += f"（{desc}）"
-                lines.append(heading)
-                lines.append("")
-                lines.append(f"- **数据类型**: {data_type}")
-
-                if extraction_source in ("constant", "subtask_context"):
-                    lines.append(f"- **提取方式**: {extraction_source}")
-                    if fixed_value:
-                        lines.append(f"- **固定值**: `{fixed_value}`")
-                elif primary_xpath:
-                    lines.append(f"- **主 XPath**: `{primary_xpath}`")
-                    for fb in fallbacks:
-                        lines.append(f"- **备选 XPath**: `{fb}`")
-
-                status_mark = "✓ 已验证" if validated else "⚠ 未验证"
-                lines.append(f"- **验证状态**: {status_mark}")
-                lines.append(f"- **置信度**: {confidence}")
-                lines.append("")
-
-        # --- 子任务 ---
-        subtask_names = skill_data.get("subtask_names", [])
-        if subtask_names:
-            lines.append("## 子任务")
-            lines.append("")
-            lines.append(f"本站共 {len(subtask_names)} 个子任务分类：")
-            lines.append("")
-            for sn in subtask_names:
-                lines.append(f"- {sn}")
-            lines.append("")
-
-        # --- 站点经验 ---
-        if insights:
-            lines.append("## 站点特征与经验")
-            lines.append("")
-            lines.append(insights.strip())
-            lines.append("")
-
-        return "\n".join(lines)
+    def _build_skill_document(
+        self,
+        *,
+        rules: SkillRuleData,
+        insights: str,
+    ) -> SkillDocument:
+        return SkillDocument(
+            frontmatter={
+                "name": rules.name,
+                "description": rules.description,
+            },
+            title=f"# {rules.domain} 采集指南",
+            rules=rules,
+            insights_markdown=insights.strip(),
+        )
 
     def _generate_insights(
         self,

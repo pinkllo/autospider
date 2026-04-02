@@ -124,6 +124,7 @@ class SkillRuntime:
         selected_indexes: list[int] = []
         raw_response = ""
         reasoning = ""
+        payload: dict[str, Any] = {}
         try:
             response = await llm.ainvoke(
                 [
@@ -133,8 +134,12 @@ class SkillRuntime:
             )
             raw_response = str(getattr(response, "content", "") or "")
             payload = parse_json_dict_from_llm(raw_response) or {}
-            selected_indexes = self._parse_selected_indexes(payload.get("selected_indexes"))
             reasoning = str(payload.get("reasoning") or "").strip()
+            selected_indexes = self._parse_selected_indexes(
+                payload.get("selected_indexes"),
+                available_count=len(skills),
+                reasoning=reasoning,
+            )
         except Exception as exc:
             logger.debug("[SkillRuntime] skill selection failed for %s: %s", phase, exc)
 
@@ -159,6 +164,7 @@ class SkillRuntime:
                 },
                 "output": {
                     "raw_response": raw_response,
+                    "parsed_payload": payload,
                     "selected_indexes": selected_indexes,
                     "selected_skills": [_skill_to_dict(skill) for skill in selected],
                     "selected_skill_paths": [skill.path for skill in selected],
@@ -247,24 +253,41 @@ class SkillRuntime:
     def _format_available_skills(self, items: list[SkillMetadata]) -> str:
         if not items:
             return "无"
-        lines = []
-        for index, item in enumerate(items, start=1):
-            lines.append(
-                f"{index}. name={item.name}; description={item.description}; domain={item.domain}"
-            )
-        return "\n".join(lines)
+        payload = [
+            {
+                "index": index,
+                "name": item.name,
+                "description": item.description,
+                "domain": item.domain,
+            }
+            for index, item in enumerate(items, start=1)
+        ]
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    def _parse_selected_indexes(self, value: Any) -> list[int]:
+    def _parse_selected_indexes(
+        self,
+        value: Any,
+        *,
+        available_count: int,
+        reasoning: str = "",
+    ) -> list[int]:
         if not isinstance(value, list):
             return []
         result: list[int] = []
         seen: set[int] = set()
+        normalized_reasoning = reasoning.lower()
         for item in value:
             try:
                 index = int(item)
             except (TypeError, ValueError):
                 continue
-            if index <= 0 or index in seen:
+            if index == 0 and available_count > 0:
+                logger.warning(
+                    "[SkillRuntime] skill selector returned 0-based index 0; auto-correcting to 1. reasoning=%s",
+                    reasoning,
+                )
+                index = 1
+            if index <= 0 or index > available_count or index in seen:
                 continue
             seen.add(index)
             result.append(index)

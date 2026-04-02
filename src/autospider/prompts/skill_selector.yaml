@@ -7,6 +7,8 @@ select_skill_system_prompt: |
   - 如果都不明显相关，返回空数组。
   - 最多选择 {{max_selected_skills}} 个，默认应只返回 0 或 1 个索引。
   - 不允许打分，不允许输出候选外的索引。
+  - 候选 skill 的 index 从 1 开始，严禁返回 0。
+  - 只能返回输入中显式提供的 index 值。
 
   严格输出 JSON，不要 markdown，不要多余文本：
   {
@@ -24,7 +26,7 @@ select_skill_user_prompt: |
   ## 当前任务上下文
   {{task_context_json}}
 
-  ## 可用 skills metadata
+  ## 可用 skills metadata（JSON 数组，index 从 1 开始）
   {{available_skills}}
 
-  请只返回最相关的 0 或 1 个 skill 索引。
+  请只返回最相关的 0 或 1 个 skill 索引；如果选择第一个 skill，必须返回 {"selected_indexes": [1]}，不能返回 0。
