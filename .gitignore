@@ -59,4 +59,11 @@ test-results/
 .trae/
 .github/
 .codex/
+.claude/
+.agents/
 test_tab_click.py
+
+# AI editing folders
+manual_*/
+tmp_*/
+agent-*/
