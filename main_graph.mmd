@@ -31,14 +31,16 @@ graph TD
   %% ============================
   %% 聊天交互路线
   %% ============================
-  subgraph chat_branch ["💬 聊天交互路线 (chat_pipeline)"]
+  subgraph chat_branch ["💬 聊天主路径 (chat_pipeline)"]
     direction TB
     chat_clarify["🗣️ chat_clarify<br/><i>AI 多轮对话澄清<br/>自动推断目标与字段</i>"]:::chatNode
-    chat_route_execution["🧭 chat_route_execution<br/><i>执行策略路由<br/>选择 single / multi 模式</i>"]:::chatNode
-    execute_single_or_multi["⚡ execute_single_or_multi<br/><i>执行单任务或<br/>启动多任务规划引擎</i>"]:::chatNode
+    chat_history_match["🧠 chat_history_match<br/><i>历史任务复用匹配<br/>按站点与意图推荐候选</i>"]:::chatNode
+    chat_review_task["✅ chat_review_task<br/><i>执行前 review / override<br/>确认后进入 planning</i>"]:::chatNode
+    chat_prepare_execution_handoff["🧭 chat_prepare_execution_handoff<br/><i>进入 planning 的参数交接<br/>chat 主链路固定转向 multi-dispatch</i>"]:::chatNode
 
-    chat_clarify -- "✅ ok" --> chat_route_execution
-    chat_route_execution -- "✅ ok" --> execute_single_or_multi
+    chat_clarify -- "✅ ready" --> chat_history_match
+    chat_history_match --> chat_review_task
+    chat_review_task -- "✅ approved" --> chat_prepare_execution_handoff
   end
 
   %% ============================
@@ -106,7 +108,7 @@ graph TD
   %% ============================
   %% 各分支 → 收尾
   %% ============================
-  execute_single_or_multi --> build_artifact_index
+  chat_prepare_execution_handoff --> plan_node
   run_pipeline_node --> build_artifact_index
   collect_urls_node --> build_artifact_index
   generate_config_node --> build_artifact_index
@@ -118,7 +120,7 @@ graph TD
   %% 错误路径 → 收尾
   %% ============================
   chat_clarify -. "❌ error" .-> build_artifact_index
-  chat_route_execution -. "❌ error" .-> build_artifact_index
+  chat_prepare_execution_handoff -. "❌ error" .-> build_artifact_index
   normalize_pipeline_params -. "❌ error" .-> build_artifact_index
   plan_node -. "❌ error" .-> build_artifact_index
   dispatch_node -. "❌ error" .-> build_artifact_index

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from autospider.graph.nodes.entry_nodes import chat_route_execution
+from autospider.graph.nodes.entry_nodes import chat_prepare_execution_handoff
 
 
-def test_chat_route_execution_only_forwards_runtime_subtask_params_that_are_consumed():
-    result = chat_route_execution(
+def test_chat_prepare_execution_handoff_only_forwards_runtime_subtask_params_that_are_consumed():
+    result = chat_prepare_execution_handoff(
         {
             "cli_args": {
                 "request": "抓取公告",

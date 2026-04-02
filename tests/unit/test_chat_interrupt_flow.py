@@ -148,6 +148,37 @@ def test_chat_review_task_supplement_returns_to_clarify(monkeypatch):
     assert result["chat_history"][-1] == {"role": "user", "content": "字段里再加上发布时间"}
 
 
+def test_chat_review_task_approve_keeps_chat_on_planning_dispatch_path(monkeypatch):
+    monkeypatch.setattr(entry_nodes, "interrupt", lambda payload: {"action": "approve"})
+
+    result = asyncio.run(
+        entry_nodes.chat_review_task(
+            {
+                "thread_id": "thread_chat",
+                "cli_args": {"request": "帮我抓取公告"},
+                "chat_history": [{"role": "user", "content": "帮我抓取公告"}],
+                "clarified_task": {
+                    "intent": "采集公告",
+                    "list_url": "https://example.com/list",
+                    "task_description": "采集公告详情",
+                    "fields": [
+                        {
+                            "name": "title",
+                            "description": "标题",
+                            "required": True,
+                            "data_type": "text",
+                            "example": None,
+                        }
+                    ],
+                },
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert result["chat_review_state"] == "approved"
+
+
 def test_chat_clarify_ready_from_override(monkeypatch):
     monkeypatch.setattr(entry_nodes, "TaskClarifier", _FakeClarifierReady)
 

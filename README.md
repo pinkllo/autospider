@@ -17,7 +17,7 @@ AutoSpider 是一个基于 `LangGraph + Playwright + SoM(Set-of-Mark)` 的纯视
 
 ## 🏗️ 系统架构
 
-AutoSpider 采用基于 LangGraph 的状态图架构，通过统一入口节点根据不同的 `entry_mode` 进行路由分发。对外 CLI 只保留 3 个主命令，但图内部仍支持多种执行模式：
+AutoSpider 采用基于 LangGraph 的状态图架构，通过统一入口节点根据不同的 `entry_mode` 进行路由分发。对外 CLI 只保留 3 个主命令；在当前实现中，`chat-pipeline` 是主要用户路径，chat 发起的任务会固定先进入 planning，再进入 multi-dispatch：
 
 ```mermaid
 graph LR
@@ -40,8 +40,8 @@ graph LR
 
 | 入口模式            | 执行路线                                                        | 功能说明                          |
 | :------------------ | :-------------------------------------------------------------- | :-------------------------------- |
-| `chat_pipeline`   | chat_clarify → chat_route_execution → execute_single_or_multi | 💬 自然语言多轮交互后自动执行     |
-| `pipeline_run`    | normalize_pipeline_params → run_pipeline_node                  | 🔧 内部单流并行流水线能力         |
+| `chat_pipeline`   | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 自然语言多轮交互后进入 planning-first 并发执行 |
+| `pipeline_run`    | normalize_pipeline_params → run_pipeline_node                  | 🔧 内部 / 兼容 direct pipeline 路径       |
 | `collect_urls`    | collect_urls_node                                               | 🔗 内部 URL 收集能力              |
 | `generate_config` | generate_config_node                                            | ⚙️ 内部配置生成能力             |
 | `batch_collect`   | batch_collect_node                                              | 📦 内部批量采集能力               |
@@ -93,10 +93,10 @@ PIPELINE_MODE=memory
 
 ### 0) 全自然语言多轮交互执行（最推荐 🎉）
 
-无需手写繁琐配置或分析结构，支持"大体量"站点全自动智能拆解与并发采集：
+无需手写繁琐配置或分析结构。系统会先澄清任务、按需复用历史任务、执行 review，再进入 planning 与并发子任务调度：
 
 ```bash
-# 自动澄清需求、决定执行路径，并在需要时进入多任务规划
+# 自动澄清需求，并进入 planning-first 的 chat 主链路
 autospider chat-pipeline -r "帮我采集 example 网站所有分类的公告列表，字段包含标题和发布时间"
 ```
 

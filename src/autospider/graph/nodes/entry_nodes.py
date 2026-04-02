@@ -49,7 +49,8 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
 
 
 
-def _resolve_chat_execution_mode(mode: str | None = None) -> str:
+def _resolve_chat_dispatch_mode(mode: str | None = None) -> str:
+    """chat 主路径当前固定进入 planning + multi-dispatch。"""
     _ = mode
     return "multi"
 
@@ -217,7 +218,7 @@ def _build_review_payload(
     *,
     state: dict[str, Any],
     task: dict[str, Any],
-    resolved_mode: str,
+    dispatch_mode: str,
 ) -> dict[str, Any]:
     cli_args = dict(state.get("cli_args") or {})
     effective_options = {
@@ -236,7 +237,7 @@ def _build_review_payload(
             task.get("field_validate_count"),
         ),
         "pipeline_mode": cli_args.get("pipeline_mode") or "默认",
-        "execution_mode": resolved_mode,
+        "execution_mode": dispatch_mode,
         "headless": bool(cli_args.get("headless", False)),
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "max_concurrent": cli_args.get(
@@ -399,8 +400,8 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
-    resolved_mode = _resolve_chat_execution_mode()
-    review_payload = interrupt(_build_review_payload(state=state, task=task, resolved_mode=resolved_mode))
+    dispatch_mode = _resolve_chat_dispatch_mode()
+    review_payload = interrupt(_build_review_payload(state=state, task=task, dispatch_mode=dispatch_mode))
     action_payload = review_payload if isinstance(review_payload, dict) else {"action": review_payload}
     action = str(action_payload.get("action") or "approve").strip().lower()
 
@@ -440,14 +441,15 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
 
 
 
-def chat_route_execution(state: dict[str, Any]) -> dict[str, Any]:
-    """chat-pipeline 执行策略路由。"""
+def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
+    """chat-pipeline 进入 planning / multi-dispatch 前的参数交接节点。"""
     cli_args = dict(state.get("cli_args") or {})
     task = dict(state.get("clarified_task") or {})
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
-    resolved_mode = _resolve_chat_execution_mode()
+    dispatch_mode = _resolve_chat_dispatch_mode()
+    # `clarified_task` 是 chat 阶段产物，这里只做进入 planning 的参数交接。
     normalized = {
         "list_url": task.get("list_url", ""),
         "task_description": task.get("task_description", ""),
@@ -477,7 +479,7 @@ def chat_route_execution(state: dict[str, Any]) -> dict[str, Any]:
             "max_concurrent",
             cli_args.get("consumer_concurrency", task.get("consumer_concurrency")),
         ),
-        "execution_mode_resolved": resolved_mode,
+        "execution_mode_resolved": dispatch_mode,
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
         "selected_skills": list(state.get("selected_skills") or []),

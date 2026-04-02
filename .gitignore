@@ -72,3 +72,4 @@ test_tab_click.py
 manual_*/
 tmp_*/
 agent-*/
+.claude/worktrees/

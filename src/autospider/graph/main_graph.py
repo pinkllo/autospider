@@ -24,7 +24,7 @@ from .nodes.entry_nodes import (
     chat_collect_user_input,
     chat_history_match,
     chat_review_task,
-    chat_route_execution,
+    chat_prepare_execution_handoff,
     normalize_pipeline_params,
     route_entry,
 )
@@ -36,8 +36,10 @@ from .subgraphs import build_multi_dispatch_subgraph
 
 def resolve_entry_route(state: dict[str, Any]) -> str:
     """
-    根据 entry_mode（入口模式）返回下一个需要执行的节点名。
-    此函数作为条件边的路由逻辑，决定状态图的初始分支走向。
+    根据 entry_mode 选择图的入口分支。
+
+    当前用户侧主路径是 `chat_pipeline`：先经过 chat 澄清/复用/review，
+    再进入 planning 与 multi-dispatch。`pipeline_run` 保留为直接/兼容路径。
     """
     mapping = {
         "chat_pipeline": "chat_clarify",
@@ -85,7 +87,7 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
 
     review_state = str(state.get("chat_review_state") or "")
     if review_state == "approved":
-        return "chat_route_execution"
+        return "chat_prepare_execution_handoff"
     if review_state == "reclarify":
         return "chat_clarify"
     return "error"
@@ -95,7 +97,9 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
 def build_main_graph(*, checkpointer: Any | None = None):
     """
     构建并编译主图（Main Graph）。
-    此函数将所有相关的能力节点、入口节点和共享收尾节点注册到图上，并定义了节点之间的有向连接边及条件选择边。
+    此函数将所有相关的能力节点、入口节点和共享收尾节点注册到图上，并定义节点之间的连接关系。
+
+    主交互链路固定为：chat 澄清 -> 历史任务复用 -> review -> planning handoff -> plan -> multi-dispatch。
     """
     graph = StateGraph(GraphState)
 
@@ -104,7 +108,7 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("chat_collect_user_input", chat_collect_user_input)
     graph.add_node("chat_history_match", chat_history_match)
     graph.add_node("chat_review_task", chat_review_task)
-    graph.add_node("chat_route_execution", chat_route_execution)
+    graph.add_node("chat_prepare_execution_handoff", chat_prepare_execution_handoff)
     graph.add_node("multi_dispatch_subgraph", build_multi_dispatch_subgraph())
     graph.add_node("normalize_pipeline_params", normalize_pipeline_params)
     graph.add_node("run_pipeline_node", run_pipeline_node)
@@ -149,13 +153,13 @@ def build_main_graph(*, checkpointer: Any | None = None):
         "chat_review_task",
         resolve_chat_review_route,
         {
-            "chat_route_execution": "chat_route_execution",
+            "chat_prepare_execution_handoff": "chat_prepare_execution_handoff",
             "chat_clarify": "chat_clarify",
             "error": "build_artifact_index",
         },
     )
     graph.add_conditional_edges(
-        "chat_route_execution",
+        "chat_prepare_execution_handoff",
         resolve_node_outcome,
         {"ok": "plan_node", "error": "build_artifact_index"},
     )
