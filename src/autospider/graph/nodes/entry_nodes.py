@@ -176,6 +176,12 @@ def _to_positive_int(value: Any, default: int) -> int:
 
 
 
+def _coalesce_cli_option(cli_args: dict[str, Any], key: str, fallback: Any) -> Any:
+    """CLI 显式传值优先；CLI 为 None 时保留上游已解析出的任务参数。"""
+    value = cli_args.get(key)
+    return fallback if value is None else value
+
+
 def _normalize_resume_answer(payload: Any) -> str:
     if isinstance(payload, dict):
         answer = payload.get("answer")
@@ -222,17 +228,20 @@ def _build_review_payload(
 ) -> dict[str, Any]:
     cli_args = dict(state.get("cli_args") or {})
     effective_options = {
-        "max_pages": cli_args.get("max_pages", task.get("max_pages")),
-        "target_url_count": cli_args.get("target_url_count", task.get("target_url_count")),
-        "consumer_concurrency": cli_args.get(
+        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
+        "target_url_count": _coalesce_cli_option(cli_args, "target_url_count", task.get("target_url_count")),
+        "consumer_concurrency": _coalesce_cli_option(
+            cli_args,
             "consumer_concurrency",
             task.get("consumer_concurrency"),
         ),
-        "field_explore_count": cli_args.get(
+        "field_explore_count": _coalesce_cli_option(
+            cli_args,
             "field_explore_count",
             task.get("field_explore_count"),
         ),
-        "field_validate_count": cli_args.get(
+        "field_validate_count": _coalesce_cli_option(
+            cli_args,
             "field_validate_count",
             task.get("field_validate_count"),
         ),
@@ -240,9 +249,14 @@ def _build_review_payload(
         "execution_mode": dispatch_mode,
         "headless": bool(cli_args.get("headless", False)),
         "output_dir": str(cli_args.get("output_dir") or "output"),
-        "max_concurrent": cli_args.get(
+        "max_concurrent": _coalesce_cli_option(
+            cli_args,
             "max_concurrent",
-            cli_args.get("consumer_concurrency", task.get("consumer_concurrency")),
+            _coalesce_cli_option(
+                cli_args,
+                "consumer_concurrency",
+                task.get("consumer_concurrency"),
+            ),
         ),
     }
     return {
@@ -454,20 +468,24 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "list_url": task.get("list_url", ""),
         "task_description": task.get("task_description", ""),
         "fields": [_field_to_dict(item) for item in task.get("fields", [])],
-        "max_pages": cli_args.get("max_pages", task.get("max_pages")),
-        "target_url_count": cli_args.get(
+        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
+        "target_url_count": _coalesce_cli_option(
+            cli_args,
             "target_url_count",
             task.get("target_url_count"),
         ),
-        "consumer_concurrency": cli_args.get(
+        "consumer_concurrency": _coalesce_cli_option(
+            cli_args,
             "consumer_concurrency",
             task.get("consumer_concurrency"),
         ),
-        "field_explore_count": cli_args.get(
+        "field_explore_count": _coalesce_cli_option(
+            cli_args,
             "field_explore_count",
             task.get("field_explore_count"),
         ),
-        "field_validate_count": cli_args.get(
+        "field_validate_count": _coalesce_cli_option(
+            cli_args,
             "field_validate_count",
             task.get("field_validate_count"),
         ),
@@ -475,9 +493,14 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "headless": bool(cli_args.get("headless", False)),
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "request": str(cli_args.get("request") or task.get("task_description") or ""),
-        "max_concurrent": cli_args.get(
+        "max_concurrent": _coalesce_cli_option(
+            cli_args,
             "max_concurrent",
-            cli_args.get("consumer_concurrency", task.get("consumer_concurrency")),
+            _coalesce_cli_option(
+                cli_args,
+                "consumer_concurrency",
+                task.get("consumer_concurrency"),
+            ),
         ),
         "execution_mode_resolved": dispatch_mode,
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),

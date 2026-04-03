@@ -121,12 +121,13 @@ class LLMDecisionMaker:
             response_text = response.content
             logger.info("[LLM] 响应前100字符: %s...", response_text[:100])
 
-            message = parse_protocol_message(response_text)
+            message = parse_protocol_message(response)
             if message:
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
-                reasoning = args.get("reasoning") or message.get("thinking") or "N/A"
+                reasoning = message.get("thinking") or ""
                 logger.info("[LLM] 决策: %s", message.get("action"))
-                logger.info("[LLM] 理由: %s...", str(reasoning)[:100])
+                if reasoning:
+                    logger.info("[LLM] 理由: %s...", str(reasoning)[:100])
                 return message
 
             logger.warning("[LLM] 响应中未找到 JSON: %s", response_text[:200])
@@ -197,7 +198,7 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
 
-            message = parse_protocol_message(response_text)
+            message = parse_protocol_message(response)
             if message:
                 return message
         except Exception as e:
@@ -242,7 +243,7 @@ class LLMDecisionMaker:
             response = await self.decider.llm.ainvoke(messages)
             response_text = response.content
 
-            message = parse_protocol_message(response_text)
+            message = parse_protocol_message(response)
             if message:
                 return message
         except Exception as e:

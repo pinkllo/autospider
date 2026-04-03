@@ -30,10 +30,13 @@ from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
 from ..domain.fields import FieldDefinition
 
+from .field_config import resolve_non_xpath_field_value
 from .models import (
     FieldExtractionResult,
     PageExtractionRecord,
 )
+from .skill_context import apply_selected_skill_context, load_field_skill_context
+from .value_helpers import is_semantically_valid, looks_like_date, looks_like_number, looks_like_url
 
 logger = get_logger(__name__)
 from .field_decider import FieldDecider
@@ -210,28 +213,17 @@ class FieldExtractor:
 
     async def _prepare_skill_context(self, url: str) -> None:
         """为当前详情页选择并加载适用的 skill 正文。"""
-        selected = await self.skill_runtime.get_or_select(
-            phase="field_extractor",
+        self.selected_skills, self.selected_skills_context = await load_field_skill_context(
+            self.skill_runtime,
             url=url,
-            task_context={
-                "fields": [field.model_dump(mode="python") for field in self.fields],
-            },
+            fields=self.fields,
             llm=self.llm_decider.llm,
         )
-        self.selected_skills = [
-            {
-                "name": skill.name,
-                "description": skill.description,
-                "path": skill.path,
-                "domain": skill.domain,
-            }
-            for skill in selected
-        ]
-        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
-            self.skill_runtime.load_selected_bodies(selected)
+        apply_selected_skill_context(
+            self.field_decider,
+            selected_skills=self.selected_skills,
+            selected_skills_context=self.selected_skills_context,
         )
-        self.field_decider.selected_skills = list(self.selected_skills)
-        self.field_decider.selected_skills_context = self.selected_skills_context
 
     async def _extract_single_field(
         self,
@@ -250,18 +242,15 @@ class FieldExtractor:
         """
         result = FieldExtractionResult(field_name=field.name)
 
-        source = str(field.extraction_source or "").strip().lower()
-        fixed_value = (field.fixed_value or "").strip()
-        if source in {"constant", "subtask_context"} and fixed_value:
-            result.value = fixed_value
+        fill_value, fill_method = resolve_non_xpath_field_value(
+            field,
+            url=self.page.url,
+            infer_url_field_from_shape=False,
+        )
+        if fill_method:
+            result.value = fill_value
             result.confidence = 1.0
-            result.extraction_method = source
-            return result
-
-        if source == "task_url":
-            result.value = self.page.url
-            result.confidence = 1.0
-            result.extraction_method = "task_url"
+            result.extraction_method = fill_method
             return result
 
         html_content = await self._get_full_page_html()
@@ -303,7 +292,8 @@ class FieldExtractor:
             if found is None:
                 found = bool(nav_args.get("field_value") or nav_args.get("field_text"))
             if not found:
-                result.error = f"字段不存在: {nav_args.get('reasoning', '')}"
+                reason = nav_result.get("thinking") or ""
+                result.error = f"字段不存在: {reason}"
                 return result
 
         # 阶段 2：提取字段值
@@ -650,13 +640,13 @@ class FieldExtractor:
                         "match": selected_match,
                     }
 
-        # 目标字段消歧策略：先严格全词匹配，未命中再允许模糊匹配
+        # 目标字段消歧策略：先严格全词匹配，未命中再退到前缀匹配
         match_mode = "strict"
         matches = self.fuzzy_searcher.search_strict_in_html(html_content, target_text)
         if not matches:
-            logger.info("[FieldExtractor] 全词匹配未命中，回退到模糊匹配")
-            matches = self.fuzzy_searcher.search_in_html(html_content, target_text)
-            match_mode = "fuzzy"
+            logger.info("[FieldExtractor] 全词匹配未命中，回退到前缀匹配")
+            matches = self.fuzzy_searcher.search_prefix_in_html(html_content, target_text)
+            match_mode = "prefix"
 
         if not matches:
             logger.info("[FieldExtractor] HTML 中未找到匹配")
@@ -714,10 +704,13 @@ class FieldExtractor:
         # 构建候选列表
         candidates = []
         for i, match in enumerate(matches[:10]):  # 限制候选数量
+            display_text = (match.element_text_content or match.text or "").strip()
+            if not display_text:
+                display_text = match.text[:100]
             candidates.append(
                 {
                     "mark_id": str(i + 1),
-                    "text": match.text[:100],
+                    "text": display_text[:100],
                     "xpath": match.element_xpath,
                 }
             )
@@ -1067,12 +1060,8 @@ class FieldExtractor:
             if expected_normalized:
                 if self._is_strict_value_match(actual_value, expected_value):
                     matched_values.append(actual_value)
-                else:
-                    similarity = self.fuzzy_searcher._calculate_similarity(
-                        actual_value, expected_value
-                    )
-                    if similarity >= 0.8:
-                        matched_values.append(actual_value)
+                elif self._is_prefix_value_match(actual_value, expected_value):
+                    matched_values.append(actual_value)
             else:
                 matched_values.append(actual_value)
 
@@ -1131,6 +1120,27 @@ class FieldExtractor:
             return ""
         return re.sub(r"\s+", "", normalized)
 
+    def _common_prefix_len_for_compare(self, left: str, right: str) -> int:
+        norm_left = self._normalize_text_no_ws_for_compare(left)
+        norm_right = self._normalize_text_no_ws_for_compare(right)
+        if not norm_left or not norm_right:
+            return 0
+
+        prefix_len = 0
+        for left_ch, right_ch in zip(norm_left, norm_right):
+            if left_ch != right_ch:
+                break
+            prefix_len += 1
+        return prefix_len
+
+    def _is_prefix_value_match(self, actual_value: str, expected_value: str) -> bool:
+        prefix_len = self._common_prefix_len_for_compare(actual_value, expected_value)
+        expected_norm = self._normalize_text_no_ws_for_compare(expected_value)
+        if not expected_norm:
+            return False
+        min_required = max(8, int(len(expected_norm) * 0.4))
+        return prefix_len >= min_required
+
     def _is_strict_value_match(self, actual_value: str, expected_value: str) -> bool:
         """严格值匹配：先全词/短语，失败后才允许模糊。"""
         actual = self._normalize_text_for_compare(actual_value)
@@ -1172,33 +1182,13 @@ class FieldExtractor:
         return False
 
     def _is_value_semantically_valid(self, value: str, data_type: str) -> bool:
-        text = (value or "").strip()
-        if not text:
-            return False
-
-        if data_type == "url":
-            return self._looks_like_url(text)
-        if data_type == "number":
-            return self._looks_like_number(text)
-        if data_type == "date":
-            return self._looks_like_date(text)
-        return True
+        return is_semantically_valid(value, data_type)
 
     def _looks_like_url(self, value: str) -> bool:
-        text = (value or "").strip().lower()
-        return bool(
-            text.startswith("http://")
-            or text.startswith("https://")
-            or text.startswith("/")
-        )
+        return looks_like_url(value)
 
     def _looks_like_number(self, value: str) -> bool:
-        return bool(re.fullmatch(r"[^\d\-+]*[-+]?\d[\d,\.\s]*[^\d]*", (value or "").strip()))
+        return looks_like_number(value)
 
     def _looks_like_date(self, value: str) -> bool:
-        text = (value or "").strip()
-        patterns = [
-            r"\d{4}[-/年]\d{1,2}([-/月]\d{1,2}日?)?",
-            r"\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?",
-        ]
-        return any(re.search(p, text) for p in patterns)
+        return looks_like_date(value)

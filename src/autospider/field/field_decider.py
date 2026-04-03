@@ -55,9 +55,9 @@ class FieldDecider:
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
 
-    def _parse_response_json(self, response_text: str) -> dict | None:
+    def _parse_response_json(self, response_payload: object) -> dict | None:
         # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
-        return parse_protocol_message(response_text)
+        return parse_protocol_message(response_payload)
 
     def _compact_text(self, text: str, max_len: int = 60) -> str:
         cleaned = re.sub(r"\s+", " ", text).strip()
@@ -339,7 +339,7 @@ class FieldDecider:
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            message = self._parse_response_json(response_text)
+            message = self._parse_response_json(response)
             if message:
                 action = message.get("action")
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
@@ -419,7 +419,7 @@ class FieldDecider:
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            message = self._parse_response_json(response_text)
+            message = self._parse_response_json(response)
             if message:
                 action = message.get("action")
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
@@ -508,7 +508,7 @@ class FieldDecider:
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
-            message = self._parse_response_json(response_text)
+            message = self._parse_response_json(response)
             if message:
                 action = message.get("action")
                 if action != "select":

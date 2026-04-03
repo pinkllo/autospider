@@ -7,7 +7,6 @@ system_prompt: |
   必须输出纯 JSON，禁止 Markdown 代码块。
   JSON 结构：
   {
-    "thinking": "简短分析：1.当前页面状态；2.目标是否可见；3.为什么选择该动作",
     "action": "动作类型",
     "args": { "参数 key": "参数值" }
   }

@@ -174,6 +174,50 @@ class FuzzyTextSearcher:
         matches.sort(key=lambda m: (m.position, -len(m.text or "")))
         return matches
 
+    def search_prefix_in_html(self, html_content: str, target_text: str) -> list[TextMatch]:
+        """
+        在 HTML 中进行前缀匹配。
+
+        策略：
+        1. 使用元素完整文本（而不是局部 text/tail 片段）参与匹配
+        2. 要求公共前缀长度达到最小门槛
+        3. 命中后按页面位置排序，不做相似度打分
+        """
+        if not target_text or not html_content:
+            return []
+
+        try:
+            tree = lxml_html.fromstring(html_content)
+        except Exception:
+            try:
+                tree = lxml_html.fragment_fromstring(html_content, create_parent="div")
+            except Exception:
+                return []
+
+        matches: list[TextMatch] = []
+        position = 0
+        seen_xpaths: set[str] = set()
+
+        for element in tree.iter():
+            if not self._is_searchable_element(element):
+                continue
+
+            full_text = self._get_full_text(element).strip()
+            if not full_text:
+                continue
+
+            match = self._check_prefix_text_match(element, full_text, target_text, position)
+            position += 1
+            if not match:
+                continue
+            if match.element_xpath in seen_xpaths:
+                continue
+            seen_xpaths.add(match.element_xpath)
+            matches.append(match)
+
+        matches.sort(key=lambda m: (m.position, -len(m.text or "")))
+        return matches
+
     def search_url_in_html(self, html_content: str, target_url: str) -> list[TextMatch]:
         """
         在 HTML 中按 URL 属性（href/src/data-href/content）搜索目标链接。
@@ -295,6 +339,37 @@ class FuzzyTextSearcher:
             xpath_candidates=candidates,
         )
 
+    def _check_prefix_text_match(
+        self,
+        element: _Element,
+        text: str,
+        target_text: str,
+        position: int,
+    ) -> TextMatch | None:
+        """检查文本是否满足前缀匹配（不使用相似度打分）。"""
+        text = text.strip()
+        if not text:
+            return None
+
+        prefix_len = self._common_prefix_len_no_ws(text, target_text)
+        min_required = self._min_prefix_len_required(target_text)
+        if prefix_len < min_required:
+            return None
+
+        candidates = self._generate_xpath_candidates(element)
+        best_xpath = candidates[0]["xpath"] if candidates else self._generate_xpath(element)
+
+        return TextMatch(
+            text=self._get_full_text(element),
+            similarity=1.0,
+            element_xpath=best_xpath,
+            element_tag=element.tag,
+            element_text_content=self._get_full_text(element),
+            source_attr=None,
+            position=position,
+            xpath_candidates=candidates,
+        )
+
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """计算两个文本的相似度"""
         # 标准化文本：去除多余空白、转小写
@@ -326,6 +401,25 @@ class FuzzyTextSearcher:
         if not normalized:
             return ""
         return re.sub(r"\s+", "", normalized)
+
+    def _common_prefix_len_no_ws(self, source_text: str, target_text: str) -> int:
+        left = self._normalize_text_no_ws(source_text)
+        right = self._normalize_text_no_ws(target_text)
+        if not left or not right:
+            return 0
+
+        prefix_len = 0
+        for left_ch, right_ch in zip(left, right):
+            if left_ch != right_ch:
+                break
+            prefix_len += 1
+        return prefix_len
+
+    def _min_prefix_len_required(self, target_text: str) -> int:
+        normalized = self._normalize_text_no_ws(target_text)
+        if not normalized:
+            return 0
+        return max(8, int(len(normalized) * 0.4))
 
     def _is_strict_text_match(self, source_text: str, target_text: str) -> bool:
         """严格文本匹配：全词/完整短语优先。"""

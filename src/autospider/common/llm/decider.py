@@ -139,7 +139,7 @@ class LLMDecider:
         response_text = response.content
 
         # 解析响应
-        action = self._parse_response(response_text)
+        action = self._parse_response(response)
         action = self._normalize_back_action(action, tab_context)
 
         append_llm_trace(
@@ -600,13 +600,15 @@ class LLMDecider:
                 return page
         return page
 
-    def _parse_response(self, response_text: str) -> Action:
+    def _parse_response(self, response_payload: Any) -> Action:
         """解析 LLM 响应"""
-        message = parse_protocol_message(response_text)
+        response_text = getattr(response_payload, "content", response_payload)
+        response_text_preview = str(response_text)
+        message = parse_protocol_message(response_payload)
         if not message:
             return Action(
                 action=ActionType.RETRY,
-                thinking=f"无法解析 LLM 响应: {response_text[:200]}",
+                thinking=f"无法解析 LLM 响应: {response_text_preview[:200]}",
             )
 
         # 解析 action 类型
@@ -657,7 +659,7 @@ class LLMDecider:
             if isinstance(sd, list) and len(sd) == 2:
                 scroll_delta = (int(sd[0]), int(sd[1]))
 
-        thinking = message.get("thinking", "") or args.get("reasoning") or ""
+        thinking = message.get("thinking", "") or ""
         if inferred and not thinking:
             thinking = f"自动推断动作: {action_type.value}"
         if action_type == ActionType.RETRY and not thinking:

@@ -19,7 +19,7 @@ system_prompt: |
   输出格式：严格 JSON，不要使用 markdown 代码块（不要包含 protocol 字段）。
 
   返回示例：
-  {"action":"select","args":{"purpose":"disambiguate_by_text","items":[{"mark_id":1,"text":"（可选）该元素文本"}],"reasoning":"说明你为什么选择这个元素（位置/上下文/样式等）"}}
+  {"action":"select","args":{"purpose":"disambiguate_by_text","items":[{"mark_id":1,"text":"（可选）该元素文本"}]}}
 
 user_message: |
   目标文本：{{target_text}}

@@ -322,7 +322,7 @@ class PaginationHandler:
                     logger.info("[Extract-JumpWidget-LLM] 找到输入框但未找到按钮的 xpath")
                     return None
             else:
-                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
+                reasoning = data.get("thinking") if isinstance(data, dict) else ""
                 logger.info(
                     f"[Extract-JumpWidget-LLM] 未找到跳转控件: {reasoning if data else ''}"
                 )
@@ -378,7 +378,7 @@ class PaginationHandler:
                 and found
                 and (mark_id_raw is not None or target_text)
             ):
-                reasoning = args.get("reasoning") or ""
+                reasoning = data.get("thinking") if isinstance(data, dict) else ""
                 logger.info(
                     f"[Extract-Pagination-LLM] 找到分页按钮 [{mark_id_raw if mark_id_raw is not None else 'text-only'}]: {reasoning}"
                 )
@@ -415,7 +415,7 @@ class PaginationHandler:
                         logger.info(f"[Extract-Pagination-LLM] ✓ 提取到 xpath: {best_xpath}")
                         return best_xpath
             else:
-                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
+                reasoning = data.get("thinking") if isinstance(data, dict) else ""
                 logger.info(
                     f"[Extract-Pagination-LLM] 未找到分页按钮: {reasoning if data else ''}"
                 )
@@ -623,7 +623,7 @@ class PaginationHandler:
                 logger.info(f"[Pagination-LLM] ✓ 翻页成功，当前第 {self.current_page_num} 页")
                 return True
             else:
-                reasoning = args.get("reasoning") if isinstance(args, dict) else ""
+                reasoning = data.get("thinking") if isinstance(data, dict) else ""
                 logger.info(f"[Pagination-LLM] 未找到下一页: {reasoning if data else ''}")
         except Exception as e:
             logger.info(f"[Pagination-LLM] LLM 识别失败: {e}")

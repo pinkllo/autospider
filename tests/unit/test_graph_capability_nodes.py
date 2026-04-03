@@ -1,24 +1,10 @@
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from autospider.common.config import config
 from autospider.common.types import TaskPlan
 from autospider.graph.nodes import capability_nodes
-
-
-class _FakeBrowserSession:
-    def __init__(self, headless=False, **kwargs):
-        self.headless = headless
-        self.kwargs = kwargs
-        self.page = SimpleNamespace(url="https://example.com/list")
-
-    async def start(self):
-        return None
-
-    async def stop(self):
-        return None
 
 
 class _FakePlannerEmpty:
@@ -41,20 +27,21 @@ class _FakePlannerEmpty:
         )
 
 
-class _FakeContextManager:
-    def __init__(self):
-        self.page = SimpleNamespace(url="https://example.com/list")
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
 def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
-    monkeypatch.setattr(capability_nodes, "BrowserSession", _FakeBrowserSession)
-    monkeypatch.setattr(capability_nodes, "TaskPlanner", _FakePlannerEmpty)
+    async def _fake_execute_planning(*, params, thread_id):
+        planner = _FakePlannerEmpty(
+            page=SimpleNamespace(url="https://example.com/list"),
+            site_url=str(params.get("list_url") or ""),
+            user_request=str(params.get("task_description") or ""),
+            output_dir=str(params.get("output_dir") or "output"),
+        )
+        return {
+            "task_plan": await planner.plan(),
+            "selected_skills": [],
+            "summary": {"total_subtasks": 0},
+        }
+
+    monkeypatch.setattr(capability_nodes, "execute_planning", _fake_execute_planning)
 
     result = asyncio.run(
         capability_nodes.plan_node(
@@ -77,18 +64,25 @@ def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
 
 
 def test_generate_config_node_persists_collection_config_in_state(monkeypatch, tmp_path):
-    async def _fake_generate_collection_config(**kwargs):
-        return SimpleNamespace(
-            nav_steps=[{"action": "click", "target": "招标公告"}],
-            common_detail_xpath="//a[@class=\"detail\"]",
-            pagination_xpath="//a[@class=\"next\"]",
-            jump_widget_xpath={"input": "//input", "button": "//button"},
-            list_url=kwargs["list_url"],
-            task_description=kwargs["task_description"],
-        )
+    async def _fake_execute_config_generation(*, params, thread_id):
+        return {
+            "collection_config": {
+                "nav_steps": [{"action": "click", "target": "招标公告"}],
+                "common_detail_xpath": "//a[@class=\"detail\"]",
+                "pagination_xpath": "//a[@class=\"next\"]",
+                "jump_widget_xpath": {"input": "//input", "button": "//button"},
+                "list_url": params["list_url"],
+                "task_description": params["task"],
+            },
+            "summary": {
+                "nav_steps": 1,
+                "has_common_detail_xpath": True,
+                "has_pagination_xpath": True,
+                "has_jump_widget_xpath": True,
+            },
+        }
 
-    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
-    monkeypatch.setattr(capability_nodes, "generate_collection_config", _fake_generate_collection_config)
+    monkeypatch.setattr(capability_nodes, "execute_config_generation", _fake_execute_config_generation)
 
     result = asyncio.run(
         capability_nodes.generate_config_node(
@@ -111,15 +105,15 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
 
 
 def test_batch_collect_node_can_use_collection_config_from_state(monkeypatch, tmp_path):
-    async def _fake_batch_collect_urls(**kwargs):
-        config_path = Path(kwargs["config_path"])
-        assert config_path.exists()
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["list_url"] == "https://example.com/list"
-        return SimpleNamespace(collected_urls=["https://example.com/a", "https://example.com/b"])
+    async def _fake_execute_batch_collection(*, params, thread_id, collection_config):
+        assert collection_config["list_url"] == "https://example.com/list"
+        return {
+            "collection_config": collection_config,
+            "collected_urls": ["https://example.com/a", "https://example.com/b"],
+            "collection_progress": {"collected_count": 2},
+        }
 
-    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
-    monkeypatch.setattr(capability_nodes, "batch_collect_urls", _fake_batch_collect_urls)
+    monkeypatch.setattr(capability_nodes, "execute_batch_collection", _fake_execute_batch_collection)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -150,12 +144,14 @@ def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monke
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    async def _fake_collect_detail_urls(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(collected_urls=["https://example.com/a"])
+    async def _fake_execute_url_collection(*, params, thread_id):
+        captured.update(params)
+        return {
+            "collected_urls": ["https://example.com/a"],
+            "collection_progress": {"collected_count": 1},
+        }
 
-    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
-    monkeypatch.setattr(capability_nodes, "collect_detail_urls", _fake_collect_detail_urls)
+    monkeypatch.setattr(capability_nodes, "execute_url_collection", _fake_execute_url_collection)
 
     result = asyncio.run(
         capability_nodes.collect_urls_node(
@@ -181,12 +177,15 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    async def _fake_batch_collect_urls(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(collected_urls=["https://example.com/a"])
+    async def _fake_execute_batch_collection(*, params, thread_id, collection_config):
+        captured.update(params)
+        return {
+            "collection_config": collection_config,
+            "collected_urls": ["https://example.com/a"],
+            "collection_progress": {"collected_count": 1},
+        }
 
-    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
-    monkeypatch.setattr(capability_nodes, "batch_collect_urls", _fake_batch_collect_urls)
+    monkeypatch.setattr(capability_nodes, "execute_batch_collection", _fake_execute_batch_collection)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -214,8 +213,8 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
 
 
 def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
-    async def _fake_run_field_pipeline(**kwargs):
-        assert kwargs["urls"] == ["https://example.com/a", "https://example.com/b"]
+    async def _fake_execute_field_extraction(*, params, thread_id, collected_urls):
+        assert collected_urls == ["https://example.com/a", "https://example.com/b"]
         return {
             "fields_config": [{"name": "title", "xpath": "//h1"}],
             "xpath_result": {
@@ -224,10 +223,10 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
                 "total_urls": 2,
                 "success_count": 2,
             },
+            "summary": {"url_count": 2, "field_count": 1},
         }
 
-    monkeypatch.setattr(capability_nodes, "create_browser_session", lambda **kwargs: _FakeContextManager())
-    monkeypatch.setattr(capability_nodes, "run_field_pipeline", _fake_run_field_pipeline)
+    monkeypatch.setattr(capability_nodes, "execute_field_extraction", _fake_execute_field_extraction)
 
     result = asyncio.run(
         capability_nodes.field_extract_node(
@@ -249,7 +248,7 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
 
 
 def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
-    async def _fake_run_pipeline(**kwargs):
+    async def _fake_execute_pipeline(*, params, thread_id):
         return {
             "total_urls": 4,
             "success_count": 3,
@@ -264,7 +263,7 @@ def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
             "execution_id": "exec_123",
         }
 
-    monkeypatch.setattr(capability_nodes, "run_pipeline", _fake_run_pipeline)
+    monkeypatch.setattr(capability_nodes, "execute_pipeline", _fake_execute_pipeline)
 
     result = asyncio.run(
         capability_nodes.run_pipeline_node(

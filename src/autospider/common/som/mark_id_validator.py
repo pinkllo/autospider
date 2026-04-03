@@ -64,6 +64,9 @@ class MarkIdValidator:
         self.debug = debug if debug is not None else config.url_collector.debug_mark_id_validation
         # 需求确认：短文本（<=2）要求严格匹配，避免“包含匹配”误命中大量元素
         self.short_text_strict_len = 2
+        # 最长前缀兜底：前缀过短时宁可失败，也不自动纠正到错误元素
+        self.prefix_match_min_chars = 8
+        self.prefix_match_min_ratio = 0.4
 
     async def validate_mark_id_text_map(
         self,
@@ -181,6 +184,54 @@ class MarkIdValidator:
                         "[Validator] ? text_ambiguous: '%s...' -> %s",
                         llm_text[:50],
                         candidate_mark_ids,
+                    )
+                continue
+
+            # 3) 最长前缀兜底：只接受“前缀足够长 + 唯一第一名”
+            prefix_candidate_ids, prefix_len = self._resolve_by_longest_prefix(
+                llm_text, mark_id_to_actual_text
+            )
+            if len(prefix_candidate_ids) == 1:
+                resolved_id = prefix_candidate_ids[0]
+                result = MarkIdValidationResult(
+                    mark_id=llm_mark_id,
+                    llm_text=llm_text,
+                    actual_text=actual_text or "[未找到 LLM mark_id 对应元素]",
+                    resolved_mark_id=resolved_id,
+                    candidate_mark_ids=prefix_candidate_ids,
+                    is_valid=True,
+                    element=element,
+                    status="text_prefix_unique",
+                )
+                results.append(result)
+                resolved_mark_ids.append(resolved_id)
+                if self.debug:
+                    logger.debug(
+                        "[Validator] ✓ text_prefix_unique: '%s...' -> mark_id=%s (prefix_len=%s)",
+                        llm_text[:50],
+                        resolved_id,
+                        prefix_len,
+                    )
+                continue
+
+            if len(prefix_candidate_ids) > 1:
+                result = MarkIdValidationResult(
+                    mark_id=llm_mark_id,
+                    llm_text=llm_text,
+                    actual_text=actual_text or "[未找到 LLM mark_id 对应元素]",
+                    resolved_mark_id=None,
+                    candidate_mark_ids=prefix_candidate_ids,
+                    is_valid=False,
+                    element=element,
+                    status="text_prefix_ambiguous",
+                )
+                results.append(result)
+                if self.debug:
+                    logger.debug(
+                        "[Validator] ? text_prefix_ambiguous: '%s...' -> %s (prefix_len=%s)",
+                        llm_text[:50],
+                        prefix_candidate_ids,
+                        prefix_len,
                     )
                 continue
 
@@ -355,4 +406,55 @@ class MarkIdValidator:
             return True
 
         return norm_llm_no_ws in norm_actual_no_ws or norm_actual_no_ws in norm_llm_no_ws
+
+    def _resolve_by_longest_prefix(
+        self, llm_text: str, mark_id_to_actual_text: dict[int, str]
+    ) -> tuple[list[int], int]:
+        """最长前缀兜底：返回前缀长度最大的候选，只有唯一第一名才应自动采用。"""
+        best_ids: list[int] = []
+        best_prefix_len = 0
+
+        for variant in self._llm_text_variants(llm_text):
+            norm_variant = self._normalize_text_no_ws(variant)
+            if not norm_variant:
+                continue
+
+            min_required = self._min_prefix_len_required(norm_variant)
+            variant_best_ids: list[int] = []
+            variant_best_len = 0
+
+            for candidate_id, candidate_text in mark_id_to_actual_text.items():
+                norm_candidate = self._normalize_text_no_ws(candidate_text)
+                if not norm_candidate:
+                    continue
+
+                prefix_len = self._common_prefix_len(norm_variant, norm_candidate)
+                if prefix_len < min_required:
+                    continue
+
+                if prefix_len > variant_best_len:
+                    variant_best_len = prefix_len
+                    variant_best_ids = [candidate_id]
+                elif prefix_len == variant_best_len:
+                    variant_best_ids.append(candidate_id)
+
+            if variant_best_len > best_prefix_len:
+                best_prefix_len = variant_best_len
+                best_ids = variant_best_ids
+            elif variant_best_len == best_prefix_len and variant_best_len > 0:
+                best_ids = sorted(set(best_ids + variant_best_ids))
+
+        return sorted(set(best_ids)), best_prefix_len
+
+    def _min_prefix_len_required(self, normalized_text: str) -> int:
+        ratio_required = int(len(normalized_text) * self.prefix_match_min_ratio)
+        return max(self.prefix_match_min_chars, ratio_required)
+
+    def _common_prefix_len(self, left: str, right: str) -> int:
+        prefix_len = 0
+        for left_ch, right_ch in zip(left, right):
+            if left_ch != right_ch:
+                break
+            prefix_len += 1
+        return prefix_len
 

@@ -40,7 +40,7 @@ class LLMConfig(BaseModel):
     )
     trace_max_chars: int = Field(default_factory=lambda: int(os.getenv("LLM_TRACE_MAX_CHARS", "20000")))
     enable_thinking: bool = Field(
-        default_factory=lambda: os.getenv("LLM_ENABLE_THINKING", "true").lower() == "true"
+        default_factory=lambda: os.getenv("LLM_ENABLE_THINKING", "false").lower() == "true"
     )
     temperature: float = 0.1
     max_tokens: int = 8192  # 增加 token 限制，避免 JSON 被截断

@@ -7,13 +7,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
-import yaml
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -26,7 +21,8 @@ from ...common.som.text_first import resolve_single_mark_id
 from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
 from ...common.utils.paths import get_prompt_path
 from ...common.utils.prompt_template import render_template
-from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
+from .planner_artifacts import PlannerArtifacts
+from .planner_state import PlannerPageState
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -73,6 +69,12 @@ class TaskPlanner:
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self._knowledge_entries: list[dict] = []  # DFS 过程中收集的知识条目
+        self._page_state = PlannerPageState(page)
+        self._artifacts = PlannerArtifacts(
+            site_url=site_url,
+            user_request=user_request,
+            output_dir=output_dir,
+        )
 
         # 获取 LLM 配置：
         # - 默认优先使用 planner 专用配置（兼容现有逻辑）
@@ -308,76 +310,19 @@ class TaskPlanner:
 
     def _stable_nav_step_payload(self, step: dict) -> dict:
         """提取用于状态判重的稳定导航字段。"""
-        payload = {
-            "action": str(step.get("action") or "").strip().lower(),
-            "target_text": str(step.get("target_text") or "").strip(),
-            "text": str(step.get("text") or "").strip(),
-            "key": str(step.get("key") or "").strip(),
-            "url": str(step.get("url") or "").strip(),
-            "scroll_delta": step.get("scroll_delta"),
-        }
-
-        xpath_candidates = step.get("clicked_element_xpath_candidates") or []
-        stable_candidates: list[dict[str, object]] = []
-        for candidate in xpath_candidates:
-            xpath = str((candidate or {}).get("xpath") or "").strip()
-            if not xpath:
-                continue
-            stable_candidates.append(
-                {
-                    "xpath": xpath,
-                    "priority": (candidate or {}).get("priority"),
-                    "strategy": str((candidate or {}).get("strategy") or "").strip(),
-                }
-            )
-        if stable_candidates:
-            payload["clicked_element_xpath_candidates"] = stable_candidates
-
-        return payload
+        return self._page_state.stable_nav_step_payload(step)
 
     def _normalize_nav_steps(self, nav_steps: list[dict] | None) -> list[dict]:
         """规范化导航步骤，去掉不稳定字段。"""
-        normalized: list[dict] = []
-        for step in nav_steps or []:
-            normalized.append(self._stable_nav_step_payload(dict(step or {})))
-        return normalized
+        return self._page_state.normalize_nav_steps(nav_steps)
 
     def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
         """构造 URL + nav_steps 的稳定状态签名。"""
-        normalized_url = str(current_url or "").strip()
-        normalized_steps = self._normalize_nav_steps(nav_steps)
-        if not normalized_steps:
-            return normalized_url
-
-        raw = json.dumps(
-            {"url": normalized_url, "nav_steps": normalized_steps},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        return f"{normalized_url}#{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+        return self._page_state.build_page_state_signature(current_url, nav_steps)
 
     async def _restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
         """恢复到指定页面状态：先回到 anchor URL，再重放导航动作。"""
-        try:
-            await self.page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
-            await self.page.wait_for_timeout(1500)
-        except Exception as e:
-            logger.warning("[Planner] 恢复页面 anchor 失败: %s", e)
-            return False
-
-        if not nav_steps:
-            return True
-
-        from ..collector.navigation_handler import NavigationHandler
-
-        nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
-        replay_ok = await nav_handler.replay_nav_steps(self._normalize_nav_steps(nav_steps))
-        if not replay_ok:
-            logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
-            return False
-
-        await self.page.wait_for_timeout(500)
-        return True
+        return await self._page_state.restore_page_state(target_url, nav_steps)
 
     async def _enter_child_state(
         self,
@@ -387,19 +332,12 @@ class TaskPlanner:
         current_nav_steps: list[dict] | None,
     ) -> bool:
         """进入子节点状态，兼容普通跳转与同 URL 内态切换。"""
-        if child_url != current_url:
-            try:
-                await self.page.goto(child_url, wait_until="domcontentloaded", timeout=30000)
-                await self.page.wait_for_timeout(1500)
-                return True
-            except Exception as e:
-                logger.warning("[Planner] 进入子 URL 失败: %s", e)
-                return False
-
-        extra_steps = list(child_nav_steps or [])[len(list(current_nav_steps or [])) :]
-        if not extra_steps:
-            return True
-        return await self._restore_page_state(current_url, child_nav_steps)
+        return await self._page_state.enter_child_state(
+            current_url,
+            child_url,
+            child_nav_steps,
+            current_nav_steps,
+        )
 
 
     def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
@@ -830,105 +768,33 @@ class TaskPlanner:
 
     def _build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
         """基于 snapshot 为 planner 构造可回放的点击动作。"""
-        marks = getattr(snapshot, "marks", None) or []
-        for mark in marks:
-            if mark.mark_id != mark_id:
-                continue
-            return {
-                "action": "click",
-                "mark_id": mark_id,
-                "target_text": str(getattr(mark, "text", "") or "").strip(),
-                "clicked_element_text": str(getattr(mark, "text", "") or "").strip(),
-                "clicked_element_tag": str(getattr(mark, "tag", "") or "").strip(),
-                "clicked_element_href": str(getattr(mark, "href", "") or "").strip(),
-                "clicked_element_role": str(getattr(mark, "role", "") or "").strip(),
-                "clicked_element_xpath_candidates": [
-                    {
-                        "xpath": candidate.xpath,
-                        "priority": candidate.priority,
-                        "strategy": candidate.strategy,
-                    }
-                    for candidate in (getattr(mark, "xpath_candidates", None) or [])
-                    if getattr(candidate, "xpath", None)
-                ],
-                "success": True,
-            }
-        return None
+        return self._page_state.build_nav_click_step(snapshot, mark_id)
 
     async def _get_dom_signature(self) -> str:
         """获取页面 DOM 内容签名，用于检测内容变化。"""
-        try:
-            text = await self.page.evaluate("""() => {
-                const body = document.body;
-                return body ? body.innerText.trim() : '';
-            }""")
-            return hashlib.md5(text.encode("utf-8")).hexdigest() if text else ""
-        except Exception:
-            return ""
+        return await self._page_state.get_dom_signature()
 
     async def _restore_original_page(self, original_url: str) -> None:
         """回退到原始页面，等待 SPA 渲染完成。"""
-        try:
-            await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
-            await self.page.wait_for_timeout(2000)
-        except Exception as e:
-            logger.debug("[Planner] 恢复原始页面失败: %s", e)
+        await self._page_state.restore_original_page(original_url)
 
     def _build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
         """构造 TaskPlan 响应对象。"""
-        existing = self._load_saved_plan()
-        created_at = existing.created_at if existing else ""
-        updated_at = existing.updated_at if existing else ""
-
-        return TaskPlan(
-            plan_id=(existing.plan_id if existing else self._build_plan_id()),
-            original_request=self.user_request,
-            site_url=self.site_url,
-            subtasks=subtasks,
-            total_subtasks=len(subtasks),
-            created_at=created_at,
-            updated_at=updated_at,
-        )
+        return self._artifacts.build_plan(subtasks)
 
     def _build_plan_id(self) -> str:
-        raw = json.dumps(
-            {"site_url": self.site_url, "user_request": self.user_request},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return self._artifacts._build_plan_id()
 
     def _load_saved_plan(self) -> TaskPlan | None:
-        plan_file = Path(self.output_dir) / "task_plan.json"
-        data = load_json_if_exists(plan_file)
-        if not isinstance(data, dict):
-            return None
-        if str(data.get("site_url") or "") != self.site_url:
-            return None
-        if str(data.get("original_request") or "") != self.user_request:
-            return None
-        try:
-            return TaskPlan.model_validate(data)
-        except Exception:
-            return None
+        return self._artifacts._load_saved_plan()
 
     def _create_empty_plan(self) -> TaskPlan:
         """当分析失败或 LLM 未产生结果时，返回一个没有任何子任务的空计划。"""
-        return self._build_plan([])
+        return self._artifacts.create_empty_plan()
 
     def _save_plan(self, plan: TaskPlan) -> TaskPlan:
         """将生成的任务计划序列化为 JSON 文件，存储在指定的输出目录中。"""
-        output_path = Path(self.output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        plan_file = output_path / "task_plan.json"
-
-        persisted = write_json_idempotent(
-            plan_file,
-            plan.model_dump(mode="python"),
-            identity_keys=("site_url", "original_request", "plan_id"),
-        )
-        logger.info("[Planner] 任务计划已成功持久化至: %s", plan_file)
-        return TaskPlan.model_validate(persisted)
+        return self._artifacts.save_plan(plan)
 
     def _write_knowledge_doc(self, plan: TaskPlan) -> None:
         """将 DFS 发现过程写成层次化的 Markdown 知识文档。
@@ -939,48 +805,7 @@ class TaskPlanner:
 
         该文档会被 SkillSedimenter 读取，作为生成 Site Skill 的上下文。
         """
-        if not self._knowledge_entries:
-            return
-
-        domain = urlparse(self.site_url).netloc
-        leaf_count = sum(1 for e in self._knowledge_entries if e["is_leaf"])
-
-        lines: list[str] = []
-
-        # 站点概况
-        lines.append(f"# 采集计划: {domain}")
-        lines.append("")
-        lines.append("## 站点概况")
-        lines.append(f"- URL: {self.site_url}")
-        lines.append(f"- 需求: {self.user_request}")
-        lines.append(f"- 发现时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append(f"- 叶子任务数: {leaf_count}")
-        lines.append("")
-
-        # 发现过程
-        lines.append("## 发现过程")
-        lines.append("")
-
-        for entry in self._knowledge_entries:
-            depth = entry["depth"]
-            heading_level = "#" * (depth + 3)  # depth=0 -> ###, depth=1 -> ####
-            leaf_mark = " ✅" if entry["is_leaf"] else ""
-            children_info = ""
-            if not entry["is_leaf"] and entry["children_count"] > 0:
-                children_info = f"（{entry['children_count']} 个子分类）"
-
-            lines.append(f"{heading_level} {entry['name']}{leaf_mark}{children_info}")
-            lines.append(f"- URL: {entry['url']}")
-            lines.append(f"- 类型: {entry['page_type']}")
-            if entry["observations"]:
-                lines.append(f"- 观察: {entry['observations']}")
-            lines.append("")
-
-        # 写文件
-        doc_path = Path(self.output_dir) / "plan_knowledge.md"
-        doc_path.parent.mkdir(parents=True, exist_ok=True)
-        doc_path.write_text("\n".join(lines), encoding="utf-8")
-        logger.info("[Planner] 知识文档已写入: %s", doc_path)
+        self._artifacts.write_knowledge_doc(self._knowledge_entries, plan)
 
     def _sediment_draft_skill(self, plan: TaskPlan) -> None:
         """DFS 完成后立即生成 draft Skill，不等 Worker 执行。
@@ -989,61 +814,4 @@ class TaskPlanner:
         为避免当前运行中的 Skill 发现链路读取到草稿，先写入 output/draft_skills；
         后续由 Pipeline 收尾阶段再决定是否提升到 .agents/skills。
         """
-        if not self._knowledge_entries:
-            return
-
-        try:
-            from ...common.experience import SkillStore
-
-            domain = urlparse(self.site_url).netloc
-            subtask_names = [s.name for s in plan.subtasks]
-
-            # 渲染标准 SKILL.md 内容
-            frontmatter = yaml.safe_dump(
-                {
-                    "name": f"{domain} 站点采集",
-                    "description": f"{domain} 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。",
-                },
-                allow_unicode=True,
-                sort_keys=False,
-            ).strip()
-
-            lines: list[str] = []
-            lines.append("---")
-            lines.extend(frontmatter.splitlines())
-            lines.append("---")
-            lines.append("")
-            lines.append(f"# {domain} 采集指南（草稿）")
-            lines.append("")
-            lines.append("## 基本信息")
-            lines.append("")
-            lines.append(f"- **列表页 URL**: `{self.site_url}`")
-            lines.append(f"- **任务描述**: {self.user_request}")
-            lines.append(f"- **状态**: 📝 draft")
-            lines.append("")
-
-            if subtask_names:
-                lines.append("## 子任务")
-                lines.append("")
-                lines.append(f"本站共 {len(subtask_names)} 个子任务分类：")
-                lines.append("")
-                for sn in subtask_names:
-                    lines.append(f"- {sn}")
-                lines.append("")
-
-            # 嵌入 DFS 发现过程文档
-            knowledge_path = Path(self.output_dir) / "plan_knowledge.md"
-            if knowledge_path.exists():
-                knowledge = knowledge_path.read_text(encoding="utf-8")
-                lines.append("## DFS 发现过程")
-                lines.append("")
-                lines.append(knowledge.strip())
-                lines.append("")
-
-            content = "\n".join(lines)
-            store = SkillStore(skills_dir=Path(self.output_dir) / "draft_skills")
-            skill_path = store.save(domain, content)
-            logger.info("[Planner] Draft Skill 已写入输出目录: %s", skill_path)
-
-        except Exception as exc:
-            logger.debug("[Planner] Draft Skill 生成失败（不影响主流程）: %s", exc)
+        self._artifacts.sediment_draft_skill(self._knowledge_entries, plan)

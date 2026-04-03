@@ -63,7 +63,7 @@ async def resolve_mark_ids_from_map(
         if r.is_valid:
             continue
 
-        if r.status == "text_ambiguous" and r.candidate_mark_ids:
+        if r.status in {"text_ambiguous", "text_prefix_ambiguous"} and r.candidate_mark_ids:
             candidates = [m for m in snapshot.marks if m.mark_id in set(r.candidate_mark_ids)]
             selected = await disambiguate_mark_id_by_text(
                 page=page,
@@ -182,7 +182,7 @@ async def disambiguate_mark_id_by_text(
         response = await llm.ainvoke(messages)
         response_text = getattr(response, "content", "") or ""
 
-        message = parse_protocol_message(response_text)
+        message = parse_protocol_message(response)
         if not message:
             continue
         if message.get("action") != "select":

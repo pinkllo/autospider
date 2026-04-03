@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ...common.config import config
@@ -20,23 +19,23 @@ from ...common.llm import LLMDecider
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
 from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ..output.script_generator import ScriptGenerator
-from ...common.som import (
-    capture_screenshot_with_marks,
-    clear_overlay,
-    inject_and_scan,
-)
-from ...common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
 from ..collector import (
-    DetailPageVisit,
     URLCollectorResult,
     CommonPattern,
     XPathExtractor,
     LLMDecisionMaker,
     NavigationHandler,
-    smart_scroll,
 )
 from ..base.base_collector import BaseCollector
 from ..batch.batch_collector import BatchCollector
+from .shared_workflow import (
+    build_detail_visit,
+    extract_mark_id_text_map,
+    prepare_explore_skill_context,
+    resolve_click_mark_id,
+    resolve_selected_mark_ids,
+    run_detail_explore_loop,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -357,7 +356,8 @@ class URLCollector(BaseCollector):
 
     async def _prepare_skill_context(self) -> None:
         """为当前列表页选择并加载已选中的 skills 正文。"""
-        selected = await self.skill_runtime.get_or_select(
+        self.selected_skills, self.selected_skills_context = await prepare_explore_skill_context(
+            skill_runtime=self.skill_runtime,
             phase="url_collector",
             url=self.list_url,
             task_context={
@@ -367,136 +367,27 @@ class URLCollector(BaseCollector):
             llm=self.decider.llm,
             preselected_skills=self.selected_skills,
         )
-        self.selected_skills = [
-            {
-                "name": skill.name,
-                "description": skill.description,
-                "path": skill.path,
-                "domain": skill.domain,
-            }
-            for skill in selected
-        ]
-        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
-            self.skill_runtime.load_selected_bodies(selected)
-        )
 
     async def _explore_phase(self) -> None:
-        """探索阶段：进入多个详情页"""
-        explored = 0
-        max_attempts = self.explore_count * 5
-        attempts = 0
-        consecutive_bottom_hits = 0
-        max_bottom_hits = 3
-
-        while explored < self.explore_count and attempts < max_attempts:
-            attempts += 1
-            logger.info(
-                f"\n[Explore] ===== 尝试 {attempts}/{max_attempts}，已探索 {explored}/{self.explore_count} ====="
-            )
-
-            # 扫描页面
-            logger.info("[Explore] 扫描页面...")
-            await clear_overlay(self.page)
-            snapshot = await inject_and_scan(self.page)
-            screenshot_bytes, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-
-            # 保存截图
-            screenshot_path = self.screenshots_dir / f"explore_{attempts:03d}.png"
-            screenshot_path.write_bytes(screenshot_bytes)
-            logger.info(f"[Explore] 截图已保存: {screenshot_path.name}")
-
-            # 使用 LLM 决策
-            logger.info("[Explore] 调用 LLM 决策...")
-            llm_decision = await self.llm_decision_maker.ask_for_decision(
-                snapshot, screenshot_base64
-            )
-
-            if llm_decision is None:
-                logger.info("[Explore] LLM 决策失败，尝试滚动...")
-                if await smart_scroll(self.page):
-                    consecutive_bottom_hits = 0
-                else:
-                    consecutive_bottom_hits += 1
-                    logger.info(f"[Explore] 已到达页面底部 ({consecutive_bottom_hits}/{max_bottom_hits})")
-                    if consecutive_bottom_hits >= max_bottom_hits:
-                        logger.info("[Explore] ⚠ 连续到达页面底部，停止探索")
-                        break
-                continue
-
-            decision_type = llm_decision.get("action")
-            decision_args = (
-                llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
-            )
-
-            # 处理决策结果
-            if (
-                decision_type == "report"
-                and (decision_args.get("kind") or "").lower() == "page_kind"
-                and (decision_args.get("page_kind") or "").lower() == "detail"
-            ):
-                if await self._handle_current_is_detail(explored):
-                    explored += 1
-                    consecutive_bottom_hits = 0
-                else:
-                    if not await smart_scroll(self.page):
-                        consecutive_bottom_hits += 1
-                        if consecutive_bottom_hits >= max_bottom_hits:
-                            break
-                    else:
-                        consecutive_bottom_hits = 0
-                continue
-
-            if decision_type == "select" and (
-                (decision_args.get("purpose") or "").lower()
-                in {"detail_links", "detail_link", "detail"}
-            ):
-                new_explored = await self._handle_select_detail_links(
-                    llm_decision, snapshot, screenshot_base64, explored
-                )
-                if new_explored > explored:
-                    explored = new_explored
-                    consecutive_bottom_hits = 0
-                else:
-                    if not await smart_scroll(self.page):
-                        consecutive_bottom_hits += 1
-                        if consecutive_bottom_hits >= max_bottom_hits:
-                            break
-                    else:
-                        consecutive_bottom_hits = 0
-                continue
-
-            if decision_type == "click":
-                if await self._handle_click_to_enter(llm_decision, snapshot):
-                    explored += 1
-                    consecutive_bottom_hits = 0
-                continue
-
-            if decision_type == "scroll":
-                if await smart_scroll(self.page):
-                    consecutive_bottom_hits = 0
-                else:
-                    consecutive_bottom_hits += 1
-                    if consecutive_bottom_hits >= max_bottom_hits:
-                        break
-                continue
+        await run_detail_explore_loop(
+            page=self.page,
+            screenshots_dir=self.screenshots_dir,
+            llm_decision_maker=self.llm_decision_maker,
+            explore_count=self.explore_count,
+            on_current_detail=self._handle_current_is_detail,
+            on_select_detail_links=self._handle_select_detail_links,
+            on_click_to_enter=self._handle_click_to_enter,
+        )
 
     async def _handle_current_is_detail(self, explored: int) -> bool:
         """处理当前页面就是详情页的情况"""
         current_url = self.page.url
         if current_url not in self.visited_detail_urls:
             logger.info(f"[Explore] ✓ LLM 判断当前页面就是详情页: {current_url[:60]}...")
-
-            visit = DetailPageVisit(
-                list_page_url=self.list_url,
-                detail_page_url=current_url,
-                clicked_element_mark_id=0,
-                clicked_element_tag="page",
-                clicked_element_text="当前页面",
-                clicked_element_href=current_url,
-                clicked_element_role="page",
-                clicked_element_xpath_candidates=[],
+            visit = build_detail_visit(
+                list_url=self.list_url,
+                detail_url=current_url,
                 step_index=self.step_index,
-                timestamp=datetime.now().isoformat(),
             )
             self.detail_visits.append(visit)
             self.visited_detail_urls.add(current_url)
@@ -517,55 +408,26 @@ class URLCollector(BaseCollector):
     ) -> int:
         """处理选择详情链接的情况"""
         args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
-        reasoning = args.get("reasoning", "")
+        reasoning = llm_decision.get("thinking") or ""
         items = args.get("items") or []
-        mark_id_text_map: dict[str, str] = {}
-        for idx, it in enumerate(items):
-            if not isinstance(it, dict):
-                continue
-            text_value = str(it.get("text") or it.get("target_text") or "").strip()
-            if not text_value:
-                continue
-            raw_mark_id = it.get("mark_id")
-            key = str(raw_mark_id) if raw_mark_id is not None else f"text_only_{idx}"
-            mark_id_text_map[key] = text_value
+        mark_id_text_map = extract_mark_id_text_map(items)
         if not mark_id_text_map:
             mark_id_text_map = args.get("mark_id_text_map", {}) or {}
         old_mark_ids = args.get("mark_ids", [])
-
-        mark_ids = []
-
-        if mark_id_text_map:
-            logger.info(f"[Explore] LLM 返回了 {len(mark_id_text_map)} 个 mark_id-文本映射")
-
-            # 文本优先解析 mark_id（若 LLM 的 mark_id 与文本不一致，以文本在候选中定位为准）
-            should_resolve_by_text = config.url_collector.validate_mark_id or any(
-                not str(k).isdigit() for k in mark_id_text_map.keys()
-            )
-            if should_resolve_by_text:
-                # 修改原因：解析逻辑已统一抽到 common/som/text_first.py，这里直接调用避免重复封装
-                try:
-                    mark_ids = await resolve_mark_ids_from_map(
-                        page=self.page,
-                        llm=self.decider.llm,
-                        snapshot=snapshot,
-                        mark_id_text_map=mark_id_text_map,
-                        max_retries=config.url_collector.max_validation_retries,
-                    )
-                except Exception as e:
-                    logger.warning(f"[Explore] 文本解析 mark_id 失败，回退数字 id: {e}")
-                    mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
-            else:
-                mark_ids = [int(k) for k in mark_id_text_map.keys() if str(k).isdigit()]
-        elif old_mark_ids:
-            logger.info(f"[Explore] LLM 返回了 {len(old_mark_ids)} 个 mark_ids")
-            mark_ids = old_mark_ids
+        mark_ids = await resolve_selected_mark_ids(
+            page=self.page,
+            llm=self.decider.llm,
+            snapshot=snapshot,
+            mark_id_text_map=mark_id_text_map,
+            fallback_mark_ids=old_mark_ids,
+        )
 
         if not mark_ids:
             logger.info("[Explore] 没有选中任何链接")
             return explored
 
-        logger.info(f"[Explore] 理由: {reasoning[:100]}...")
+        if reasoning:
+            logger.info(f"[Explore] 理由: {reasoning[:100]}...")
 
         # 获取候选元素
         candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
@@ -584,20 +446,11 @@ class URLCollector(BaseCollector):
             )
 
             if url and url not in self.visited_detail_urls:
-                visit = DetailPageVisit(
-                    list_page_url=self.list_url,
-                    detail_page_url=url,
-                    clicked_element_mark_id=candidate.mark_id,
-                    clicked_element_tag=candidate.tag,
-                    clicked_element_text=candidate.text,
-                    clicked_element_href=candidate.href,
-                    clicked_element_role=candidate.role,
-                    clicked_element_xpath_candidates=[
-                        {"xpath": c.xpath, "priority": c.priority, "strategy": c.strategy}
-                        for c in candidate.xpath_candidates
-                    ],
+                visit = build_detail_visit(
+                    list_url=self.list_url,
+                    detail_url=url,
                     step_index=self.step_index,
-                    timestamp=datetime.now().isoformat(),
+                    element=candidate,
                 )
                 self.detail_visits.append(visit)
                 self.visited_detail_urls.add(url)
@@ -621,25 +474,14 @@ class URLCollector(BaseCollector):
         args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
         mark_id_raw = args.get("mark_id")
         target_text = args.get("target_text") or ""
-        try:
-            mark_id = int(mark_id_raw) if mark_id_raw is not None else None
-        except (TypeError, ValueError):
-            mark_id = None
         logger.info(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
-
-        # 文本优先纠正 mark_id，提高点击准确度
-        if target_text and (config.url_collector.validate_mark_id or mark_id is None):
-            try:
-                mark_id = await resolve_single_mark_id(
-                    page=self.page,
-                    llm=self.decider.llm,
-                    snapshot=snapshot,
-                    mark_id=mark_id,
-                    target_text=target_text,
-                    max_retries=config.url_collector.max_validation_retries,
-                )
-            except Exception as e:
-                raise ValueError(f"点击进入详情页：无法根据文本纠正 mark_id: {e}") from e
+        mark_id = await resolve_click_mark_id(
+            page=self.page,
+            llm=self.decider.llm,
+            snapshot=snapshot,
+            raw_mark_id=mark_id_raw,
+            target_text=target_text,
+        )
 
         # 查找标注元素并执行模拟点击/导航
         element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
@@ -649,20 +491,11 @@ class URLCollector(BaseCollector):
             )
             if url and url not in self.visited_detail_urls:
                 # 记录访问详情
-                visit = DetailPageVisit(
-                    list_page_url=self.list_url,
-                    detail_page_url=url,
-                    clicked_element_mark_id=element.mark_id,
-                    clicked_element_tag=element.tag,
-                    clicked_element_text=element.text,
-                    clicked_element_href=element.href,
-                    clicked_element_role=element.role,
-                    clicked_element_xpath_candidates=[
-                        {"xpath": c.xpath, "priority": c.priority, "strategy": c.strategy}
-                        for c in element.xpath_candidates
-                    ],
+                visit = build_detail_visit(
+                    list_url=self.list_url,
+                    detail_url=url,
                     step_index=self.step_index,
-                    timestamp=datetime.now().isoformat(),
+                    element=element,
                 )
                 self.detail_visits.append(visit)
                 self.visited_detail_urls.add(url)

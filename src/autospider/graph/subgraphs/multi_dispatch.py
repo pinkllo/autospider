@@ -254,6 +254,8 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     """(子任务态) 工作流执行节点。包裹了浏览器大模型爬虫 Worker 执行单一子任务逻辑。"""
     subtask = _restore_subtask(dict(state.get("subtask_payload") or {}))
     params = dict(state.get("normalized_params") or {})
+    if subtask.max_pages is None and params.get("max_pages") is not None:
+        subtask.max_pages = int(params["max_pages"])
     if subtask.target_url_count is None and params.get("target_url_count") is not None:
         subtask.target_url_count = int(params["target_url_count"])
 
@@ -268,6 +270,22 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
             headless=bool(params.get("headless", False)),
             thread_id=str(params.get("_thread_id") or ""),
             guard_intervention_mode="interrupt",
+            consumer_concurrency=(
+                int(params["consumer_concurrency"])
+                if params.get("consumer_concurrency") is not None
+                else None
+            ),
+            field_explore_count=(
+                int(params["field_explore_count"])
+                if params.get("field_explore_count") is not None
+                else None
+            ),
+            field_validate_count=(
+                int(params["field_validate_count"])
+                if params.get("field_validate_count") is not None
+                else None
+            ),
+            selected_skills=list(params.get("selected_skills") or []),
         )
         result = await worker.execute()
     except BrowserInterventionRequired as exc:

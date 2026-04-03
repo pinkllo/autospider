@@ -35,6 +35,10 @@ class SubTaskWorker:
         headless: bool = False,
         thread_id: str = "",
         guard_intervention_mode: str = "blocking",
+        consumer_concurrency: int | None = None,
+        field_explore_count: int | None = None,
+        field_validate_count: int | None = None,
+        selected_skills: list[dict[str, str]] | None = None,
     ):
         self.subtask = subtask
         self.raw_fields = fields
@@ -42,6 +46,10 @@ class SubTaskWorker:
         self.headless = headless
         self.thread_id = thread_id
         self.guard_intervention_mode = guard_intervention_mode
+        self.consumer_concurrency = consumer_concurrency
+        self.field_explore_count = field_explore_count
+        self.field_validate_count = field_validate_count
+        self.selected_skills = list(selected_skills or [])
 
     def _prepare_fields(self) -> list[FieldDefinition]:
         """将字段定义字典转换为 FieldDefinition 列表。"""
@@ -161,11 +169,18 @@ class SubTaskWorker:
             headless=self.headless,
             max_pages=self.subtask.max_pages,
             target_url_count=self.subtask.target_url_count,
-            consumer_concurrency=config.planner.subtask_consumer_concurrency,
+            consumer_concurrency=(
+                self.consumer_concurrency
+                if self.consumer_concurrency is not None
+                else config.planner.subtask_consumer_concurrency
+            ),
+            explore_count=self.field_explore_count,
+            validate_count=self.field_validate_count,
             pipeline_mode=pipeline_mode,
             redis_key_prefix=redis_key_prefix,
             guard_intervention_mode=self.guard_intervention_mode,
             guard_thread_id=self.thread_id,
+            selected_skills=self.selected_skills,
         )
 
         logger.info(

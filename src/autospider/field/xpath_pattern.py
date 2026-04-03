@@ -20,6 +20,14 @@ from ..common.logger import get_logger
 from ..common.llm.trace_logger import append_llm_trace
 from ..common.utils.paths import get_prompt_path
 from ..common.utils.prompt_template import render_template
+from .value_helpers import is_semantically_valid, looks_like_date, looks_like_number, looks_like_url
+from .xpath_helpers import (
+    build_xpath_fallback_chain,
+    clean_xpath,
+    normalize_xpath_for_comparison,
+    normalize_xpath_majority_key,
+    xpath_stability_score,
+)
 from .models import (
     PageExtractionRecord,
     CommonFieldXPath,
@@ -144,12 +152,7 @@ class FieldXPathExtractor:
         return xpaths
 
     def _normalize_majority_key(self, xpath: str) -> str:
-        value = self._clean_xpath(xpath)
-        if not value:
-            return ""
-        value = re.sub(r"\[\d+\]", "", value)
-        value = re.sub(r"\s+", "", value)
-        return value
+        return normalize_xpath_majority_key(xpath)
 
     def _select_majority_pattern(self, xpaths: list[str]) -> dict[str, float | int | str] | None:
         if len(xpaths) < 2:
@@ -246,12 +249,7 @@ class FieldXPathExtractor:
             return None
 
     def _clean_xpath(self, value: str) -> str:
-        xpath = value.strip()
-        if xpath.lower().startswith("xpath="):
-            xpath = xpath[6:].strip()
-        if xpath.startswith(("'", '"')) and xpath.endswith(("'", '"')):
-            xpath = xpath[1:-1].strip()
-        return xpath if xpath.startswith("/") else ""
+        return clean_xpath(value)
 
     def _build_union_pattern(self, xpaths: list[str]) -> str | None:
         """
@@ -391,42 +389,7 @@ class FieldXPathExtractor:
         return union_conf >= (current_conf + 0.25)
 
     def _xpath_stability_score(self, xpath: str) -> float:
-        """
-        对 XPath 做稳定性评分。
-        分数越高表示越偏向可复用、可迁移的结构。
-        """
-        value = (xpath or "").strip()
-        if not value:
-            return -10.0
-
-        lower = value.lower()
-        score = 0.0
-
-        if "@id=" in lower:
-            score += 3.0
-        if "@data-" in lower:
-            score += 1.8
-        if "@class" in lower:
-            score += 0.8
-        if lower.startswith("//*[@id="):
-            score += 0.5
-
-        numeric_index_count = len(re.findall(r"\[\d+\]", value))
-        score -= numeric_index_count * 0.2
-
-        depth = value.count("/")
-        if depth > 10:
-            score -= (depth - 10) * 0.08
-
-        # 吸顶/浮层/弹窗等节点通常随模板或滚动状态变化，不宜作为公共模式锚点
-        volatile_tokens = ("fixed", "sticky", "float", "popup", "modal", "dialog", "mask")
-        if any(token in lower for token in volatile_tokens):
-            score -= 1.8
-
-        if "|" in value:
-            score -= 0.6
-
-        return score
+        return xpath_stability_score(xpath)
 
     def _is_over_broad_pattern(self, xpath: str) -> bool:
         """
@@ -980,8 +943,7 @@ class FieldXPathExtractor:
         
         只删除变化的位置索引，保留属性选择器
         """
-        # 删除位置索引（纯数字的谓词）
-        return re.sub(r'\[\d+\]', '', xpath)
+        return normalize_xpath_for_comparison(xpath)
 
     def _fallback_extract_pattern(self, xpaths: list[str]) -> str | None:
         """
@@ -1159,28 +1121,7 @@ def _build_xpath_fallback_chain(
     fallback_xpaths: list[str] | None = None,
 ) -> list[str]:
     """构建 XPath 优先级链：主 XPath 在前，fallback 依次在后。"""
-    primary = (xpath_pattern or "").strip()
-    if not primary:
-        return []
-
-    chain: list[str] = []
-    if " | " in primary:
-        # 兼容历史 union 配置：`a | b` -> `a -> b`
-        parts = [part.strip() for part in primary.split(" | ") if part.strip()]
-        chain.extend(parts)
-    else:
-        chain.append(primary)
-
-    raw_fallbacks = fallback_xpaths or []
-    for xpath in raw_fallbacks:
-        value = str(xpath or "").strip()
-        if not value:
-            continue
-        if value not in chain:
-            chain.append(value)
-
-    # 仅保留看起来合法的 XPath
-    return [xpath for xpath in chain if xpath.startswith("/")]
+    return build_xpath_fallback_chain(xpath_pattern, fallback_xpaths)
 
 
 async def validate_xpath_pattern(
@@ -1337,50 +1278,22 @@ def _normalize_text(value: str) -> str:
 
 
 def _looks_like_url(value: str) -> bool:
-    value = (value or "").strip()
-    if value.startswith("/"):
-        return True
-    try:
-        parsed = urlparse(value)
-        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-    except Exception:
-        return False
+    return looks_like_url(value)
 
 
 def _looks_like_number(value: str) -> bool:
-    value = (value or "").strip()
-    # 通用数字表达式：支持货币前后缀、千分位、小数
-    return bool(re.fullmatch(r"[^\d\-+]*[-+]?\d[\d,\.\s]*[^\d]*", value))
+    return looks_like_number(value)
 
 
 def _looks_like_date(value: str) -> bool:
-    value = (value or "").strip()
-    patterns = [
-        r"\d{4}[-/年]\d{1,2}([-/月]\d{1,2}日?)?",
-        r"\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?",
-    ]
-    return any(re.search(p, value) for p in patterns)
+    return looks_like_date(value)
 
 
 def _is_semantically_valid(
     value: str,
     data_type: str | None,
 ) -> bool:
-    text = (value or "").strip()
-    if not text:
-        return False
-
-    dtype = (data_type or "").lower()
-    if dtype == "url":
-        return _looks_like_url(text)
-
-    if dtype == "number":
-        return _looks_like_number(text)
-
-    if dtype == "date":
-        return _looks_like_date(text)
-
-    return True
+    return is_semantically_valid(value, data_type)
 
 
 async def _wait_for_page_settle(

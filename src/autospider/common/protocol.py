@@ -172,17 +172,120 @@ def parse_json_dict_from_llm(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _extract_text_from_content(content: Any) -> str:
+    """从响应 content 中提取文本，兼容 str / block list。"""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                item_type = str(item.get("type") or "").strip().lower()
+                if item_type in {"text", "output_text"} and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+                    continue
+                if isinstance(item.get("content"), str):
+                    parts.append(item["content"])
+                    continue
+            text_attr = getattr(item, "text", None)
+            if isinstance(text_attr, str) and text_attr:
+                parts.append(text_attr)
+                continue
+            content_attr = getattr(item, "content", None)
+            if isinstance(content_attr, str) and content_attr:
+                parts.append(content_attr)
+        return "\n".join(part for part in parts if part).strip()
+    return str(content)
+
+
+def _extract_response_text(payload: Any) -> str:
+    """从原始 payload / 响应对象中提取可解析 JSON 的文本。"""
+    if payload is None:
+        return ""
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        return json.dumps(payload, ensure_ascii=False)
+    content = getattr(payload, "content", None)
+    return _extract_text_from_content(content)
+
+
+def _extract_reasoning_from_value(value: Any) -> str:
+    """递归从响应元数据中提取 thinking/reasoning 文本。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in value:
+            extracted = _extract_reasoning_from_value(item)
+            if extracted:
+                return extracted
+        return ""
+    if isinstance(value, dict):
+        for key in (
+            "thinking",
+            "reasoning",
+            "reasoning_content",
+            "reasoning_text",
+            "reasoning_summary",
+            "thought",
+            "thoughts",
+        ):
+            extracted = _extract_reasoning_from_value(value.get(key))
+            if extracted:
+                return extracted
+
+        item_type = str(value.get("type") or "").strip().lower()
+        if item_type in {"reasoning", "thinking"}:
+            for key in ("text", "content", "summary"):
+                extracted = _extract_reasoning_from_value(value.get(key))
+                if extracted:
+                    return extracted
+
+        for nested in value.values():
+            extracted = _extract_reasoning_from_value(nested)
+            if extracted:
+                return extracted
+        return ""
+    return ""
+
+
+def _extract_response_thinking(payload: Any) -> str:
+    """尽量从响应对象中提取模型思考文本。"""
+    if payload is None or isinstance(payload, (str, dict)):
+        return ""
+
+    for attr in ("additional_kwargs", "response_metadata"):
+        extracted = _extract_reasoning_from_value(getattr(payload, attr, None))
+        if extracted:
+            return extracted
+
+    content = getattr(payload, "content", None)
+    if isinstance(content, list):
+        extracted = _extract_reasoning_from_value(content)
+        if extracted:
+            return extracted
+
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # 统一结构解析
 # ---------------------------------------------------------------------------
 
 
-def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, Any] | None:
+def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
     """解析统一结构：action + args + thinking"""
     if payload is None:
         return None
 
-    data = payload if isinstance(payload, dict) else parse_json_dict_from_llm(payload)
+    data = payload if isinstance(payload, dict) else parse_json_dict_from_llm(_extract_response_text(payload))
     if not isinstance(data, dict):
         return None
 
@@ -208,10 +311,7 @@ def parse_protocol_message(payload: str | dict[str, Any] | None) -> dict[str, An
 
     message: dict[str, Any] = {"action": action, "args": args}
 
-    thinking = data.get("thinking")
-    if isinstance(thinking, str) and thinking:
-        message["thinking"] = thinking
-    elif isinstance(args.get("reasoning"), str) and args.get("reasoning"):
-        message["thinking"] = args.get("reasoning")
+    if extracted := _extract_response_thinking(payload):
+        message["thinking"] = extracted
 
     return message

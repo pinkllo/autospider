@@ -27,10 +27,17 @@ from ..common.protocol import coerce_bool
 from ..common.som import capture_screenshot_with_marks
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..domain.fields import FieldDefinition
+from .field_config import (
+    build_field_xpath_chain,
+    field_config_to_definition,
+    resolve_non_xpath_field_value,
+)
 from .field_decider import FieldDecider
 from .field_extractor import FieldExtractor
 
 from .models import FieldExtractionResult, PageExtractionRecord
+from .skill_context import apply_selected_skill_context, load_field_skill_context
+from .value_helpers import is_semantically_valid, looks_like_date, looks_like_number, looks_like_url
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -273,27 +280,17 @@ class BatchXPathExtractor:
     async def _prepare_skill_context(self, url: str) -> None:
         """为当前详情页选择并加载 skill 正文。"""
         llm = self.salvage_llm_decider.llm if self.salvage_llm_decider else None
-        selected = await self.skill_runtime.get_or_select(
-            phase="field_extractor",
+        self.selected_skills, self.selected_skills_context = await load_field_skill_context(
+            self.skill_runtime,
             url=url,
-            task_context={"fields": list(self.fields_config)},
+            fields=self.fields_config,
             llm=llm,
         )
-        self.selected_skills = [
-            {
-                "name": skill.name,
-                "description": skill.description,
-                "path": skill.path,
-                "domain": skill.domain,
-            }
-            for skill in selected
-        ]
-        self.selected_skills_context = self.skill_runtime.format_selected_skills_context(
-            self.skill_runtime.load_selected_bodies(selected)
+        apply_selected_skill_context(
+            self.salvage_field_decider,
+            selected_skills=self.selected_skills,
+            selected_skills_context=self.selected_skills_context,
         )
-        if self.salvage_field_decider:
-            self.salvage_field_decider.selected_skills = list(self.selected_skills)
-            self.salvage_field_decider.selected_skills_context = self.selected_skills_context
 
     def _required_fields_ok(self, record: PageExtractionRecord) -> bool:
         """判断当前页面是否已满足全部必填字段。"""
@@ -326,23 +323,7 @@ class BatchXPathExtractor:
 
     def _to_field_definition(self, field: dict) -> FieldDefinition:
         """将批处理字段配置转换为 FieldDecider 可消费的字段定义。"""
-        return FieldDefinition(
-            name=str(field.get("name") or "").strip(),
-            description=str(field.get("description") or "").strip(),
-            required=bool(field.get("required", True)),
-            data_type=str(field.get("data_type") or "text").strip().lower() or "text",
-            example=(str(field.get("example")) if field.get("example") is not None else None),
-            extraction_source=(
-                str(field.get("extraction_source")).strip()
-                if field.get("extraction_source") is not None
-                else None
-            ),
-            fixed_value=(
-                str(field.get("fixed_value")).strip()
-                if field.get("fixed_value") is not None
-                else None
-            ),
-        )
+        return field_config_to_definition(field)
 
     async def _salvage_required_fields(self, record: PageExtractionRecord) -> None:
         """必填字段兜底：XPath 失败后原地唤起 LLM 提取并尝试动态重定位 XPath。"""
@@ -562,19 +543,8 @@ class BatchXPathExtractor:
 
     def _is_value_semantically_valid(self, value: str, data_type: str) -> bool:
         """按字段类型做轻量语义校验，避免挽救阶段写入明显错误值。"""
-        text = (value or "").strip()
-        if not text:
-            return False
-
-        if self._is_url_type(data_type):
-            return self._looks_like_url(text)
-        if data_type == "number":
-            return self._looks_like_number(text)
-        if data_type == "date":
-            return self._looks_like_date(text)
-
-        # text 类型放宽，仅限制超长噪声文本
-        return len(text) <= 300
+        normalized_type = "url" if self._is_url_type(data_type) else data_type
+        return is_semantically_valid(value, normalized_type, max_text_length=300)
 
     def _relocate_xpath_from_value(
         self,
@@ -755,26 +725,7 @@ class BatchXPathExtractor:
 
     def _build_xpath_chain(self, field: dict) -> list[str]:
         """构建字段 XPath 优先级链：主 XPath 在前，fallback 在后。"""
-        primary = str(field.get("xpath") or "").strip()
-        if not primary:
-            return []
-
-        chain: list[str] = []
-        if " | " in primary:
-            # 兼容历史 union 配置：`a | b` -> `a -> b`
-            parts = [part.strip() for part in primary.split(" | ") if part.strip()]
-            chain.extend(parts)
-        else:
-            chain.append(primary)
-
-        fallbacks_raw = field.get("xpath_fallbacks")
-        if isinstance(fallbacks_raw, list):
-            for xpath in fallbacks_raw:
-                value = str(xpath or "").strip()
-                if value and value not in chain:
-                    chain.append(value)
-
-        return [xpath for xpath in chain if xpath.startswith("/")]
+        return build_field_xpath_chain(field)
 
     def _resolve_non_xpath_field_value(
         self,
@@ -782,44 +733,16 @@ class BatchXPathExtractor:
         *,
         url: str,
     ) -> tuple[str | None, str | None]:
-        source = str(field.get("extraction_source") or "").strip().lower()
-        fixed_value = field.get("fixed_value")
-
-        if source in {"constant", "subtask_context"}:
-            if fixed_value is None:
-                return None, None
-            value = str(fixed_value).strip()
-            return (value if value else None), source
-
-        if source == "task_url":
-            return url, "task_url"
-
-        data_type = str(field.get("data_type") or "").strip().lower()
-        name = str(field.get("name") or "").strip().lower()
-        if data_type == "url" and name in {"detail_url", "url", "source_url", "page_url"}:
-            return url, "task_url"
-        return None, None
+        return resolve_non_xpath_field_value(field, url=url)
 
     def _looks_like_url(self, value: str) -> bool:
-        text = (value or "").strip()
-        if text.startswith("/"):
-            return True
-        try:
-            parsed = urlparse(text)
-            return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-        except Exception:
-            return False
+        return looks_like_url(value)
 
     def _looks_like_number(self, value: str) -> bool:
-        return bool(re.fullmatch(r"[^\d\-+]*[-+]?\d[\d,\.\s]*[^\d]*", (value or "").strip()))
+        return looks_like_number(value)
 
     def _looks_like_date(self, value: str) -> bool:
-        text = (value or "").strip()
-        patterns = [
-            r"\d{4}[-/年]\d{1,2}([-/月]\d{1,2}日?)?",
-            r"\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?",
-        ]
-        return any(re.search(p, text) for p in patterns)
+        return looks_like_date(value)
 
     def _normalize_text(self, value: str) -> str:
         return re.sub(r"\s+", " ", value or "").strip().lower()

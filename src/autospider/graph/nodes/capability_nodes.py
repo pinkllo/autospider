@@ -3,27 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from langgraph.types import interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
-
-from ...common.browser import BrowserSession, create_browser_session
-from ...common.config import config
-from ...common.experience import SkillRuntime
-from ...common.storage.idempotent_io import write_json_idempotent
-from ...domain.fields import FieldDefinition
 from ...domain.planning import TaskPlan
-from ...crawler.batch.batch_collector import batch_collect_urls
-from ...crawler.explore.config_generator import generate_collection_config
-from ...crawler.explore.url_collector import collect_detail_urls
-from ...crawler.planner import TaskPlanner
-from ...field import run_field_pipeline
-from ...pipeline import run_pipeline
-from ...pipeline.aggregator import ResultAggregator
+from ...services import (
+    AggregationService,
+    CollectionService,
+    FieldService,
+    PipelineExecutionService,
+    PlanningService,
+)
 
 RETRY_DELAYS = (1.0, 2.0)
 
@@ -51,100 +43,62 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
     }
 
 
-def _field_definitions_from_dicts(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
-    fields: list[FieldDefinition] = []
-    for raw in raw_fields:
-        if not isinstance(raw, dict):
-            continue
-        fields.append(
-            FieldDefinition(
-                name=str(raw.get("name") or ""),
-                description=str(raw.get("description") or ""),
-                required=bool(raw.get("required", True)),
-                data_type=str(raw.get("data_type") or "text"),
-                example=raw.get("example"),
-            )
-        )
-    return fields
+def _thread_id(state: dict[str, Any]) -> str:
+    return str(state.get("thread_id") or "")
 
 
-def _artifact(label: str, path: str | Path) -> dict[str, str]:
-    return {"label": label, "path": str(path)}
+def _node_artifacts(service_result: dict[str, Any]) -> list[dict[str, str]]:
+    return list(service_result.get("artifacts") or [])
 
 
-def _browser_session_options(state: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "headless": bool(params.get("headless", False)),
-        "guard_intervention_mode": "interrupt",
-        "guard_thread_id": str(state.get("thread_id") or ""),
+def _node_payload(service_result: dict[str, Any], fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = service_result.get("result")
+    if isinstance(result, dict):
+        return {"result": result}
+    return fallback or {}
+
+
+def _extract_pipeline_result(service_result: dict[str, Any]) -> dict[str, Any]:
+    nested = service_result.get("pipeline_result") or service_result.get("result")
+    if isinstance(nested, dict) and nested:
+        return dict(nested)
+
+    keys = {
+        "total_urls",
+        "success_count",
+        "failed_count",
+        "success_rate",
+        "required_field_success_rate",
+        "validation_failure_count",
+        "execution_state",
+        "outcome_state",
+        "promotion_state",
+        "items_file",
+        "summary_file",
+        "execution_id",
     }
+    return {key: service_result[key] for key in keys if key in service_result}
 
 
-def _collection_config_payload(config_obj: Any) -> dict[str, Any]:
-    return {
-        "nav_steps": list(getattr(config_obj, "nav_steps", []) or []),
-        "common_detail_xpath": getattr(config_obj, "common_detail_xpath", None),
-        "pagination_xpath": getattr(config_obj, "pagination_xpath", None),
-        "jump_widget_xpath": getattr(config_obj, "jump_widget_xpath", None),
-        "list_url": str(getattr(config_obj, "list_url", "") or ""),
-        "task_description": str(getattr(config_obj, "task_description", "") or ""),
+def _extract_pipeline_summary(service_result: dict[str, Any], pipeline_result: dict[str, Any]) -> dict[str, Any]:
+    summary = service_result.get("summary")
+    if isinstance(summary, dict) and summary:
+        return dict(summary)
+
+    keys = {
+        "total_urls",
+        "success_count",
+        "failed_count",
+        "success_rate",
+        "required_field_success_rate",
+        "validation_failure_count",
+        "execution_state",
+        "outcome_state",
+        "promotion_state",
+        "execution_id",
+        "items_file",
     }
-
-
-def _load_collection_config_payload(config_path: str | Path) -> dict[str, Any]:
-    path = Path(config_path)
-    if not path.exists():
-        return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        "nav_steps": list(raw.get("nav_steps") or []),
-        "common_detail_xpath": raw.get("common_detail_xpath"),
-        "pagination_xpath": raw.get("pagination_xpath"),
-        "jump_widget_xpath": raw.get("jump_widget_xpath"),
-        "list_url": str(raw.get("list_url") or ""),
-        "task_description": str(raw.get("task_description") or ""),
-    }
-
-
-def _materialize_collection_config(output_dir: str | Path, collection_config: dict[str, Any]) -> Path:
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    config_path = output_path / "collection_config.json"
-    write_json_idempotent(
-        config_path,
-        dict(collection_config or {}),
-        identity_keys=("list_url", "task_description"),
-    )
-    return config_path
-
-
-def _collection_progress_payload(*, list_url: str, task_description: str, collected_count: int, current_page_num: int = 1, status: str = "COMPLETED") -> dict[str, Any]:
-    return {
-        "status": status,
-        "pause_reason": None,
-        "list_url": list_url,
-        "task_description": task_description,
-        "current_page_num": current_page_num,
-        "collected_count": collected_count,
-        "backoff_level": 0,
-        "consecutive_success_pages": 0,
-    }
-
-
-def _serialize_xpath_result(raw_result: Any) -> dict[str, Any] | None:
-    if not isinstance(raw_result, dict):
-        return None
-    return {
-        "fields": list(raw_result.get("fields") or []),
-        "records": list(raw_result.get("records") or []),
-        "total_urls": int(raw_result.get("total_urls", 0) or 0),
-        "success_count": int(raw_result.get("success_count", 0) or 0),
-    }
+    return {key: pipeline_result[key] for key in keys if key in pipeline_result}
 
 
 async def _run_with_retry(
@@ -176,67 +130,75 @@ async def _retry_after_browser_interrupt(
     return await retry(state)
 
 
+async def execute_pipeline(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return await PipelineExecutionService().execute(params=params, thread_id=thread_id)
+
+
+async def execute_url_collection(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return await CollectionService().collect_urls(params=params, thread_id=thread_id)
+
+
+async def execute_config_generation(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return await CollectionService().generate_config(params=params, thread_id=thread_id)
+
+
+async def execute_batch_collection(
+    *,
+    params: dict[str, Any],
+    thread_id: str,
+    collection_config: dict[str, Any],
+) -> dict[str, Any]:
+    return await CollectionService().batch_collect(
+        params=params,
+        state={"collection_config": collection_config},
+        thread_id=thread_id,
+    )
+
+
+async def execute_field_extraction(
+    *,
+    params: dict[str, Any],
+    thread_id: str,
+    collected_urls: list[str],
+) -> dict[str, Any]:
+    return await FieldService().execute(
+        params=params,
+        state={"collected_urls": collected_urls},
+        thread_id=thread_id,
+    )
+
+
+async def execute_planning(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return await PlanningService().execute(params=params, thread_id=thread_id)
+
+
+async def execute_aggregation(
+    *,
+    params: dict[str, Any],
+    task_plan: TaskPlan,
+    dispatch_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return AggregationService().execute(
+        params=params,
+        task_plan=task_plan,
+        dispatch_result=dispatch_result,
+    )
+
+
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or {})
+    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
         try:
-            result = await run_pipeline(
-                list_url=str(params.get("list_url") or ""),
-                task_description=str(params.get("task_description") or ""),
-                fields=_field_definitions_from_dicts(list(params.get("fields") or [])),
-                output_dir=str(params.get("output_dir") or "output"),
-                headless=bool(params.get("headless", False)),
-                explore_count=params.get("field_explore_count"),
-                validate_count=params.get("field_validate_count"),
-                consumer_concurrency=params.get("consumer_concurrency"),
-                max_pages=params.get("max_pages"),
-                target_url_count=params.get("target_url_count"),
-                pipeline_mode=params.get("pipeline_mode"),
-                guard_intervention_mode="interrupt",
-                guard_thread_id=str(state.get("thread_id") or ""),
-                selected_skills=list(params.get("selected_skills") or []),
-            )
+            service_result = await execute_pipeline(params=params, thread_id=_thread_id(state))
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
-        artifacts: list[dict[str, str]] = []
-        if result.get("items_file"):
-            artifacts.append(_artifact("pipeline_items", str(result["items_file"])))
-        summary_file = Path(str(params.get("output_dir") or "output")) / "pipeline_summary.json"
-        artifacts.append(_artifact("pipeline_summary", summary_file))
-        pipeline_result = {
-            "total_urls": int(result.get("total_urls", 0) or 0),
-            "success_count": int(result.get("success_count", 0) or 0),
-            "failed_count": int(result.get("failed_count", 0) or 0),
-            "success_rate": float(result.get("success_rate", 0.0) or 0.0),
-            "required_field_success_rate": float(
-                result.get("required_field_success_rate", 0.0) or 0.0
-            ),
-            "validation_failure_count": int(result.get("validation_failure_count", 0) or 0),
-            "execution_state": str(result.get("execution_state") or ""),
-            "outcome_state": str(result.get("outcome_state") or ""),
-            "promotion_state": str(result.get("promotion_state") or ""),
-            "items_file": str(result.get("items_file", "")),
-            "summary_file": str(summary_file),
-            "execution_id": str(result.get("execution_id", "")),
-        }
+        pipeline_result = _extract_pipeline_result(service_result)
         return {
-            **_ok({"result": pipeline_result}, artifacts),
+            **_ok(_node_payload(service_result, {"result": pipeline_result}), _node_artifacts(service_result)),
             "pipeline_result": pipeline_result,
-            "summary": {
-                "total_urls": pipeline_result["total_urls"],
-                "success_count": pipeline_result["success_count"],
-                "failed_count": pipeline_result["failed_count"],
-                "success_rate": pipeline_result["success_rate"],
-                "required_field_success_rate": pipeline_result["required_field_success_rate"],
-                "validation_failure_count": pipeline_result["validation_failure_count"],
-                "execution_state": pipeline_result["execution_state"],
-                "outcome_state": pipeline_result["outcome_state"],
-                "promotion_state": pipeline_result["promotion_state"],
-                "execution_id": pipeline_result["execution_id"],
-                "items_file": pipeline_result["items_file"],
-            },
+            "summary": _extract_pipeline_summary(service_result, pipeline_result),
         }
 
     node_result = await _run_with_retry(_runner, error_code="run_pipeline_failed")
@@ -248,41 +210,15 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            async with create_browser_session(
-                close_engine=True,
-                **_browser_session_options(state, params),
-            ) as session:
-                result = await collect_detail_urls(
-                    page=session.page,
-                    list_url=str(params.get("list_url") or ""),
-                    task_description=str(params.get("task") or ""),
-                    explore_count=int(params.get("explore_count") or 3),
-                    target_url_count=params.get("target_url_count"),
-                    max_pages=params.get("max_pages"),
-                    output_dir=str(params.get("output_dir") or "output"),
-                    persist_progress=False,
-                    selected_skills=list(params.get("selected_skills") or []),
-                )
+            service_result = await execute_url_collection(params=params, thread_id=_thread_id(state))
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
-        collected_urls = list(result.collected_urls)
-        collection_progress = _collection_progress_payload(
-            list_url=str(params.get("list_url") or ""),
-            task_description=str(params.get("task") or ""),
-            collected_count=len(collected_urls),
-        )
-        artifacts = [
-            _artifact("collected_urls_json", output_dir / "collected_urls.json"),
-            _artifact("collected_urls_txt", output_dir / "urls.txt"),
-            _artifact("collector_spider", output_dir / "spider.py"),
-        ]
         return {
-            **_ok({"result": {"collected_urls": len(collected_urls)}}, artifacts),
-            "collected_urls": collected_urls,
-            "collection_progress": collection_progress,
-            "summary": {"collected_urls": len(collected_urls)},
+            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+            "collected_urls": list(service_result.get("collected_urls") or []),
+            "collection_progress": dict(service_result.get("collection_progress") or {}),
+            "summary": dict(service_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="collect_urls_failed")
@@ -294,41 +230,14 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            async with create_browser_session(
-                close_engine=True,
-                **_browser_session_options(state, params),
-            ) as session:
-                config_result = await generate_collection_config(
-                    page=session.page,
-                    list_url=str(params.get("list_url") or ""),
-                    task_description=str(params.get("task") or ""),
-                    explore_count=int(params.get("explore_count") or 3),
-                    output_dir=str(params.get("output_dir") or "output"),
-                    persist_progress=False,
-                    selected_skills=list(params.get("selected_skills") or []),
-                )
+            service_result = await execute_config_generation(params=params, thread_id=_thread_id(state))
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
-        collection_config = _collection_config_payload(config_result)
-        artifacts = [_artifact("collection_config", output_dir / "collection_config.json")]
         return {
-            **_ok({
-                "result": {
-                    "nav_steps": len(config_result.nav_steps),
-                    "has_common_detail_xpath": bool(config_result.common_detail_xpath),
-                    "has_pagination_xpath": bool(config_result.pagination_xpath),
-                    "has_jump_widget_xpath": bool(config_result.jump_widget_xpath),
-                }
-            }, artifacts),
-            "collection_config": collection_config,
-            "summary": {
-                "nav_steps": len(config_result.nav_steps),
-                "has_common_detail_xpath": bool(config_result.common_detail_xpath),
-                "has_pagination_xpath": bool(config_result.pagination_xpath),
-                "has_jump_widget_xpath": bool(config_result.jump_widget_xpath),
-            },
+            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+            "collection_config": dict(service_result.get("collection_config") or {}),
+            "summary": dict(service_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="generate_config_failed")
@@ -337,52 +246,24 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    collection_config = dict(state.get("collection_config") or {})
 
     async def _runner() -> dict[str, Any]:
-        collection_config = dict(state.get("collection_config") or {})
-        config_path = str(params.get("config_path") or "").strip()
-        if not config_path and collection_config:
-            config_path = str(_materialize_collection_config(
-                str(params.get("output_dir") or "output"),
-                collection_config,
-            ))
-        if not config_path:
-            raise ValueError("missing_collection_config")
         try:
-            async with create_browser_session(
-                close_engine=True,
-                **_browser_session_options(state, params),
-            ) as session:
-                result = await batch_collect_urls(
-                    page=session.page,
-                    config_path=config_path,
-                    target_url_count=params.get("target_url_count"),
-                    max_pages=params.get("max_pages"),
-                    output_dir=str(params.get("output_dir") or "output"),
-                    persist_progress=False,
-                )
+            service_result = await execute_batch_collection(
+                params=params,
+                thread_id=_thread_id(state),
+                collection_config=collection_config,
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
-        if not collection_config:
-            collection_config = _load_collection_config_payload(config_path)
-        collected_urls = list(result.collected_urls)
-        collection_progress = _collection_progress_payload(
-            list_url=str(collection_config.get("list_url") or params.get("list_url") or ""),
-            task_description=str(collection_config.get("task_description") or params.get("task") or ""),
-            collected_count=len(collected_urls),
-        )
-        artifacts = [
-            _artifact("batch_collected_urls_json", output_dir / "collected_urls.json"),
-            _artifact("batch_collected_urls_txt", output_dir / "urls.txt"),
-        ]
         return {
-            **_ok({"result": {"collected_urls": len(collected_urls)}}, artifacts),
-            "collection_config": collection_config,
-            "collected_urls": collected_urls,
-            "collection_progress": collection_progress,
-            "summary": {"collected_urls": len(collected_urls)},
+            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+            "collection_config": dict(service_result.get("collection_config") or {}),
+            "collected_urls": list(service_result.get("collected_urls") or []),
+            "collection_progress": dict(service_result.get("collection_progress") or {}),
+            "summary": dict(service_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="batch_collect_failed")
@@ -391,57 +272,23 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    collected_urls = list(state.get("collected_urls") or [])
 
     async def _runner() -> dict[str, Any]:
-        use_explore = params.get("field_explore_count")
-        if use_explore is None:
-            use_explore = config.field_extractor.explore_count
-        use_validate = params.get("field_validate_count")
-        if use_validate is None:
-            use_validate = config.field_extractor.validate_count
-
-        urls = list(params.get("urls") or state.get("collected_urls") or [])
         try:
-            async with create_browser_session(
-                close_engine=True,
-                **_browser_session_options(state, params),
-            ) as session:
-                result = await run_field_pipeline(
-                    page=session.page,
-                    urls=urls,
-                    fields=_field_definitions_from_dicts(list(params.get("fields") or [])),
-                    output_dir=str(params.get("output_dir") or "output"),
-                    explore_count=use_explore,
-                    validate_count=use_validate,
-                    run_xpath=True,
-                    selected_skills=list(params.get("selected_skills") or []),
-                )
+            service_result = await execute_field_extraction(
+                params=params,
+                thread_id=_thread_id(state),
+                collected_urls=collected_urls,
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
-        fields_config = list(result.get("fields_config") or [])
-        xpath_result = _serialize_xpath_result(result.get("xpath_result"))
-        artifacts = [
-            _artifact("field_extraction_config", output_dir / "extraction_config.json"),
-            _artifact("field_extraction_result", output_dir / "extraction_result.json"),
-            _artifact("field_extracted_items", output_dir / "extracted_items.json"),
-        ]
         return {
-            **_ok({
-                "result": {
-                    "field_count": len(list(params.get("fields") or [])),
-                    "url_count": len(urls),
-                    "has_xpath_result": bool(xpath_result),
-                    "fields_config_count": len(fields_config),
-                }
-            }, artifacts),
-            "fields_config": fields_config,
-            "xpath_result": xpath_result,
-            "summary": {
-                "url_count": len(urls),
-                "field_count": len(list(params.get("fields") or [])),
-            },
+            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+            "fields_config": list(service_result.get("fields_config") or []),
+            "xpath_result": service_result.get("xpath_result"),
+            "summary": dict(service_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="field_extract_failed")
@@ -452,59 +299,24 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
-        planner_session = BrowserSession(**_browser_session_options(state, params))
-        await planner_session.start()
         try:
-            runtime = SkillRuntime()
-            planner = TaskPlanner(
-                page=planner_session.page,
-                site_url=str(params.get("site_url") or params.get("list_url") or ""),
-                user_request=str(params.get("request") or params.get("task_description") or ""),
-                output_dir=str(params.get("output_dir") or "output"),
-            )
-            planner_url = str(params.get("site_url") or params.get("list_url") or "")
-            selected_skill_meta = await runtime.get_or_select(
-                phase="planner",
-                url=planner_url,
-                task_context={
-                    "request": str(params.get("request") or params.get("task_description") or ""),
-                    "fields": list(params.get("fields") or []),
-                },
-                llm=planner.llm,
-                preselected_skills=list(params.get("selected_skills") or []),
-            ) if planner_url else []
-            planner.selected_skills = [
-                {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "path": skill.path,
-                    "domain": skill.domain,
-                }
-                for skill in selected_skill_meta
-            ]
-            planner.selected_skills_context = runtime.format_selected_skills_context(
-                runtime.load_selected_bodies(selected_skill_meta)
-            )
-            plan = await planner.plan()
+            service_result = await execute_planning(params=params, thread_id=_thread_id(state))
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
-        finally:
-            await planner_session.stop()
 
-        if not plan.subtasks:
+        task_plan = service_result.get("task_plan")
+        subtasks = list(getattr(task_plan, "subtasks", []) or [])
+        if not subtasks:
             return _fatal(
                 "planner_no_subtasks",
                 "规划阶段未生成任何可执行子任务，请检查站点结构识别结果或补充更明确的分类入口。",
             )
 
-        fields = list(params.get("fields") or [])
-        plan.shared_fields = fields
-        plan.total_subtasks = len(plan.subtasks)
         return {
-            **_ok({"task_plan": plan}),
-            "task_plan": plan,
-            "summary": {"total_subtasks": len(plan.subtasks)},
-            "selected_skills": list(planner.selected_skills or []),
+            **_ok(_node_payload(service_result, {"task_plan": task_plan})),
+            "task_plan": task_plan,
+            "summary": dict(service_result.get("summary") or {}),
+            "selected_skills": list(service_result.get("selected_skills") or []),
         }
 
     node_result = await _run_with_retry(_runner, error_code="plan_failed")
@@ -513,32 +325,20 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
-    plan = state.get("task_plan")
-    if not isinstance(plan, TaskPlan):
+    task_plan = state.get("task_plan")
+    if not isinstance(task_plan, TaskPlan):
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
 
     async def _runner() -> dict[str, Any]:
-        aggregator = ResultAggregator()
-        aggregate_result = aggregator.aggregate(
-            plan=plan,
-            output_dir=str(params.get("output_dir") or "output"),
+        service_result = await execute_aggregation(
+            params=params,
+            task_plan=task_plan,
+            dispatch_result=dict(state.get("dispatch_result") or {}),
         )
-        dispatch_result = dict(state.get("dispatch_result") or {})
-        dispatch_result.update(
-            {
-                "merged_items": aggregate_result.get("total_items", 0),
-                "unique_urls": aggregate_result.get("unique_urls", 0),
-            }
-        )
-        output_dir = Path(str(params.get("output_dir") or "output"))
-        artifacts = [
-            _artifact("merged_results", output_dir / "merged_results.jsonl"),
-            _artifact("merged_summary", output_dir / "merged_summary.json"),
-        ]
         return {
-            **_ok({"aggregate_result": aggregate_result, "dispatch_result": dispatch_result}, artifacts),
-            "aggregate_result": aggregate_result,
-            "summary": dispatch_result,
+            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+            "aggregate_result": dict(service_result.get("aggregate_result") or {}),
+            "summary": dict(service_result.get("summary") or {}),
         }
 
     return await _run_with_retry(_runner, error_code="aggregate_failed")
