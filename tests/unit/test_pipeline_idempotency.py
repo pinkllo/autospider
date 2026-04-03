@@ -8,6 +8,7 @@ from autospider.common.config import config
 from autospider.domain.fields import FieldDefinition
 from autospider.pipeline import runner as pipeline_runner
 from autospider.pipeline.runner import (
+    _classify_pipeline_result,
     _build_staged_record,
     _commit_items_file,
     _load_staged_records,
@@ -88,6 +89,11 @@ def test_strip_draft_markers_from_skill_content_for_promoted_skills():
 def test_should_promote_skill_requires_clean_success():
     assert _should_promote_skill(
         state={},
+        summary={"success_count": 3, "total_urls": 4},
+        validation_failures=[],
+    )
+    assert _should_promote_skill(
+        state={},
         summary={"success_count": 3, "total_urls": 3},
         validation_failures=[],
     )
@@ -98,7 +104,7 @@ def test_should_promote_skill_requires_clean_success():
     )
     assert not _should_promote_skill(
         state={},
-        summary={"success_count": 2, "total_urls": 3},
+        summary={"success_count": 7, "total_urls": 10},
         validation_failures=[],
     )
     assert not _should_promote_skill(
@@ -106,6 +112,28 @@ def test_should_promote_skill_requires_clean_success():
         summary={"success_count": 3, "total_urls": 3},
         validation_failures=[{"url": "https://example.com/1"}],
     )
+
+
+def test_classify_pipeline_result_uses_quality_threshold_and_validation_barrier():
+    reusable = _classify_pipeline_result(
+        total_urls=4,
+        success_count=3,
+        state_error=None,
+        validation_failures=[],
+    )
+    assert reusable["outcome_state"] == "success"
+    assert reusable["promotion_state"] == "reusable"
+    assert reusable["success_rate"] == 0.75
+
+    diagnostic = _classify_pipeline_result(
+        total_urls=10,
+        success_count=8,
+        state_error=None,
+        validation_failures=[{"url": "https://example.com/1"}],
+    )
+    assert diagnostic["outcome_state"] == "partial_success"
+    assert diagnostic["promotion_state"] == "diagnostic_only"
+    assert diagnostic["validation_failure_count"] == 1
 
 
 def test_prepare_pipeline_workspace_resets_stale_attempt_outputs(tmp_path):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import os
-from typing import Callable
+from collections import deque
 
 from .base import URLChannel, URLTask
 from ..storage.redis_manager import RedisQueueManager
@@ -44,6 +44,7 @@ class RedisURLChannel(URLChannel):
         self.max_retries = max_retries
         self._connected = False                        # Redis 是否连接成功的标记位
         self._recover_task: asyncio.Task | None = None # 用于自动检查并接管 stale/超时未处理的遗留信息的后台定时任务
+        self._retry_buffer: deque[tuple[str, str, dict]] = deque()
 
     async def _recover_pending_once(self) -> None:
         """执行一次遗留未 ack (Pending) 消息的恢复逻辑。
@@ -53,11 +54,13 @@ class RedisURLChannel(URLChannel):
         """
         if not self._connected or not config.redis.auto_recover:
             return
-        await self.manager.recover_stale_tasks(
+        recovered = await self.manager.recover_stale_tasks(
             consumer_name=self.consumer_name,
             max_idle_ms=config.redis.task_timeout_ms,
             count=config.redis.fetch_batch_size,
         )
+        if recovered:
+            self._retry_buffer.extend(recovered)
 
     def _start_recover_loop(self) -> None:
         """启动后台死信及僵尸任务恢复轮询循环。"""
@@ -128,12 +131,18 @@ class RedisURLChannel(URLChannel):
             else:
                 block_ms = int(timeout_s * 1000)
 
-        # 底层借用 redis-py `xreadgroup` 实现消费者抢占读取
-        tasks = await self.manager.fetch_task(
-            consumer_name=self.consumer_name,
-            block_ms=block_ms,
-            count=max_items,
-        )
+        buffered: list[tuple[str, str, dict]] = []
+        while self._retry_buffer and len(buffered) < max_items:
+            buffered.append(self._retry_buffer.popleft())
+        if buffered:
+            tasks = buffered
+        else:
+            # 底层借用 redis-py `xreadgroup` 实现消费者抢占读取
+            tasks = await self.manager.fetch_task(
+                consumer_name=self.consumer_name,
+                block_ms=block_ms,
+                count=max_items,
+            )
 
         wrapped: list[URLTask] = []
         # 对 Redis Stream 读取出来的结果集按条目进行拆包和重封装
@@ -149,13 +158,16 @@ class RedisURLChannel(URLChannel):
                 reason: str,
                 sid: str = stream_id,
                 did: str = data_id,
+                task_data: dict = data,
             ) -> None:
-                await self.manager.fail_task(
+                result = await self.manager.fail_task_state(
                     sid,
                     did,
                     reason,
                     max_retries=self.max_retries,
                 )
+                if result == "retry":
+                    self._retry_buffer.append((sid, did, dict(task_data)))
 
             # 组装返回最终给业务侧消费者的任务对象
             wrapped.append(URLTask(url=url, ack=_ack, fail=_fail))

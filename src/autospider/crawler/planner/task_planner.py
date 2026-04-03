@@ -116,13 +116,13 @@ class TaskPlanner:
 
         # 步骤 2: DFS 遍历
         all_subtasks: list[SubTask] = []
-        visited_urls: set[str] = set()
+        visited_states: set[str] = set()
 
         await self._dfs_explore(
             current_url=self.page.url,
             user_request=self.user_request,
             subtasks_out=all_subtasks,
-            visited_urls=visited_urls,
+            visited_states=visited_states,
             depth=0,
         )
 
@@ -142,7 +142,7 @@ class TaskPlanner:
         current_url: str,
         user_request: str,
         subtasks_out: list[SubTask],
-        visited_urls: set[str],
+        visited_states: set[str],
         depth: int,
         parent_nav_steps: list[dict] | None = None,
     ) -> None:
@@ -156,14 +156,20 @@ class TaskPlanner:
             current_url: 当前页面 URL。
             user_request: 用户需求描述（可能随深度细化）。
             subtasks_out: 收集结果的列表（引用传递）。
-            visited_urls: 已访问 URL 集合（防止环路）。
+            visited_states: 已访问状态集合（防止环路）。
             depth: 当前遍历深度。
             parent_nav_steps: 从首页到达当前页面的导航步骤（用于 Ajax 站）。
         """
-        if current_url in visited_urls:
-            logger.info("[Planner] DFS(depth=%d) 跳过已访问 URL: %s", depth, current_url[:80])
+        current_nav_steps = list(parent_nav_steps or [])
+        state_signature = self._build_page_state_signature(current_url, current_nav_steps)
+        if state_signature in visited_states:
+            logger.info(
+                "[Planner] DFS(depth=%d) 跳过已访问状态: %s",
+                depth,
+                state_signature[:120],
+            )
             return
-        visited_urls.add(current_url)
+        visited_states.add(state_signature)
 
         logger.info("[Planner] DFS(depth=%d) 分析页面: %s", depth, current_url[:80])
 
@@ -236,7 +242,7 @@ class TaskPlanner:
             return
 
         # 复用现有的 URL 提取逻辑获取每个子分类的 URL
-        children_with_urls = await self._extract_subtask_urls(analysis, snapshot)
+        children_with_urls = await self._extract_subtask_urls(analysis, snapshot, current_nav_steps)
 
         if not children_with_urls:
             # 提取全部失败 → 兜底
@@ -268,31 +274,132 @@ class TaskPlanner:
         for child in children_with_urls:
             child_url = child.list_url
             child_desc = child.task_description
+            child_nav_steps = list(child.nav_steps or current_nav_steps)
 
-            if child_url == current_url:
-                # 纯 Ajax：URL 不变，通过 nav_steps 区分
-                child_nav_steps = list(parent_nav_steps or []) + child.nav_steps
-            else:
-                child_nav_steps = list(parent_nav_steps or [])
+            await self._restore_page_state(current_url, current_nav_steps)
 
-            # DFS：进入子分类
-            if child_url != current_url:
-                await self.page.goto(child_url, wait_until="domcontentloaded", timeout=30000)
-                await self.page.wait_for_timeout(1500)
+            child_state_signature = self._build_page_state_signature(child_url, child_nav_steps)
+            if child_state_signature in visited_states:
+                logger.info(
+                    "[Planner] DFS(depth=%d) 跳过已访问子状态: %s",
+                    depth + 1,
+                    child_state_signature[:120],
+                )
+                continue
+
+            if not await self._enter_child_state(current_url, child_url, child_nav_steps, current_nav_steps):
+                logger.warning(
+                    "[Planner] DFS(depth=%d) 进入子状态失败，跳过: %s",
+                    depth + 1,
+                    child_desc[:80],
+                )
+                continue
 
             await self._dfs_explore(
                 current_url=child_url,
                 user_request=child_desc,
                 subtasks_out=subtasks_out,
-                visited_urls=visited_urls,
+                visited_states=visited_states,
                 depth=depth + 1,
                 parent_nav_steps=child_nav_steps,
             )
 
-            # 回退到当前节点
-            if self.page.url != current_url:
-                await self.page.goto(current_url, wait_until="domcontentloaded", timeout=15000)
+        await self._restore_page_state(current_url, current_nav_steps)
+
+    def _stable_nav_step_payload(self, step: dict) -> dict:
+        """提取用于状态判重的稳定导航字段。"""
+        payload = {
+            "action": str(step.get("action") or "").strip().lower(),
+            "target_text": str(step.get("target_text") or "").strip(),
+            "text": str(step.get("text") or "").strip(),
+            "key": str(step.get("key") or "").strip(),
+            "url": str(step.get("url") or "").strip(),
+            "scroll_delta": step.get("scroll_delta"),
+        }
+
+        xpath_candidates = step.get("clicked_element_xpath_candidates") or []
+        stable_candidates: list[dict[str, object]] = []
+        for candidate in xpath_candidates:
+            xpath = str((candidate or {}).get("xpath") or "").strip()
+            if not xpath:
+                continue
+            stable_candidates.append(
+                {
+                    "xpath": xpath,
+                    "priority": (candidate or {}).get("priority"),
+                    "strategy": str((candidate or {}).get("strategy") or "").strip(),
+                }
+            )
+        if stable_candidates:
+            payload["clicked_element_xpath_candidates"] = stable_candidates
+
+        return payload
+
+    def _normalize_nav_steps(self, nav_steps: list[dict] | None) -> list[dict]:
+        """规范化导航步骤，去掉不稳定字段。"""
+        normalized: list[dict] = []
+        for step in nav_steps or []:
+            normalized.append(self._stable_nav_step_payload(dict(step or {})))
+        return normalized
+
+    def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
+        """构造 URL + nav_steps 的稳定状态签名。"""
+        normalized_url = str(current_url or "").strip()
+        normalized_steps = self._normalize_nav_steps(nav_steps)
+        if not normalized_steps:
+            return normalized_url
+
+        raw = json.dumps(
+            {"url": normalized_url, "nav_steps": normalized_steps},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return f"{normalized_url}#{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+
+    async def _restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
+        """恢复到指定页面状态：先回到 anchor URL，再重放导航动作。"""
+        try:
+            await self.page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+            await self.page.wait_for_timeout(1500)
+        except Exception as e:
+            logger.warning("[Planner] 恢复页面 anchor 失败: %s", e)
+            return False
+
+        if not nav_steps:
+            return True
+
+        from ..collector.navigation_handler import NavigationHandler
+
+        nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
+        replay_ok = await nav_handler.replay_nav_steps(self._normalize_nav_steps(nav_steps))
+        if not replay_ok:
+            logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
+            return False
+
+        await self.page.wait_for_timeout(500)
+        return True
+
+    async def _enter_child_state(
+        self,
+        current_url: str,
+        child_url: str,
+        child_nav_steps: list[dict] | None,
+        current_nav_steps: list[dict] | None,
+    ) -> bool:
+        """进入子节点状态，兼容普通跳转与同 URL 内态切换。"""
+        if child_url != current_url:
+            try:
+                await self.page.goto(child_url, wait_until="domcontentloaded", timeout=30000)
                 await self.page.wait_for_timeout(1500)
+                return True
+            except Exception as e:
+                logger.warning("[Planner] 进入子 URL 失败: %s", e)
+                return False
+
+        extra_steps = list(child_nav_steps or [])[len(list(current_nav_steps or [])) :]
+        if not extra_steps:
+            return True
+        return await self._restore_page_state(current_url, child_nav_steps)
 
 
     def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
@@ -449,7 +556,7 @@ class TaskPlanner:
             return None
 
     async def _extract_subtask_urls(
-        self, analysis: dict, snapshot: object
+        self, analysis: dict, snapshot: object, parent_nav_steps: list[dict] | None = None
     ) -> list[SubTask]:
         """根据 LLM 的分析结果，为每个识别出的分类提取真实的列表页 URL。
 
@@ -530,9 +637,16 @@ class TaskPlanner:
                         logger.info("[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, list_url[:80])
 
             # 策略 3: SPA 兜底 — 模拟点击元素，观察 URL 或 DOM 变化（通过原生 XPath 定位）
+            nav_steps_for_child = list(parent_nav_steps or [])
             if not list_url and mark_id is not None:
-                list_url = await self._get_url_by_navigation(mark_id, original_url, snapshot)
+                list_url, navigation_steps = await self._get_url_by_navigation(
+                    mark_id,
+                    original_url,
+                    snapshot,
+                    parent_nav_steps=parent_nav_steps,
+                )
                 if list_url:
+                    nav_steps_for_child = list(navigation_steps or nav_steps_for_child)
                     logger.info("[Planner] [%s] 策略3：通过 SPA 模拟点击获取 URL: %s", name, list_url[:80])
 
             if not list_url:
@@ -560,6 +674,7 @@ class TaskPlanner:
                 task_description=task_desc,
                 priority=idx,
                 max_pages=raw.get("estimated_pages"),
+                nav_steps=nav_steps_for_child,
             )
             subtasks.append(subtask)
 
@@ -620,8 +735,12 @@ class TaskPlanner:
         return ""
 
     async def _get_url_by_navigation(
-        self, mark_id: int, original_url: str, snapshot: object
-    ) -> str:
+        self,
+        mark_id: int,
+        original_url: str,
+        snapshot: object,
+        parent_nav_steps: list[dict] | None = None,
+    ) -> tuple[str, list[dict]]:
         """针对 SPA 网站的兜底策略：通过原生 XPath 定位元素，模拟点击并检测跳转。
 
         检测逻辑：
@@ -636,12 +755,18 @@ class TaskPlanner:
             snapshot: SoM 快照，用于获取原生 XPath 定位元素。
 
         Returns:
-            str: 点击跳转后的新 URL；若 URL 和 DOM 均未发生变化，则返回空字符串。
+            tuple[str, list[dict]]: 点击跳转后的新 URL 以及到达子状态的导航链；
+                若 URL 和 DOM 均未发生变化，则返回 ("", 原父导航链)。
         """
         xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
         if not xpath:
             logger.debug("[Planner]   mark_id=%d 在 snapshot 中无可用 XPath", mark_id)
-            return ""
+            return "", list(parent_nav_steps or [])
+
+        nav_step_record = self._build_nav_click_step(snapshot, mark_id)
+        if not nav_step_record:
+            logger.debug("[Planner]   mark_id=%d 无法构造导航回放动作", mark_id)
+            return "", list(parent_nav_steps or [])
 
         try:
             logger.info("[Planner]   触发模拟点击 mark_id=%d (xpath=%s)...", mark_id, xpath[:60])
@@ -653,7 +778,7 @@ class TaskPlanner:
 
             if await locator.count() == 0:
                 logger.warning("[Planner]   XPath 未匹配到元素: %s", xpath[:80])
-                return ""
+                return "", list(parent_nav_steps or [])
 
             await locator.first.click(timeout=5000)
             await self.page.wait_for_timeout(2000)
@@ -677,8 +802,8 @@ class TaskPlanner:
 
             if url_changed and url_after:
                 logger.info("[Planner]   SPA 路由跳转成功: %s", url_after[:80])
-                await self._restore_original_page(original_url)
-                return url_after
+                await self._restore_page_state(original_url, parent_nav_steps)
+                return url_after, list(parent_nav_steps or [])
 
             dom_sig_after = await self._get_dom_signature()
             logger.info(
@@ -691,21 +816,44 @@ class TaskPlanner:
                 logger.info(
                     "[Planner]   URL 未变但 DOM 内容已更新（纯 Ajax SPA），使用原始 URL"
                 )
-                await self._restore_original_page(original_url)
-                return url_before
+                child_nav_steps = list(parent_nav_steps or []) + [nav_step_record]
+                await self._restore_page_state(original_url, parent_nav_steps)
+                return url_before, child_nav_steps
 
             logger.info("[Planner]   模拟点击后 URL 和 DOM 均未发生显著变化")
 
         except Exception as e:
             logger.debug("[Planner]   模拟点击导航 mark_id=%d 失败: %s", mark_id, e)
-            try:
-                if self.page.url != original_url:
-                    await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
-                    await self.page.wait_for_timeout(1500)
-            except Exception:
-                pass
+            await self._restore_page_state(original_url, parent_nav_steps)
 
-        return ""
+        return "", list(parent_nav_steps or [])
+
+    def _build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
+        """基于 snapshot 为 planner 构造可回放的点击动作。"""
+        marks = getattr(snapshot, "marks", None) or []
+        for mark in marks:
+            if mark.mark_id != mark_id:
+                continue
+            return {
+                "action": "click",
+                "mark_id": mark_id,
+                "target_text": str(getattr(mark, "text", "") or "").strip(),
+                "clicked_element_text": str(getattr(mark, "text", "") or "").strip(),
+                "clicked_element_tag": str(getattr(mark, "tag", "") or "").strip(),
+                "clicked_element_href": str(getattr(mark, "href", "") or "").strip(),
+                "clicked_element_role": str(getattr(mark, "role", "") or "").strip(),
+                "clicked_element_xpath_candidates": [
+                    {
+                        "xpath": candidate.xpath,
+                        "priority": candidate.priority,
+                        "strategy": candidate.strategy,
+                    }
+                    for candidate in (getattr(mark, "xpath_candidates", None) or [])
+                    if getattr(candidate, "xpath", None)
+                ],
+                "success": True,
+            }
+        return None
 
     async def _get_dom_signature(self) -> str:
         """获取页面 DOM 内容签名，用于检测内容变化。"""

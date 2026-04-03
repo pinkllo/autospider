@@ -208,6 +208,15 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
         pipeline_result = {
             "total_urls": int(result.get("total_urls", 0) or 0),
             "success_count": int(result.get("success_count", 0) or 0),
+            "failed_count": int(result.get("failed_count", 0) or 0),
+            "success_rate": float(result.get("success_rate", 0.0) or 0.0),
+            "required_field_success_rate": float(
+                result.get("required_field_success_rate", 0.0) or 0.0
+            ),
+            "validation_failure_count": int(result.get("validation_failure_count", 0) or 0),
+            "execution_state": str(result.get("execution_state") or ""),
+            "outcome_state": str(result.get("outcome_state") or ""),
+            "promotion_state": str(result.get("promotion_state") or ""),
             "items_file": str(result.get("items_file", "")),
             "summary_file": str(summary_file),
             "execution_id": str(result.get("execution_id", "")),
@@ -218,6 +227,14 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
             "summary": {
                 "total_urls": pipeline_result["total_urls"],
                 "success_count": pipeline_result["success_count"],
+                "failed_count": pipeline_result["failed_count"],
+                "success_rate": pipeline_result["success_rate"],
+                "required_field_success_rate": pipeline_result["required_field_success_rate"],
+                "validation_failure_count": pipeline_result["validation_failure_count"],
+                "execution_state": pipeline_result["execution_state"],
+                "outcome_state": pipeline_result["outcome_state"],
+                "promotion_state": pipeline_result["promotion_state"],
+                "execution_id": pipeline_result["execution_id"],
                 "items_file": pipeline_result["items_file"],
             },
         }

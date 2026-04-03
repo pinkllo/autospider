@@ -47,11 +47,27 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
     return {"summary": summary}
 
 
+def _resolve_summary_outcome_state(summary: dict[str, Any]) -> str:
+    outcome_state = str(summary.get("outcome_state") or "").strip().lower()
+    if outcome_state in {"success", "partial_success", "failed"}:
+        return outcome_state
+
+    failed = int(summary.get("failed", 0) or summary.get("failed_count", 0) or 0)
+    completed = int(summary.get("completed", 0) or summary.get("success_count", 0) or 0)
+    if failed > 0 and completed > 0:
+        return "partial_success"
+    if failed > 0:
+        return "failed"
+    return "success"
+
+
 def _try_register_task(state: dict[str, Any], summary: dict[str, Any]) -> None:
     """尝试将已完成的任务注册到任务注册表，不影响主流程。"""
     try:
         node_status = str(state.get("node_status") or "")
         if node_status not in {"ok", ""}:
+            return
+        if str(summary.get("promotion_state") or "").strip().lower() != "reusable":
             return
 
         params = dict(state.get("normalized_params") or state.get("cli_args") or {})
@@ -84,7 +100,7 @@ def _try_register_task(state: dict[str, Any], summary: dict[str, Any]) -> None:
             fields=fields,
             execution_id=str(summary.get("execution_id") or summary.get("run_id") or ""),
             output_dir=output_dir,
-            status="completed",
+            status=str(summary.get("execution_state") or "completed"),
             collected_count=collected,
         )
     except Exception as exc:
@@ -106,12 +122,7 @@ def finalize_result(state: dict[str, Any]) -> dict[str, Any]:
         status = "failed"
     else:
         summary = dict(state.get("summary") or {})
-        failed = int(summary.get("failed", 0) or 0)
-        completed = int(summary.get("completed", 0) or 0)
-        if failed > 0 and completed > 0:
-            status = "partial_success"
-        elif failed > 0:
-            status = "failed"
+        status = _resolve_summary_outcome_state(summary)
 
     return {
         "status": status,

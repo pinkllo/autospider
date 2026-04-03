@@ -76,6 +76,44 @@ def _restore_subtask(payload: dict[str, Any]) -> SubTask:
     return SubTask.model_validate(dict(payload or {}))
 
 
+def _inherit_parent_nav_steps(payload: dict[str, Any], plan: TaskPlan) -> dict[str, Any]:
+    """为运行时派生子任务补齐父导航链。"""
+    hydrated = dict(payload or {})
+    if hydrated.get("nav_steps"):
+        return hydrated
+
+    parent_id = str(hydrated.get("parent_id") or "").strip()
+    if not parent_id:
+        return hydrated
+
+    for subtask in plan.subtasks:
+        if subtask.id != parent_id:
+            continue
+        hydrated["nav_steps"] = list(subtask.nav_steps or [])
+        return hydrated
+    return hydrated
+
+
+def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
+    default_value = int(getattr(config.planner, "runtime_subtasks_max_children", 1) or 1)
+    raw_value = params.get("runtime_subtask_max_children")
+    try:
+        resolved = int(raw_value) if raw_value is not None else default_value
+    except (TypeError, ValueError):
+        resolved = default_value
+    return max(1, resolved)
+
+
+def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
+    default_value = bool(getattr(config.planner, "runtime_subtasks_use_main_model", False))
+    raw_value = params.get("runtime_subtasks_use_main_model")
+    if raw_value is None:
+        return default_value
+    if isinstance(raw_value, bool):
+        return raw_value
+    return str(raw_value).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
 def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
     params = dict(state.get("normalized_params") or {})
     raw_value = params.get("max_concurrent")
@@ -287,6 +325,7 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
     known = {_subtask_signature(subtask.model_dump(mode="python")) for subtask in plan.subtasks}
     queue: list[dict[str, Any]] = []
     for payload in list(state.get("spawned_subtasks") or []):
+        payload = _inherit_parent_nav_steps(payload, plan)
         signature = _subtask_signature(payload)
         if signature in known:
             continue

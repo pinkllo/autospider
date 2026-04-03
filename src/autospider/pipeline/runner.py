@@ -129,6 +129,64 @@ def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
         logger.debug("[Pipeline] 清理 Draft Skill 失败（不影响主流程）: %s", exc)
 
 
+def _load_validation_failures(output_path: Path) -> list[dict]:
+    """从 extraction_result.json 读取校验失败记录。"""
+    detail_path = output_path / "extraction_result.json"
+    if not detail_path.exists():
+        return []
+    try:
+        payload = json.loads(detail_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    failures = payload.get("validation_failures", [])
+    return list(failures) if isinstance(failures, list) else []
+
+
+def _classify_pipeline_result(
+    *,
+    total_urls: int,
+    success_count: int,
+    state_error: object,
+    validation_failures: list[dict],
+) -> dict[str, object]:
+    """统一产出 pipeline 执行状态、结果状态和可复用等级。"""
+    failed_count = max(total_urls - success_count, 0)
+    success_rate = (success_count / total_urls) if total_urls > 0 else 0.0
+    validation_failure_count = len(validation_failures)
+    execution_state = "failed" if state_error else "completed"
+
+    if success_count <= 0 or total_urls <= 0:
+        outcome_state = "failed"
+    elif not state_error and success_rate > 0.7 and validation_failure_count == 0:
+        outcome_state = "success"
+    else:
+        outcome_state = "partial_success"
+
+    if (
+        total_urls > 0
+        and success_count > 0
+        and not state_error
+        and success_rate > 0.7
+        and validation_failure_count == 0
+    ):
+        promotion_state = "reusable"
+    elif success_count > 0:
+        promotion_state = "diagnostic_only"
+    else:
+        promotion_state = "rejected"
+
+    return {
+        "execution_state": execution_state,
+        "outcome_state": outcome_state,
+        "promotion_state": promotion_state,
+        "success_rate": round(success_rate, 4),
+        "failed_count": failed_count,
+        # 现阶段按页面级成功率近似必填字段成功率，保持判定口径一致。
+        "required_field_success_rate": round(success_rate, 4),
+        "validation_failure_count": validation_failure_count,
+    }
+
+
 def _should_promote_skill(
     *,
     state: dict[str, object],
@@ -136,15 +194,16 @@ def _should_promote_skill(
     validation_failures: list[dict],
 ) -> bool:
     """判断本次运行是否满足正式 skill 的提升条件。"""
-    success_count = int(summary.get("success_count", 0) or 0)
-    total_urls = int(summary.get("total_urls", 0) or 0)
-    if success_count <= 0 or total_urls <= 0:
-        return False
-    if state.get("error"):
-        return False
-    if validation_failures:
-        return False
-    return success_count == total_urls
+    if str(summary.get("promotion_state") or "").strip().lower() == "reusable":
+        return True
+
+    classified = _classify_pipeline_result(
+        total_urls=int(summary.get("total_urls", 0) or 0),
+        success_count=int(summary.get("success_count", 0) or 0),
+        state_error=state.get("error"),
+        validation_failures=validation_failures,
+    )
+    return bool(classified.get("promotion_state") == "reusable")
 
 
 def _strip_draft_markers_from_skill_content(content: str) -> str:
@@ -514,10 +573,19 @@ async def run_pipeline(
         committed_summary = _build_summary_from_staged_records(committed_records)
         summary["total_urls"] = committed_summary["total_urls"]
         summary["success_count"] = committed_summary["success_count"]
+        validation_failures = _load_validation_failures(output_path)
+        summary.update(
+            _classify_pipeline_result(
+                total_urls=summary["total_urls"],
+                success_count=summary["success_count"],
+                state_error=state.get("error"),
+                validation_failures=validation_failures,
+            )
+        )
         _commit_items_file(items_path, committed_records)
         _write_summary(summary_path, summary)
         # 标记进度追踪完成
-        final_status = "failed" if state.get("error") else "completed"
+        final_status = str(summary.get("execution_state") or "completed")
         await tracker.mark_done(final_status)
 
         # 经验沉淀：仅高质量成功运行会写入正式 Skill
@@ -880,14 +948,7 @@ def _try_sediment_skill(
                 pass
 
         # 读取校验失败记录
-        validation_failures: list[dict] = []
-        er_path = output_path / "extraction_result.json"
-        if er_path.exists():
-            try:
-                er_data = json.loads(er_path.read_text(encoding="utf-8"))
-                validation_failures = er_data.get("validation_failures", [])
-            except Exception:
-                pass
+        validation_failures = _load_validation_failures(output_path)
 
         if not _should_promote_skill(
             state=state,

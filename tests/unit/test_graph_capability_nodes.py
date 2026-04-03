@@ -246,3 +246,43 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
     assert result["fields_config"] == [{"name": "title", "xpath": "//h1"}]
     assert result["xpath_result"]["total_urls"] == 2
     assert result["summary"]["url_count"] == 2
+
+
+def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
+    async def _fake_run_pipeline(**kwargs):
+        return {
+            "total_urls": 4,
+            "success_count": 3,
+            "failed_count": 1,
+            "success_rate": 0.75,
+            "required_field_success_rate": 0.75,
+            "validation_failure_count": 0,
+            "execution_state": "completed",
+            "outcome_state": "success",
+            "promotion_state": "reusable",
+            "items_file": str(tmp_path / "pipeline_extracted_items.jsonl"),
+            "execution_id": "exec_123",
+        }
+
+    monkeypatch.setattr(capability_nodes, "run_pipeline", _fake_run_pipeline)
+
+    result = asyncio.run(
+        capability_nodes.run_pipeline_node(
+            {
+                "thread_id": "thread-1",
+                "normalized_params": {
+                    "list_url": "https://example.com/list",
+                    "task_description": "采集公告",
+                    "fields": [{"name": "title", "description": "标题"}],
+                    "output_dir": str(tmp_path),
+                },
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert result["pipeline_result"]["outcome_state"] == "success"
+    assert result["pipeline_result"]["promotion_state"] == "reusable"
+    assert result["pipeline_result"]["success_rate"] == 0.75
+    assert result["summary"]["failed_count"] == 1
+    assert result["summary"]["execution_state"] == "completed"

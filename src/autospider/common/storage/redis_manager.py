@@ -387,10 +387,42 @@ class RedisQueueManager:
             self.logger.error(f"批量推入任务异常: {e}")
             return success_count
 
+    async def _hydrate_stream_messages(self, response: Any) -> list[tuple[str, str, dict]]:
+        """将 Stream 响应批量补全为包含业务数据的任务列表。"""
+        if not self.client or not response:
+            return []
+
+        messages_info = []
+        data_ids = []
+        for _, messages in response:
+            for stream_id, fields in messages:
+                data_id = fields.get("data_id")
+                if data_id:
+                    messages_info.append((stream_id, data_id))
+                    data_ids.append(data_id)
+
+        if not data_ids:
+            return []
+
+        data_jsons = await self.client.hmget(self.data_key, data_ids)
+
+        tasks = []
+        for (stream_id, data_id), data_json in zip(messages_info, data_jsons):
+            if data_json:
+                tasks.append((stream_id, data_id, json.loads(data_json)))
+
+        return tasks
+
     async def fetch_task(
         self, consumer_name: str, block_ms: int = 5000, count: int = 1
     ) -> list[tuple[str, str, dict]]:
-        """从消费者组中获取任务。获取到的消息会自动进入该消费者的专属 PEL (Pending Entries List)。
+        """从消费者组中获取任务。
+
+        仅拉取新的 `>` 消息。
+
+        超时接管任务与本地重试任务的重新投递由 channel 层完成，避免在
+        manager 层直接重读当前消费者的 pending 消息，导致未完成任务被
+        过早重复派发。
 
         Args:
             consumer_name: 当前消费者的唯一名称
@@ -420,28 +452,7 @@ class RedisQueueManager:
                 count=count,
                 block=block_ms,
             )
-
-            if not response:
-                return []
-
-            # 3. 提取 data_id 并使用 HMGET 批量合并请求 (1 RTT)
-            messages_info = []
-            data_ids = []
-            for _, messages in response:
-                for stream_id, fields in messages:
-                    data_id = fields.get("data_id")
-                    if data_id:
-                        messages_info.append((stream_id, data_id))
-                        data_ids.append(data_id)
-
-            if not data_ids: return []
-
-            data_jsons = await self.client.hmget(self.data_key, data_ids)
-            
-            tasks = []
-            for (stream_id, data_id), dj in zip(messages_info, data_jsons):
-                if dj:
-                    tasks.append((stream_id, data_id, json.loads(dj)))
+            tasks = await self._hydrate_stream_messages(response)
 
             if tasks:
                 self.logger.debug(f"消费者 [{consumer_name}] 成功获取 {len(tasks)} 个任务")
@@ -483,8 +494,27 @@ class RedisQueueManager:
         
         使用 Lua 脚本实现原子状态机转换，避免并发下的计数器覆盖。
         """
+        state = await self.fail_task_state(
+            stream_id,
+            data_id,
+            error_msg=error_msg,
+            max_retries=max_retries,
+        )
+        return state in {"retry", "dead_letter"}
+
+    async def fail_task_state(
+        self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3
+    ) -> str:
+        """标记任务失败并返回状态机结果。
+
+        返回值:
+        - ``retry``: 任务仍可重试，应重新进入执行路径
+        - ``dead_letter``: 任务已进入死信
+        - ``missing``: 数据不存在
+        - ``error``: Redis 操作异常
+        """
         if not self.client or not self._lua_fail:
-            return False
+            return "error"
 
         try:
             dead_letter_key = f"{self.key_prefix}:dead_letter"
@@ -505,17 +535,17 @@ class RedisQueueManager:
 
             if result == 1:
                 self.logger.warning(f"任务将重试: {data_id}, 错误: {error_msg}")
-                return True
+                return "retry"
             elif result == 2:
                 self.logger.error(f"任务彻底失败并移入死信: {data_id}")
-                return True
+                return "dead_letter"
             else:
                 self.logger.error(f"标记失败任务失败 (数据不存在): {data_id}")
-                return False
+                return "missing"
 
         except Exception as e:
             self.logger.error(f"标记失败任务时出错: {e}")
-            return False
+            return "error"
 
     async def recover_stale_tasks(
         self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10
