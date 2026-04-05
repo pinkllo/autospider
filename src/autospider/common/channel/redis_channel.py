@@ -150,8 +150,8 @@ class RedisURLChannel(URLChannel):
             url = data.get("url", "")
 
             # 定制任务生命周期确认回调：向 redis 汇报 ack（确认），表明该任务成功完成
-            async def _ack(sid: str = stream_id) -> None:
-                await self.manager.ack_task(sid)
+            async def _ack(sid: str = stream_id, did: str = data_id) -> None:
+                await self.manager.ack_task(sid, did)
 
             # 定制任务生命周期失败回调：通知 redis 以增加失败计数器，到达最大重试次数将放入死信处理
             async def _fail(

@@ -2,11 +2,12 @@
 
 from .skill_store import SkillMetadata, SkillStore
 from .skill_runtime import LoadedSkill, SkillRuntime
-from .skill_sedimenter import SkillSedimenter
+from .skill_sedimenter import SkillSedimentationPayload, SkillSedimenter
 
 __all__ = [
     "LoadedSkill",
     "SkillMetadata",
+    "SkillSedimentationPayload",
     "SkillRuntime",
     "SkillStore",
     "SkillSedimenter",

@@ -95,10 +95,10 @@ if retry_count < max_retries then
     return 1
 else
     redis.call('XACK', KEYS[2], ARGV[3], ARGV[2])
+    redis.call('XDEL', KEYS[2], ARGV[2])
     data['final_failed_at'] = tonumber(ARGV[6])
     data['final_error'] = ARGV[4]
     data['total_retries'] = retry_count
-    redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(data))
     redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[7], '*', 
         'data_id', ARGV[1], 
         'url', data['url'] or '', 
@@ -106,11 +106,23 @@ else
         'retries', tostring(retry_count), 
         'failed_at', ARGV[6]
     )
+    redis.call('HDEL', KEYS[1], ARGV[1])
     return 2
 end
 """
 
-# 4. 原子捞回：XAUTOCLAIM + HGET 批量获取详情
+# 4. 原子确认：XACK + XDEL + HDEL
+LUA_ACK_TASK = """
+local acked = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+if acked == 0 then return 0 end
+redis.call('XDEL', KEYS[1], ARGV[2])
+if ARGV[3] and ARGV[3] ~= '' then
+    redis.call('HDEL', KEYS[2], ARGV[3])
+end
+return acked
+"""
+
+# 5. 原子捞回：XAUTOCLAIM + HGET 批量获取详情
 LUA_RECOVER_TASK = """
 local result = redis.call('XAUTOCLAIM', KEYS[1], ARGV[1], ARGV[2], ARGV[3], '0-0', 'COUNT', ARGV[4])
 local claimed_messages = result[2]
@@ -188,6 +200,7 @@ class RedisQueueManager:
         self._lua_push: Script | None = None
         self._lua_fetch: Script | None = None
         self._lua_fail: Script | None = None
+        self._lua_ack: Script | None = None
         self._lua_recover: Script | None = None
 
     def _generate_hash_id(self, item: str) -> str:
@@ -241,6 +254,7 @@ class RedisQueueManager:
             self._lua_push = self.client.register_script(LUA_PUSH_TASK)
             self._lua_fetch = self.client.register_script(LUA_FETCH_TASK)
             self._lua_fail = self.client.register_script(LUA_FAIL_TASK)
+            self._lua_ack = self.client.register_script(LUA_ACK_TASK)
             self._lua_recover = self.client.register_script(LUA_RECOVER_TASK)
 
             # 初始化 Consumer Group（如果不存在）
@@ -462,11 +476,12 @@ class RedisQueueManager:
             self.logger.error(f"消费任务异常: {e}")
             return []
 
-    async def ack_task(self, stream_id: str) -> bool:
+    async def ack_task(self, stream_id: str, data_id: str | None = None) -> bool:
         """确认任务已完成
 
         Args:
             stream_id: 任务的 Stream ID
+            data_id: 任务对应的 Hash ID。提供时会一并清理 payload。
 
         Returns:
             是否成功确认
@@ -475,8 +490,16 @@ class RedisQueueManager:
             return False
 
         try:
-            # 从 PEL 中移除消息
-            result = await self.client.xack(self.stream_key, self.group_name, stream_id)
+            if self._lua_ack:
+                result = await self._lua_ack(
+                    keys=[self.stream_key, self.data_key],
+                    args=[self.group_name, stream_id, data_id or ""],
+                )
+            else:
+                result = await self.client.xack(self.stream_key, self.group_name, stream_id)
+                if result and data_id:
+                    await self.client.xdel(self.stream_key, stream_id)
+                    await self.client.hdel(self.data_key, data_id)
 
             if result:
                 self.logger.debug(f"已 ACK 任务: {stream_id}")

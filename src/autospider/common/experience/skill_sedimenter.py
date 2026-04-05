@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -36,6 +37,20 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+@dataclass(frozen=True, slots=True)
+class SkillSedimentationPayload:
+    list_url: str
+    task_description: str
+    fields: list[dict[str, Any]]
+    collection_config: dict[str, Any] = field(default_factory=dict)
+    extraction_config: dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, Any] = field(default_factory=dict)
+    validation_failures: list[dict[str, Any]] = field(default_factory=list)
+    subtask_names: list[str] = field(default_factory=list)
+    plan_knowledge: str = ""
+    status: str = "validated"
+
+
 class SkillSedimenter:
     """经验沉淀器。
 
@@ -47,17 +62,7 @@ class SkillSedimenter:
 
     def sediment_from_pipeline_result(
         self,
-        *,
-        list_url: str,
-        task_description: str,
-        fields: list[dict[str, Any]],
-        collection_config: dict[str, Any] | None = None,
-        extraction_config: dict[str, Any] | None = None,
-        summary: dict[str, Any] | None = None,
-        validation_failures: list[dict[str, Any]] | None = None,
-        subtask_names: list[str] | None = None,
-        plan_knowledge: str = "",
-        status: str = "validated",
+        payload: SkillSedimentationPayload,
     ) -> Path | None:
         """从单个 Pipeline 运行结果沉淀 Skill。
 
@@ -65,17 +70,17 @@ class SkillSedimenter:
             生成的 SKILL.md 文件路径，如果沉淀失败则返回 None
         """
         try:
-            summary = summary or {}
-            collection_config = collection_config or {}
-            extraction_config = extraction_config or {}
-            validation_failures = validation_failures or []
+            summary = dict(payload.summary or {})
+            collection_config = dict(payload.collection_config or {})
+            extraction_config = dict(payload.extraction_config or {})
+            validation_failures = list(payload.validation_failures or [])
 
             success_count = int(summary.get("success_count", 0) or 0)
             if success_count <= 0:
                 logger.debug("[SkillSedimenter] 任务无成功记录，跳过沉淀")
                 return None
 
-            domain = _extract_domain(list_url)
+            domain = _extract_domain(payload.list_url)
             if not domain:
                 logger.debug("[SkillSedimenter] 无法从 URL 提取域名，跳过沉淀")
                 return None
@@ -83,24 +88,24 @@ class SkillSedimenter:
             # 第一步：提取结构化规则层
             rules = self._build_rule_data(
                 domain=domain,
-                list_url=list_url,
-                task_description=task_description,
-                fields=fields,
+                list_url=payload.list_url,
+                task_description=payload.task_description,
+                fields=payload.fields,
                 collection_config=collection_config,
                 extraction_config=extraction_config,
                 summary=summary,
-                subtask_names=subtask_names,
-                status=status,
+                subtask_names=payload.subtask_names,
+                status=payload.status,
             )
 
             # 第二步：生成软经验总结
             insights = self._generate_insights(
                 domain=domain,
-                fields=fields,
+                fields=payload.fields,
                 extraction_config=extraction_config,
                 validation_failures=validation_failures,
                 summary=summary,
-                plan_knowledge=plan_knowledge,
+                plan_knowledge=payload.plan_knowledge,
             )
 
             # 第三步：产出结构化文档并统一保存
@@ -147,14 +152,16 @@ class SkillSedimenter:
                 return None
 
             return self.sediment_from_pipeline_result(
-                list_url=list_url,
-                task_description=task_description,
-                fields=fields,
-                collection_config=merged_collection,
-                extraction_config=merged_xpaths,
-                summary=merged_summary,
-                validation_failures=merged_failures,
-                subtask_names=subtask_names,
+                SkillSedimentationPayload(
+                    list_url=list_url,
+                    task_description=task_description,
+                    fields=fields,
+                    collection_config=merged_collection,
+                    extraction_config=merged_xpaths,
+                    summary=merged_summary,
+                    validation_failures=merged_failures,
+                    subtask_names=subtask_names,
+                )
             )
 
         except Exception as exc:

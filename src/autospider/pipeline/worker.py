@@ -39,6 +39,7 @@ class SubTaskWorker:
         field_explore_count: int | None = None,
         field_validate_count: int | None = None,
         selected_skills: list[dict[str, str]] | None = None,
+        plan_knowledge: str = "",
     ):
         self.subtask = subtask
         self.raw_fields = fields
@@ -50,6 +51,7 @@ class SubTaskWorker:
         self.field_explore_count = field_explore_count
         self.field_validate_count = field_validate_count
         self.selected_skills = list(selected_skills or [])
+        self.plan_knowledge = str(plan_knowledge or "")
 
     def _prepare_fields(self) -> list[FieldDefinition]:
         """将字段定义字典转换为 FieldDefinition 列表。"""
@@ -181,6 +183,7 @@ class SubTaskWorker:
             guard_intervention_mode=self.guard_intervention_mode,
             guard_thread_id=self.thread_id,
             selected_skills=self.selected_skills,
+            plan_knowledge=self.plan_knowledge,
         )
 
         logger.info(

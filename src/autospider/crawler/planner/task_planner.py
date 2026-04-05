@@ -807,6 +807,9 @@ class TaskPlanner:
         """
         self._artifacts.write_knowledge_doc(self._knowledge_entries, plan)
 
+    def render_plan_knowledge(self, plan: TaskPlan) -> str:
+        return self._artifacts.build_knowledge_doc(self._knowledge_entries, plan)
+
     def _sediment_draft_skill(self, plan: TaskPlan) -> None:
         """DFS 完成后立即生成 draft Skill，不等 Worker 执行。
 

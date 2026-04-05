@@ -10,7 +10,7 @@ import atexit
 from contextlib import contextmanager
 from typing import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import MetaData, Table, create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -21,6 +21,70 @@ logger = get_logger(__name__)
 
 _engine: Engine | None = None
 _SessionFactory: sessionmaker[Session] | None = None
+_LEGACY_TABLES = [
+    "task_run_validation_failures",
+    "task_run_items",
+    "task_runs",
+    "task_configs",
+    "extracted_items",
+    "collected_urls",
+    "subtasks",
+    "task_executions",
+    "tasks",
+]
+_EXPECTED_COLUMNS = {
+    "tasks": {
+        "id",
+        "registry_id",
+        "normalized_url",
+        "original_url",
+        "task_description",
+        "field_names",
+        "created_at",
+        "updated_at",
+    },
+    "task_runs": {
+        "id",
+        "task_id",
+        "execution_id",
+        "thread_id",
+        "output_dir",
+        "pipeline_mode",
+        "execution_state",
+        "outcome_state",
+        "promotion_state",
+        "total_urls",
+        "success_count",
+        "failed_count",
+        "validation_failure_count",
+        "success_rate",
+        "error_message",
+        "summary_json",
+        "collection_config",
+        "extraction_config",
+        "plan_knowledge",
+        "started_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
+    },
+    "task_run_items": {
+        "id",
+        "task_run_id",
+        "url",
+        "success",
+        "failure_reason",
+        "item_data",
+        "created_at",
+    },
+    "task_run_validation_failures": {
+        "id",
+        "task_run_id",
+        "url",
+        "failure_data",
+        "created_at",
+    },
+}
 
 
 def get_engine() -> Engine:
@@ -87,12 +151,52 @@ def session_scope() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db() -> None:
-    """初始化数据库：创建所有模型对应的表（如果不存在）。"""
+def _drop_known_tables(engine: Engine) -> None:
+    metadata = MetaData()
+    inspector = inspect(engine)
+    for table_name in _LEGACY_TABLES:
+        if not inspector.has_table(table_name):
+            continue
+        table = Table(table_name, metadata, autoload_with=engine)
+        table.drop(engine)
+
+
+def _find_missing_columns(engine: Engine, table_name: str, expected: set[str]) -> list[str]:
+    inspector = inspect(engine)
+    if not inspector.has_table(table_name):
+        return []
+    actual = {column["name"] for column in inspector.get_columns(table_name)}
+    return sorted(expected - actual)
+
+
+def _validate_expected_schema(engine: Engine) -> None:
+    mismatches: list[str] = []
+    for table_name, expected in _EXPECTED_COLUMNS.items():
+        missing = _find_missing_columns(engine, table_name, expected)
+        if missing:
+            missing_text = ", ".join(missing)
+            mismatches.append(f"{table_name} 缺少字段: {missing_text}")
+    if mismatches:
+        detail = "；".join(mismatches)
+        raise RuntimeError(
+            f"检测到旧版 PostgreSQL 表结构：{detail}。"
+            "当前版本不保留旧结构兼容，请执行 `autospider db-init --reset` 重建任务相关表。"
+        )
+
+
+def init_db(reset: bool = False) -> None:
+    """初始化数据库：创建所有模型对应的表。
+
+    Args:
+        reset: 为 True 时会先删除现有任务相关表，再按当前模型重建。
+    """
     from .models import Base
 
     engine = get_engine()
+    if reset:
+        _drop_known_tables(engine)
     Base.metadata.create_all(engine)
+    _validate_expected_schema(engine)
     logger.info("[DB] 数据库表已初始化")
 
 

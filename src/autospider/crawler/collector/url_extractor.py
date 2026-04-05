@@ -39,6 +39,61 @@ class URLExtractor:
         self.page = page
         self.list_url = list_url
 
+    async def _find_locator_from_element(self, element: "ElementMark"):
+        xpath_candidates = list(getattr(element, "xpath_candidates", None) or [])
+        for candidate in xpath_candidates:
+            xpath = str(getattr(candidate, "xpath", "") or "").strip()
+            if not xpath:
+                continue
+            try:
+                locator = self.page.locator(f"xpath={xpath}").first
+                if await locator.count() > 0 and await locator.is_visible():
+                    return locator
+            except Exception:
+                continue
+
+        text = str(getattr(element, "text", "") or "").strip()
+        if not text:
+            return None
+        try:
+            locator = self.page.get_by_text(text, exact=False).first
+            if await locator.count() > 0 and await locator.is_visible():
+                return locator
+        except Exception:
+            return None
+        return None
+
+    async def _get_href_from_locator(self, locator) -> str | None:
+        try:
+            href = await locator.get_attribute("href")
+            if href:
+                return urljoin(self.list_url, href)
+        except Exception:
+            pass
+
+        try:
+            anchor = locator.locator("xpath=.//a[@href]").first
+            if await anchor.count() > 0:
+                href = await anchor.get_attribute("href")
+                if href:
+                    return urljoin(self.list_url, href)
+        except Exception:
+            pass
+        return None
+
+    async def extract_from_locator(
+        self,
+        locator,
+        nav_steps: list[dict] | None = None,
+    ) -> str | None:
+        url = await self._get_href_from_locator(locator)
+        if url:
+            logger.info(f"[Extract] ✓ 从 locator/href 提取: {url[:60]}...")
+            return url
+
+        logger.info("[Extract] 定位元素无 href，点击获取 URL...")
+        return await self.click_element_and_get_url(locator, nav_steps=nav_steps)
+
     async def extract_from_element(
         self,
         element: "ElementMark",
@@ -65,6 +120,12 @@ class URLExtractor:
             url = urljoin(self.list_url, element.href)
             logger.info(f"[Extract] ✓ 从 href 提取: {url[:60]}...")
             return url
+
+        locator = await self._find_locator_from_element(element)
+        if locator is not None:
+            url = await self.extract_from_locator(locator, nav_steps=nav_steps)
+            if url:
+                return url
 
         # 策略 2: 元素无 href，尝试点击获取（动态提取）
         logger.info("[Extract] 元素无 href，点击获取 URL...")
@@ -111,7 +172,11 @@ class URLExtractor:
 
             if not result.success:
                 logger.info(f"[Click] ✗ 点击失败: {result.error}")
-                return None
+                locator = await self._find_locator_from_element(element)
+                if locator is None:
+                    return None
+                logger.info("[Click] 回退为 locator 直接点击...")
+                return await self.click_element_and_get_url(locator, nav_steps=nav_steps)
 
             # 检查是否产生了新页面（ActionExecutor 会自动捕获新页面）
             new_page = getattr(executor, "_new_page", None)
@@ -179,6 +244,13 @@ class URLExtractor:
             return None
         except Exception as e:
             logger.info(f"[Click] ✗ 点击失败: {e}")
+            locator = await self._find_locator_from_element(element)
+            if locator is not None:
+                try:
+                    logger.info("[Click] 异常后回退为 locator 直接点击...")
+                    return await self.click_element_and_get_url(locator, nav_steps=nav_steps)
+                except Exception as nested_exc:
+                    logger.info(f"[Click] ✗ locator 回退点击失败: {nested_exc}")
             # 异常情况下尝试恢复环境
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)

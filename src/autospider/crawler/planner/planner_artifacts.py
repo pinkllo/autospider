@@ -57,8 +57,18 @@ class PlannerArtifacts:
         return TaskPlan.model_validate(persisted)
 
     def write_knowledge_doc(self, knowledge_entries: list[dict], plan: TaskPlan) -> None:
-        if not knowledge_entries:
+        content = self.build_knowledge_doc(knowledge_entries, plan)
+        if not content:
             return
+
+        doc_path = Path(self.output_dir) / "plan_knowledge.md"
+        doc_path.parent.mkdir(parents=True, exist_ok=True)
+        doc_path.write_text(content, encoding="utf-8")
+        logger.info("[Planner] 知识文档已写入: %s", doc_path)
+
+    def build_knowledge_doc(self, knowledge_entries: list[dict], plan: TaskPlan) -> str:
+        if not knowledge_entries:
+            return ""
 
         domain = urlparse(self.site_url).netloc
         leaf_count = sum(1 for entry in knowledge_entries if entry["is_leaf"])
@@ -90,10 +100,7 @@ class PlannerArtifacts:
                 lines.append(f"- 观察: {entry['observations']}")
             lines.append("")
 
-        doc_path = Path(self.output_dir) / "plan_knowledge.md"
-        doc_path.parent.mkdir(parents=True, exist_ok=True)
-        doc_path.write_text("\n".join(lines), encoding="utf-8")
-        logger.info("[Planner] 知识文档已写入: %s", doc_path)
+        return "\n".join(lines)
 
     def sediment_draft_skill(self, knowledge_entries: list[dict], plan: TaskPlan) -> None:
         if not knowledge_entries:

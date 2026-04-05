@@ -17,47 +17,12 @@ def test_finalize_result_prefers_explicit_outcome_state():
     assert result["status"] == "partial_success"
 
 
-def test_build_summary_registers_only_reusable_tasks(monkeypatch, tmp_path):
-    calls: list[dict] = []
-
-    class _FakeRegistry:
-        def __init__(self, registry_path: str):
-            self.registry_path = registry_path
-
-        def register(self, **kwargs):
-            calls.append(kwargs)
-
-    monkeypatch.setattr(shared_nodes, "TaskRegistry", _FakeRegistry)
-
-    shared_nodes.build_summary(
+def test_build_summary_includes_runtime_metadata():
+    result = shared_nodes.build_summary(
         {
-            "node_status": "ok",
-            "normalized_params": {
-                "list_url": "https://example.com/list",
-                "task_description": "采集公告",
-                "output_dir": str(tmp_path),
-                "fields": [{"name": "title"}],
-            },
-            "summary": {
-                "total_urls": 4,
-                "success_count": 3,
-                "promotion_state": "diagnostic_only",
-                "execution_state": "completed",
-                "execution_id": "exec_skip",
-            },
-        }
-    )
-    assert calls == []
-
-    shared_nodes.build_summary(
-        {
-            "node_status": "ok",
-            "normalized_params": {
-                "list_url": "https://example.com/list",
-                "task_description": "采集公告",
-                "output_dir": str(tmp_path),
-                "fields": [{"name": "title"}],
-            },
+            "thread_id": "thread-1",
+            "request_id": "request-1",
+            "entry_mode": "chat-pipeline",
             "summary": {
                 "total_urls": 4,
                 "success_count": 4,
@@ -68,6 +33,8 @@ def test_build_summary_registers_only_reusable_tasks(monkeypatch, tmp_path):
         }
     )
 
-    assert len(calls) == 1
-    assert calls[0]["status"] == "completed"
-    assert calls[0]["execution_id"] == "exec_keep"
+    summary = result["summary"]
+    assert summary["thread_id"] == "thread-1"
+    assert summary["request_id"] == "request-1"
+    assert summary["entry_mode"] == "chat-pipeline"
+    assert summary["execution_id"] == "exec_keep"

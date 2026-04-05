@@ -27,6 +27,7 @@ class MultiDispatchState(TypedDict, total=False):
     thread_id: str  # 当前图运行的唯一线程 ID，用于绑定执行上下文或断点恢复
     normalized_params: Annotated[dict[str, Any], _use_last]  # 经过统一归一化后的运行参数（例如从 CLI 或 API 传入的全局配置）
     task_plan: Annotated[TaskPlan, _use_last]  # 全局任务规划数据结构，包含了待调度的所有子任务树
+    plan_knowledge: Annotated[str, _use_last]  # 规划阶段产出的 DFS 知识文档正文
     dispatch_queue: list[dict[str, Any]]  # 尚未下发执行的子任务队列（等待进入下一批并行）
     current_batch: list[dict[str, Any]]  # 目前正被 Send API 分发在当前轮次被并行处理的一批子任务
     
@@ -49,6 +50,7 @@ class SubTaskFlowState(TypedDict, total=False):
     """
     normalized_params: dict[str, Any]  # 从主图透传的全局运行时环境参数（含 _thread_id）
     task_plan: TaskPlan  # 包含基础配置的全局规划对象（只读，为 worker 提供字段引用背景等）
+    plan_knowledge: str  # 规划阶段的 DFS 知识文档正文
     subtask_payload: dict[str, Any]  # 被分配到当前分片节点运行的目标子任务配置字典
     subtask_result: dict[str, Any]   # 记录当前单独这个子任务完成后的成功与否及提取数量等结果信息
     
@@ -243,6 +245,7 @@ def route_dispatch_batch(state: MultiDispatchState):
             {
                 "normalized_params": params,
                 "task_plan": plan,
+                "plan_knowledge": str(state.get("plan_knowledge") or ""),
                 "subtask_payload": payload,
             },
         )
@@ -261,6 +264,7 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
 
     plan = state.get("task_plan")
     shared_fields = list(getattr(plan, "shared_fields", []) or [])
+    plan_knowledge = str(state.get("plan_knowledge") or "")
 
     try:
         worker = SubTaskWorker(
@@ -286,6 +290,7 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
                 else None
             ),
             selected_skills=list(params.get("selected_skills") or []),
+            plan_knowledge=plan_knowledge,
         )
         result = await worker.execute()
     except BrowserInterventionRequired as exc:

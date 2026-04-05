@@ -628,7 +628,7 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     # 1. 查找历史任务
     cli_args = dict(state.get("cli_args") or {})
     output_dir = str(cli_args.get("output_dir") or "output")
-    registry = TaskRegistry(registry_path=f"{output_dir}/.task_registry.json")
+    registry = TaskRegistry()
     history = registry.find_by_url(list_url)
 
     if not history:

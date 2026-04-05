@@ -13,7 +13,7 @@ class _FakeManager:
         self.fetch_calls: list[dict[str, object]] = []
         self.recover_calls: list[dict[str, object]] = []
         self.fail_calls: list[dict[str, object]] = []
-        self.acked: list[str] = []
+        self.acked: list[tuple[str, str | None]] = []
         self._fresh_tasks: list[list[tuple[str, str, dict]]] = []
         self._recovered_tasks: list[list[tuple[str, str, dict]]] = []
         self.fail_result = "retry"
@@ -38,8 +38,8 @@ class _FakeManager:
             return self._recovered_tasks.pop(0)
         return []
 
-    async def ack_task(self, stream_id: str) -> bool:
-        self.acked.append(stream_id)
+    async def ack_task(self, stream_id: str, data_id: str | None = None) -> bool:
+        self.acked.append((stream_id, data_id))
         return True
 
     async def fail_task_state(self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3) -> str:
@@ -107,6 +107,18 @@ async def test_non_retryable_failure_is_not_rebuffered():
 
     assert [task.url for task in first] == ["https://example.com/dead"]
     assert second == []
+
+
+@pytest.mark.asyncio
+async def test_ack_callback_passes_data_id_for_cleanup():
+    manager = _FakeManager()
+    manager._fresh_tasks.append([("1-0", "item-1", {"url": "https://example.com/ok"})])
+    channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
+
+    tasks = await channel.fetch(max_items=1, timeout_s=0)
+    await tasks[0].ack_task()
+
+    assert manager.acked == [("1-0", "item-1")]
 
 
 @pytest.mark.asyncio

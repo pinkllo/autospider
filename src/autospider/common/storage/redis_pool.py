@@ -19,7 +19,6 @@ class _SyncPool:
     """同步 Redis 连接池（惰性单例）。"""
 
     _pool: Any | None = None
-    _init_attempted: bool = False
 
     @classmethod
     def get_client(cls) -> Any | None:
@@ -28,10 +27,6 @@ class _SyncPool:
             import redis as _redis
 
             return _redis.Redis(connection_pool=cls._pool)
-
-        if cls._init_attempted:
-            return None
-        cls._init_attempted = True
 
         if not config.redis.enabled:
             return None
@@ -71,7 +66,6 @@ class _SyncPool:
             except Exception:
                 pass
             cls._pool = None
-            cls._init_attempted = False
             logger.info("[RedisPool] 同步连接池已关闭")
 
 

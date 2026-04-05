@@ -40,6 +40,7 @@ class GraphState(TypedDict, total=False):
 
     # planning / dispatch / aggregate 状态
     task_plan: Any
+    plan_knowledge: str
     dispatch_queue: list[dict[str, Any]]
     current_batch: list[dict[str, Any]]
     spawned_subtasks: list[dict[str, Any]]

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .task_repo import TaskRepository
+from .task_repo import TaskRepository, TaskRunPayload
 
-__all__ = ["TaskRepository"]
+__all__ = ["TaskRepository", "TaskRunPayload"]

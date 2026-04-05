@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .common.db.engine import init_db
 from .common.validators import validate_url
 from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
@@ -31,6 +32,11 @@ app = typer.Typer(
 )
 console = Console()
 _GRAPH_THREAD_ID_HELP = "LangGraph 线程 ID。为空时自动生成，可用于后续 resume。"
+
+
+def _ensure_database_ready() -> None:
+    """确保 PostgreSQL schema 已按当前模型初始化。"""
+    init_db()
 
 
 def run_async_safely(coro):
@@ -193,6 +199,7 @@ def _log_graph_runtime(result: dict) -> None:
 
 def _invoke_graph(entry_mode: str, cli_args: dict, *, thread_id: str = "") -> dict:
     """统一调用 GraphRunner 并返回 dict 结构结果。"""
+    _ensure_database_ready()
     runner = GraphRunner()
     graph_input_kwargs = {
         "entry_mode": entry_mode,
@@ -222,6 +229,7 @@ def _resume_graph(
     runner: GraphRunner | None = None,
 ) -> dict:
     """恢复图线程并返回 dict 结构结果。"""
+    _ensure_database_ready()
     active_runner = runner or GraphRunner()
     graph_result = run_async_safely(
         active_runner.resume(
@@ -238,6 +246,7 @@ def _resume_graph(
 
 def _inspect_graph(thread_id: str, *, runner: GraphRunner | None = None) -> dict:
     """读取图线程当前状态。"""
+    _ensure_database_ready()
     active_runner = runner or GraphRunner()
     graph_result = run_async_safely(active_runner.inspect(thread_id=thread_id))
     result = graph_result.model_dump()
@@ -677,6 +686,19 @@ def main():
     供 pyproject.toml 中 [project.scripts] 调用。
     """
     app()
+
+
+@app.command("db-init")
+def db_init_command(
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        help="先删除现有任务相关表，再按当前 PostgreSQL 模型重建。",
+    ),
+) -> None:
+    """初始化 PostgreSQL schema。"""
+    init_db(reset=reset)
+    console.print("[green]数据库 schema 已初始化[/green]")
 
 
 @app.command("multi-pipeline")

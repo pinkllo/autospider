@@ -4,20 +4,22 @@ import json
 
 import pytest
 
+from autospider.common.channel.base import URLTask
 from autospider.common.config import config
 from autospider.domain.fields import FieldDefinition
+from autospider.field.models import FieldExtractionResult, PageExtractionRecord
 from autospider.pipeline import runner as pipeline_runner
 from autospider.pipeline.runner import (
     _classify_pipeline_result,
-    _build_staged_record,
+    _build_run_record,
+    _build_record_summary,
     _commit_items_file,
-    _load_staged_records,
-    _prepare_pipeline_workspace,
+    _load_persisted_run_records,
+    _prepare_pipeline_output,
     _process_task,
     _should_promote_skill,
     _strip_draft_markers_from_skill_content,
     _try_sediment_skill,
-    _write_staged_record,
 )
 
 
@@ -59,12 +61,59 @@ class _FakeBrowserSession:
         return None
 
 
+class _NoopTracker:
+    def __init__(self, execution_id: str):
+        self.execution_id = execution_id
+
+    async def set_total(self, total: int):
+        return None
+
+    async def record_success(self, url: str = ""):
+        return None
+
+    async def record_failure(self, url: str = "", error: str = ""):
+        return None
+
+    async def mark_done(self, final_status: str = "completed"):
+        return None
+
+
 class _ExplodingChannel:
     async def close(self):
         return None
 
-    async def get_task(self):
+    async def fetch(self, *args, **kwargs):
         raise RuntimeError("stop consumer")
+
+
+class _QueueBackedChannel:
+    def __init__(self):
+        self.pending: list[str] = []
+        self.closed = False
+        self.close_calls = 0
+
+    async def publish(self, url: str):
+        if self.closed:
+            raise RuntimeError("channel already closed")
+        self.pending.append(url)
+
+    async def fetch(self, max_items: int, timeout_s: float | None):
+        if self.closed:
+            return []
+        batch = self.pending[:max_items]
+        self.pending = self.pending[max_items:]
+        return [URLTask(url=url, ack=self._ack, fail=self._fail) for url in batch]
+
+    async def close(self):
+        self.close_calls += 1
+        self.closed = True
+        self.pending.clear()
+
+    async def _ack(self):
+        return None
+
+    async def _fail(self, reason: str):
+        return None
 
 
 def test_strip_draft_markers_from_skill_content_for_promoted_skills():
@@ -136,76 +185,39 @@ def test_classify_pipeline_result_uses_quality_threshold_and_validation_barrier(
     assert diagnostic["validation_failure_count"] == 1
 
 
-def test_prepare_pipeline_workspace_resets_stale_attempt_outputs(tmp_path):
-    staging_dir = tmp_path / ".pipeline_items"
+def test_prepare_pipeline_output_resets_export_files(tmp_path):
     items_path = tmp_path / "pipeline_extracted_items.jsonl"
     summary_path = tmp_path / "pipeline_summary.json"
-    manifest_path = tmp_path / "pipeline_execution.json"
-
-    _prepare_pipeline_workspace(
-        output_path=tmp_path,
-        staging_dir=staging_dir,
-        items_path=items_path,
-        summary_path=summary_path,
-        manifest_path=manifest_path,
-        execution_id="old-exec",
-        list_url="https://example.com/list",
-        task_description="old",
-    )
-    _write_staged_record(
-        staging_dir,
-        _build_staged_record(
-            url="https://example.com/a",
-            item={"url": "https://example.com/a", "title": "A"},
-            success=True,
-            failure_reason="",
-        ),
-    )
     items_path.write_text('{"url": "https://example.com/a"}\n', encoding="utf-8")
     summary_path.write_text('{"total_urls": 1}\n', encoding="utf-8")
 
-    _prepare_pipeline_workspace(
+    _prepare_pipeline_output(
         output_path=tmp_path,
-        staging_dir=staging_dir,
         items_path=items_path,
         summary_path=summary_path,
-        manifest_path=manifest_path,
-        execution_id="new-exec",
-        list_url="https://example.com/list",
-        task_description="new",
     )
 
-    assert _load_staged_records(staging_dir) == {}
     assert not items_path.exists()
     assert not summary_path.exists()
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["execution_id"] == "new-exec"
 
 
 def test_commit_items_file_writes_single_visible_snapshot(tmp_path):
-    staging_dir = tmp_path / ".pipeline_items"
-    staging_dir.mkdir(parents=True, exist_ok=True)
-    _write_staged_record(
-        staging_dir,
-        _build_staged_record(
+    records = {
+        "https://example.com/b": _build_run_record(
             url="https://example.com/b",
             item={"url": "https://example.com/b", "title": "B"},
             success=True,
             failure_reason="",
         ),
-    )
-    _write_staged_record(
-        staging_dir,
-        _build_staged_record(
+        "https://example.com/a": _build_run_record(
             url="https://example.com/a",
             item={"url": "https://example.com/a", "title": "A"},
             success=False,
             failure_reason="failed",
         ),
-    )
+    }
 
     items_path = tmp_path / "pipeline_extracted_items.jsonl"
-    records = _load_staged_records(staging_dir)
     _commit_items_file(items_path, records)
 
     lines = items_path.read_text(encoding="utf-8").strip().splitlines()
@@ -215,34 +227,51 @@ def test_commit_items_file_writes_single_visible_snapshot(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_process_task_reuses_staged_record_without_reextract(tmp_path):
-    staging_dir = tmp_path / ".pipeline_items"
-    staging_dir.mkdir(parents=True, exist_ok=True)
-    staged_record = _build_staged_record(
-        url="https://example.com/a",
-        item={"url": "https://example.com/a", "title": "A"},
-        success=True,
-        failure_reason="",
-    )
-    _write_staged_record(staging_dir, staged_record)
-    staged_records = _load_staged_records(staging_dir)
-
+async def test_process_task_reuses_persisted_record_without_reextract():
     task = _DummyTask("https://example.com/a")
     extractor = _UnusedExtractor()
+    run_records = {
+        "https://example.com/a": _build_run_record(
+            url="https://example.com/a",
+            item={"url": "https://example.com/a", "title": "A"},
+            success=True,
+            failure_reason="",
+        )
+    }
 
     import asyncio
 
     await _process_task(
         extractor=extractor,
         task=task,
-        staging_dir=staging_dir,
-        staged_records=staged_records,
+        run_records=run_records,
         summary_lock=asyncio.Lock(),
     )
 
     assert extractor.called is False
     assert task.acked == 1
     assert task.failed == []
+
+
+def test_build_record_summary_counts_success_and_failure():
+    records = {
+        "https://example.com/a": _build_run_record(
+            url="https://example.com/a",
+            item={"url": "https://example.com/a"},
+            success=True,
+            failure_reason="",
+        ),
+        "https://example.com/b": _build_run_record(
+            url="https://example.com/b",
+            item={"url": "https://example.com/b"},
+            success=False,
+            failure_reason="boom",
+        ),
+    }
+
+    summary = _build_record_summary(records)
+
+    assert summary == {"total_urls": 2, "success_count": 1}
 
 
 @pytest.mark.asyncio
@@ -269,7 +298,7 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
     monkeypatch.setattr(pipeline_runner, "URLCollector", _FakeCollector)
     monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
-    monkeypatch.setattr(pipeline_runner, "_load_staged_records", lambda staging_dir: {})
+    monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
     monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
 
@@ -288,6 +317,107 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     assert result["success_count"] == 0
     assert "started_at" not in result
     assert "finished_at" not in result
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_urls(monkeypatch, tmp_path):
+    channel = _QueueBackedChannel()
+
+    class _PublishingCollector:
+        def __init__(self, **kwargs):
+            self.url_channel = kwargs["url_channel"]
+
+        async def run(self):
+            urls = [f"https://example.com/detail/{idx}" for idx in range(10)]
+            for url in urls:
+                await self.url_channel.publish(url)
+            return type(
+                "_Result",
+                (),
+                {
+                    "collected_urls": urls,
+                    "plan_upgrade_requested": False,
+                    "plan_upgrade_reason": "",
+                    "plan_upgrade_site_url": "",
+                },
+            )()
+
+    class _FakeBatchFieldExtractor:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def run(self, urls: list[str]):
+            assert len(urls) == 7
+
+            class _Result:
+                validation_records: list[object] = []
+
+                def to_extraction_config(self):
+                    return {
+                        "fields": [
+                            {
+                                "name": "project_name",
+                                "description": "项目名称",
+                                "xpath": '//*[@id="title"]',
+                                "required": True,
+                                "data_type": "text",
+                                "extraction_source": None,
+                                "fixed_value": None,
+                            }
+                        ]
+                    }
+
+            return _Result()
+
+    class _FakeBatchXPathExtractor:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def _extract_from_url(self, url: str):
+            return PageExtractionRecord(
+                url=url,
+                fields=[
+                    FieldExtractionResult(
+                        field_name="project_name",
+                        value=f"value:{url.rsplit('/', 1)[-1]}",
+                    )
+                ],
+                success=True,
+            )
+
+    monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
+    monkeypatch.setattr(pipeline_runner, "URLCollector", _PublishingCollector)
+    monkeypatch.setattr(
+        pipeline_runner,
+        "create_url_channel",
+        lambda **kwargs: (channel, None),
+    )
+    monkeypatch.setattr(pipeline_runner, "BatchFieldExtractor", _FakeBatchFieldExtractor)
+    monkeypatch.setattr(pipeline_runner, "BatchXPathExtractor", _FakeBatchXPathExtractor)
+    monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
+    monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
+    monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
+    monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
+    monkeypatch.setattr(pipeline_runner, "_try_sediment_skill", lambda **kwargs: None)
+
+    result = await pipeline_runner.run_pipeline(
+        list_url="https://example.com/list",
+        task_description="采集项目名称",
+        fields=[FieldDefinition(name="project_name", description="项目名称")],
+        output_dir=str(tmp_path),
+        explore_count=3,
+        validate_count=4,
+        consumer_concurrency=1,
+        target_url_count=10,
+    )
+
+    assert result["total_urls"] == 10
+    assert result["success_count"] == 10
+    assert channel.close_calls == 1
+
+
+def test_load_persisted_run_records_returns_empty_for_blank_execution_id():
+    assert _load_persisted_run_records("") == {}
 
 
 def test_try_sediment_skill_skips_low_quality_run(tmp_path):

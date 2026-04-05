@@ -287,9 +287,6 @@ class PlannerConfig(BaseModel):
 class DatabaseConfig(BaseModel):
     """数据库配置（PostgreSQL）"""
 
-    enabled: bool = Field(
-        default_factory=lambda: os.getenv("DB_ENABLED", "false").lower() == "true"
-    )
     url: str = Field(
         default_factory=lambda: os.getenv(
             "DATABASE_URL",

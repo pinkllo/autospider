@@ -1,63 +1,48 @@
-"""详情页 URL 收集器（重构版）
-
-实现流程:
-1. 探索阶段：进入 N 个不同的详情页，记录每次进入的操作步骤
-2. 分析阶段：分析这 N 次操作的共同模式，提取公共脚本
-3. 收集阶段：使用公共脚本遍历列表页，收集所有详情页的 URL
-"""
+"""详情页 URL 在线收集器：LLM 样本采集 -> 规则生成 -> 规则验证 -> 规则执行。"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING
 
 from ...common.config import config
 from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
-from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
 from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
-from ..output.script_generator import ScriptGenerator
+from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ..base.base_collector import BaseCollector
 from ..collector import (
-    URLCollectorResult,
     CommonPattern,
-    XPathExtractor,
+    DetailPageVisit,
     LLMDecisionMaker,
     NavigationHandler,
+    URLCollectorResult,
+    XPathExtractor,
+    smart_scroll,
 )
-from ..base.base_collector import BaseCollector
-from ..batch.batch_collector import BatchCollector
+from ..output.script_generator import ScriptGenerator
 from .shared_workflow import (
     build_detail_visit,
     extract_mark_id_text_map,
     prepare_explore_skill_context,
-    resolve_click_mark_id,
     resolve_selected_mark_ids,
-    run_detail_explore_loop,
 )
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+    from ...common.channel.base import URLChannel
+    from ...common.storage.redis_manager import RedisQueueManager
     from ...common.types import SoMSnapshot
 
 
 logger = get_logger(__name__)
-from ...common.storage.redis_manager import RedisQueueManager
-from ...common.channel.base import URLChannel
 
 
 class URLCollector(BaseCollector):
-    """详情页 URL 收集器（协调器）
-
-    该类负责从列表页中识别并收集所有详情页的 URL。
-    它采用三阶段工作流：
-    1. 探索阶段：通过 LLM 引导进入若干个详情页，记录操作路径。
-    2. 分析阶段：提取这些详情页链接的公共 XPath 模式。
-    3. 收集阶段：利用提取的 XPath 高效遍历列表页并翻页收集。
-
-    继承 BaseCollector，扩展了探索、XPath 提取及脚本生成功能。
-    """
+    """单链路 URL 收集器。"""
 
     def __init__(
         self,
@@ -76,18 +61,6 @@ class URLCollector(BaseCollector):
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
     ):
-        """初始化 URLCollector
-
-        Args:
-            page: Playwright Page 对象
-            list_url: 初始列表页 URL
-            task_description: 任务描述，指导 LLM 识别详情页链接
-            explore_count: 探索阶段要进入的详情页数量（默认 3）
-            max_nav_steps: 导航阶段允许的最大操作步数
-            target_url_count: 目标采集 URL 数量（可覆盖配置）
-            output_dir: 结果和中间配置的输出目录
-        """
-        # 调用基类初始化，设置基础属性（page, list_url, task_description 等）
         super().__init__(
             page=page,
             list_url=list_url,
@@ -106,230 +79,101 @@ class URLCollector(BaseCollector):
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
 
-        # 探索阶段特有状态
-        self.detail_visits: list[DetailPageVisit] = []  # 记录每次详情页访问的详细信息
-        self.step_index = 0  # 当前操作步数索引
-        self.visited_detail_urls: set[str] = set()  # 已访问过的详情页 URL，用于去重
-        self.common_pattern: CommonPattern | None = None  # 提取出的公共模式（XPath 等）
+        self.detail_visits: list[DetailPageVisit] = []
+        self.step_index = 0
+        self.visited_detail_urls: set[str] = set()
+        self.common_pattern: CommonPattern | None = None
 
-        # 初始化额外组件
-        self.decider = LLMDecider()  # LLM 决策核心组件
-        self.script_generator = ScriptGenerator(output_dir)  # 用于生成最终爬虫脚本
-        self.config_persistence = ConfigPersistence(output_dir)  # 负责保存/加载采集配置（XPath等）
-        self.xpath_extractor = XPathExtractor()  # 负责从访问记录中分析公共 XPath
+        self.decider = LLMDecider()
+        self.script_generator = ScriptGenerator(output_dir)
+        self.config_persistence = ConfigPersistence(output_dir)
+        self.xpath_extractor = XPathExtractor()
 
     async def run(self) -> URLCollectorResult:
-        """运行 URL 收集流程"""
-        logger.info("\n[URLCollector] ===== 开始收集详情页 URL =====")
+        logger.info("\n[URLCollector] ===== 开始在线收集详情页 URL =====")
         logger.info(f"[URLCollector] 任务描述: {self.task_description}")
         logger.info(f"[URLCollector] 列表页: {self.list_url}")
-        logger.info(f"[URLCollector] 将探索 {self.explore_count} 个详情页")
+        logger.info(f"[URLCollector] 样本目标: {self.explore_count}")
         await self._prepare_skill_context()
 
-        # 0.5 加载历史进度和配置信息
-        previous_progress = self.progress_persistence.load_progress()
-        previous_config = self.config_persistence.load()
-        target_page_num = 1  # 默认从第1页开始
-        is_resume = False  # 是否是断点恢复
-        config_mismatch = False
-        progress_mismatch = False
-
-        # 校验历史配置是否与当前任务匹配
-        if previous_config:
-            if previous_config.list_url and previous_config.list_url != self.list_url:
-                config_mismatch = True
-            if (
-                previous_config.task_description
-                and previous_config.task_description != self.task_description
-            ):
-                config_mismatch = True
-            if config_mismatch:
-                logger.info("[断点恢复] 历史配置与当前任务不匹配，忽略旧配置与进度")
-                previous_config = None
-                previous_progress = None
-
-        # 校验历史进度是否与当前任务匹配
-        if previous_progress and not self._is_progress_compatible(previous_progress):
-            logger.info("[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
-            previous_progress = None
-            progress_mismatch = True
-
-        # 0.6 连接 Redis / 本地文件并加载历史 URL（断点续爬）
-        if not config_mismatch and not progress_mismatch:
-            await self._load_previous_urls()
-            if self.collected_urls:
-                self.visited_detail_urls.update(self.collected_urls)
-
-        if previous_progress and previous_progress.current_page_num > 1:
-            logger.info(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
-            logger.info(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")
-            target_page_num = previous_progress.current_page_num
-            is_resume = True
-
-            # 恢复速率控制器状态
-            self.rate_controller.current_level = previous_progress.backoff_level
-            self.rate_controller.consecutive_success_count = (
-                previous_progress.consecutive_success_pages
-            )
-            logger.info(
-                f"[断点恢复] 恢复速率控制状态: 等级={previous_progress.backoff_level}, 连续成功={previous_progress.consecutive_success_pages}"
-            )
-
-        # 加载历史配置（导航步骤、XPath等）
-        if previous_config:
-            if previous_config.nav_steps:
-                self.nav_steps = previous_config.nav_steps
-                logger.info(f"[断点恢复] 已加载 {len(self.nav_steps)} 个导航步骤")
-            if previous_config.common_detail_xpath:
-                self.common_detail_xpath = previous_config.common_detail_xpath
-                logger.info("[断点恢复] 已加载公共详情页 XPath")
-
-        # 1. 导航到列表页
-        logger.info("\n[Phase 1] 导航到列表页...")
         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(1)
-
-        # 初始化延迟组件
         self._initialize_handlers()
 
-        # 2. 导航阶段
-        if is_resume and self.nav_steps:
-            # 断点恢复：直接重放已保存的导航步骤，无需LLM决策
-            logger.info(
-                f"\n[Phase 2] 导航阶段：重放已保存的 {len(self.nav_steps)} 个导航步骤（跳过LLM决策）..."
-            )
-            nav_success = await self.navigation_handler.replay_nav_steps(self.nav_steps)
-            if not nav_success:
-                logger.info("[Warning] 导航步骤重放失败，将直接在当前页面探索")
-        else:
-            # 首次运行：让LLM进行决策并保存导航步骤
-            logger.info("\n[Phase 2] 导航阶段：根据任务描述进行筛选操作（LLM决策）...")
-            nav_success = await self.navigation_handler.run_navigation_phase()
-            if not nav_success:
-                logger.info("[Warning] 导航阶段未能完成筛选，将直接在当前页面探索")
-            # 保存导航步骤
-            self.nav_steps = self.navigation_handler.nav_steps
+        logger.info("\n[Phase 1] 导航阶段：根据任务描述进行筛选操作...")
+        nav_success = await self.navigation_handler.run_navigation_phase()
+        if not nav_success:
+            logger.info("[URLCollector] 导航阶段未完全完成，将在当前页面继续采集")
+        self.nav_steps = self.navigation_handler.nav_steps
 
-        # 如果导航阶段打开了新标签页，更新页面引用
         if self.navigation_handler and self.navigation_handler.page is not self.page:
             new_page = self.navigation_handler.page
             new_list_url = self.navigation_handler.list_url or new_page.url
             self._sync_page_references(new_page, list_url=new_list_url)
 
+        validation_pages = max(1, int(config.field_extractor.validate_count))
 
-
-        # 3. 探索阶段
-        if is_resume and self.common_detail_xpath:
-            # 断点恢复且已有 common_detail_xpath：跳过探索阶段
-            logger.info("\n[Phase 3] 探索阶段：跳过（已有公共 XPath）")
-            logger.info(f"[Phase 3] 使用已保存的公共详情页 XPath: {self.common_detail_xpath}")
-        else:
-            # 首次运行：需要探索并提取 XPath
-            logger.info(f"\n[Phase 3] 探索阶段：进入 {self.explore_count} 个详情页...")
-            await self._explore_phase()
-
-            if len(self.detail_visits) < 2:
-                logger.info(
-                    f"[Warning] 只探索到 {len(self.detail_visits)} 个详情页，需要至少 2 个才能提取模式"
-                )
-                self._save_progress_status(status="FAILED", append_urls=True)
-                return self._create_result()
-
-            # 3.5 提取公共 xpath
-            logger.info("\n[Phase 3.5] 提取公共 xpath...")
-            self.common_detail_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
-            if self.common_detail_xpath:
-                logger.info(f"[Phase 3.5] ✓ 提取到公共 xpath: {self.common_detail_xpath}")
-                # 填充 common_pattern 以便 CLI 显示
-                self.common_pattern = CommonPattern(
-                    xpath_pattern=self.common_detail_xpath,
-                    confidence=0.8,  # 默认置信度，XPathExtractor 内部有更详细的判断
-                    source_visits=self.detail_visits,
-                )
-            else:
-                logger.info("[Phase 3.5] ⚠ 未能提取公共 xpath，将使用 LLM 收集")
-
-        # 3.6 提取分页控件
-        if is_resume and previous_config and previous_config.pagination_xpath:
-            # 断点恢复：使用已保存的分页控件 XPath
-            pagination_xpath = previous_config.pagination_xpath
-            self.pagination_handler.pagination_xpath = pagination_xpath
-            logger.info("\n[Phase 3.6] 提取分页控件 xpath：使用已保存配置")
-            logger.info(f"[Phase 3.6] ✓ 分页控件 xpath: {pagination_xpath}")
-        else:
-            # 首次运行：提取分页控件 XPath
-            logger.info("\n[Phase 3.6] 提取分页控件 xpath...")
-            pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
-            if pagination_xpath:
-                logger.info(f"[Phase 3.6] ✓ 提取到分页控件 xpath: {pagination_xpath}")
-            else:
-                logger.info("[Phase 3.6] ⚠ 未找到分页控件，将只收集当前页")
-
-        # 3.6.1 提取跳转控件（用于断点恢复第二阶段）
-        if is_resume and previous_config and previous_config.jump_widget_xpath:
-            # 断点恢复：使用已保存的跳转控件 XPath
-            jump_widget_xpath = previous_config.jump_widget_xpath
-            self.pagination_handler.jump_widget_xpath = jump_widget_xpath
-            logger.info("\n[Phase 3.6.1] 提取跳转控件：使用已保存配置")
-            logger.info("[Phase 3.6.1] ✓ 跳转控件已加载")
-        else:
-            # 首次运行：提取跳转控件 XPath
-            logger.info("\n[Phase 3.6.1] 提取跳转控件...")
-            jump_widget_xpath = await self.pagination_handler.extract_jump_widget_xpath()
-            if jump_widget_xpath:
-                logger.info("[Phase 3.6.1] ✓ 提取到跳转控件")
-            else:
-                logger.info("[Phase 3.6.1] ⚠ 未找到跳转控件，第二阶段策略不可用")
-
-        # 3.7 断点恢复：跳转到目标页
-        if target_page_num > 1:
-            logger.info(f"\n[Phase 3.7] 断点恢复：尝试跳转到第 {target_page_num} 页...")
-            actual_page = await self._resume_to_target_page(
-                target_page_num=target_page_num,
-                jump_widget_xpath=jump_widget_xpath,
-                pagination_xpath=pagination_xpath,
+        while self.pagination_handler.current_page_num <= self.max_pages:
+            logger.info(
+                "\n[Phase 2] manual_sample: 第 %s 页，已收集 %s 条 URL",
+                self.pagination_handler.current_page_num,
+                len(self.collected_urls),
             )
-            # 更新分页处理器的当前页码
-            self.pagination_handler.current_page_num = actual_page
-            logger.info(f"[Phase 3.7] ✓ 已定位到第 {actual_page} 页，继续收集")
 
-        # 4. 持久化配置
-        logger.info("\n[Phase 4] 持久化配置...")
-        self._save_config()
+            page_urls, new_visits = await self._collect_current_page_with_llm()
+            if new_visits:
+                logger.info("[URLCollector] 本页新增样本 %s 条", len(new_visits))
 
-        # 5. 收集阶段（批量模式：直接复用 BatchCollector）
-        logger.info("\n[Phase 5] 收集阶段：使用 BatchCollector 批量爬取...")
-        batch_collector = BatchCollector(
-            page=self.page,
-            config_path=self.output_dir / "collection_config.json",
-            target_url_count=self.target_url_count,
-            max_pages=self.max_pages,
-            output_dir=self.output_dir,
-            url_channel=self.url_channel,
-            redis_manager=self.redis_manager,
-        )
-        batch_result = await batch_collector.collect_from_config()
-        self.collected_urls = batch_result.collected_urls
+            self._save_progress()
 
-        # 6. 生成爬虫脚本
-        logger.info("\n[Phase 6] 生成爬虫脚本...")
+            if len(self.collected_urls) >= self.target_url_count:
+                logger.info("[URLCollector] 已达到目标 URL 数量")
+                break
+
+            if len(self.detail_visits) >= self.explore_count and not self.common_detail_xpath:
+                logger.info("\n[Phase 3] build_rule: 从真实样本生成公共详情 XPath")
+                candidate_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
+                if candidate_xpath:
+                    self.common_detail_xpath = candidate_xpath
+                    self.common_pattern = CommonPattern(
+                        xpath_pattern=candidate_xpath,
+                        confidence=0.8,
+                        source_visits=self.detail_visits,
+                    )
+
+                    logger.info("\n[Phase 4] validate_rule: 使用后续页面验证公共详情 XPath")
+                    validated = await self._validate_xpath_rule_on_next_pages(validation_pages)
+                    if validated:
+                        logger.info("[URLCollector] 公共详情 XPath 验证通过，切换到规则执行")
+                        logger.info("\n[Phase 4.1] 提取分页控件 XPath...")
+                        pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
+                        if pagination_xpath:
+                            logger.info("[URLCollector] ✓ 分页控件 XPath: %s", pagination_xpath)
+                        jump_widget_xpath = await self.pagination_handler.extract_jump_widget_xpath()
+                        if jump_widget_xpath:
+                            logger.info("[URLCollector] ✓ 跳转控件已提取")
+                        self._save_config()
+                        break
+
+                    logger.info("[URLCollector] 公共详情 XPath 验证失败，继续手动采集样本")
+                    self.common_detail_xpath = None
+                    self.common_pattern = None
+
+            if not await self._advance_to_next_page():
+                logger.info("[URLCollector] 无法继续翻页，结束手动采集")
+                break
+
+        if self.common_detail_xpath and len(self.collected_urls) < self.target_url_count:
+            logger.info("\n[Phase 5] rule_run: 使用公共 XPath 批量收集剩余 URL")
+            await self._collect_phase_with_xpath()
+
         crawler_script = await self._generate_crawler_script()
-
-        # 7. 保存结果
-        logger.info("\n[Phase 7] 保存结果 (collected_urls.json / urls.txt / spider.py)...")
         result = self._create_result()
         await self._save_result(result, crawler_script)
-
-        logger.info("\n[Complete] 收集完成!")
-        logger.info(f"  - 探索了 {len(self.detail_visits)} 个详情页")
-        logger.info(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
-
         self._save_progress_status(status="COMPLETED", append_urls=True)
         return result
 
     def _initialize_handlers(self) -> None:
-        """初始化各个处理器（覆盖基类方法，添加探索阶段所需组件）"""
-        # 先初始化 LLM 决策器（需要在基类初始化之前，因为 pagination_handler 依赖它）
         self.llm_decision_maker = LLMDecisionMaker(
             page=self.page,
             decider=self.decider,
@@ -340,11 +184,7 @@ class URLCollector(BaseCollector):
             selected_skills_context=self.selected_skills_context,
             selected_skills=self.selected_skills,
         )
-
-        # 调用基类初始化（初始化 url_extractor 和 pagination_handler）
         super()._initialize_handlers()
-
-        # URLCollector 特有的 NavigationHandler
         self.navigation_handler = NavigationHandler(
             page=self.page,
             list_url=self.list_url,
@@ -355,7 +195,6 @@ class URLCollector(BaseCollector):
         )
 
     async def _prepare_skill_context(self) -> None:
-        """为当前列表页选择并加载已选中的 skills 正文。"""
         self.selected_skills, self.selected_skills_context = await prepare_explore_skill_context(
             skill_runtime=self.skill_runtime,
             phase="url_collector",
@@ -368,144 +207,165 @@ class URLCollector(BaseCollector):
             preselected_skills=self.selected_skills,
         )
 
-    async def _explore_phase(self) -> None:
-        await run_detail_explore_loop(
-            page=self.page,
-            screenshots_dir=self.screenshots_dir,
-            llm_decision_maker=self.llm_decision_maker,
-            explore_count=self.explore_count,
-            on_current_detail=self._handle_current_is_detail,
-            on_select_detail_links=self._handle_select_detail_links,
-            on_click_to_enter=self._handle_click_to_enter,
-        )
+    async def _collect_current_page_with_llm(self) -> tuple[list[str], list[DetailPageVisit]]:
+        if not self.llm_decision_maker:
+            return [], []
 
-    async def _handle_current_is_detail(self, explored: int) -> bool:
-        """处理当前页面就是详情页的情况"""
-        current_url = self.page.url
-        if current_url not in self.visited_detail_urls:
-            logger.info(f"[Explore] ✓ LLM 判断当前页面就是详情页: {current_url[:60]}...")
-            visit = build_detail_visit(
-                list_url=self.list_url,
-                detail_url=current_url,
-                step_index=self.step_index,
-            )
-            self.detail_visits.append(visit)
-            self.visited_detail_urls.add(current_url)
-            self.step_index += 1
-            logger.info(f"[Explore] 已探索 {explored + 1}/{self.explore_count} 个详情页")
+        target_url_count = self.target_url_count
+        max_scrolls = config.url_collector.max_scrolls
+        no_new_threshold = config.url_collector.no_new_url_threshold
+        page_urls: list[str] = []
+        page_visits: list[DetailPageVisit] = []
+        scroll_count = 0
+        no_new_urls_count = 0
+        last_url_count = len(self.collected_urls)
 
-            # 返回列表页
-            logger.info("[Explore] 返回列表页...")
-            await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(1)
-            if self.nav_steps:
-                await self.navigation_handler.replay_nav_steps(self.nav_steps)
-            return True
-        return False
+        while scroll_count < max_scrolls and no_new_urls_count < no_new_threshold:
+            if len(self.collected_urls) >= target_url_count:
+                break
 
-    async def _handle_select_detail_links(
-        self, llm_decision: dict, snapshot: "SoMSnapshot", screenshot_base64: str, explored: int
-    ) -> int:
-        """处理选择详情链接的情况"""
+            await clear_overlay(self.page)
+            snapshot = await inject_and_scan(self.page)
+            _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
+            llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
+
+            if llm_decision and llm_decision.get("action") == "select":
+                args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+                purpose = (args.get("purpose") or "").lower()
+                if purpose in {"detail_links", "detail_link", "detail"}:
+                    page_urls_delta, visits_delta = await self._collect_selected_detail_links(
+                        llm_decision=llm_decision,
+                        snapshot=snapshot,
+                    )
+                    page_urls.extend(page_urls_delta)
+                    page_visits.extend(visits_delta)
+
+            current_count = len(self.collected_urls)
+            if current_count == last_url_count:
+                no_new_urls_count += 1
+            else:
+                no_new_urls_count = 0
+                last_url_count = current_count
+
+            if len(self.collected_urls) >= target_url_count:
+                break
+            if not await smart_scroll(self.page):
+                break
+            scroll_count += 1
+
+        return page_urls, page_visits
+
+    async def _collect_selected_detail_links(
+        self,
+        *,
+        llm_decision: dict,
+        snapshot: "SoMSnapshot",
+    ) -> tuple[list[str], list[DetailPageVisit]]:
         args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
-        reasoning = llm_decision.get("thinking") or ""
         items = args.get("items") or []
-        mark_id_text_map = extract_mark_id_text_map(items)
-        if not mark_id_text_map:
-            mark_id_text_map = args.get("mark_id_text_map", {}) or {}
-        old_mark_ids = args.get("mark_ids", [])
+        mark_id_text_map = extract_mark_id_text_map(items) or args.get("mark_id_text_map", {}) or {}
+        fallback_mark_ids = args.get("mark_ids", [])
         mark_ids = await resolve_selected_mark_ids(
             page=self.page,
             llm=self.decider.llm,
             snapshot=snapshot,
             mark_id_text_map=mark_id_text_map,
-            fallback_mark_ids=old_mark_ids,
+            fallback_mark_ids=fallback_mark_ids,
         )
 
         if not mark_ids:
-            logger.info("[Explore] 没有选中任何链接")
-            return explored
+            return [], []
 
-        if reasoning:
-            logger.info(f"[Explore] 理由: {reasoning[:100]}...")
-
-        # 获取候选元素
-        candidates = [m for m in snapshot.marks if m.mark_id in mark_ids]
-        logger.info(f"[Explore] 找到 {len(candidates)} 个候选元素")
-
-        # 遍历候选，提取 URL
-        for i, candidate in enumerate(candidates, 1):
-            if explored >= self.explore_count:
+        page_urls: list[str] = []
+        page_visits: list[DetailPageVisit] = []
+        candidates = [mark for mark in snapshot.marks if mark.mark_id in mark_ids]
+        for candidate in candidates:
+            if len(self.collected_urls) >= self.target_url_count:
                 break
 
-            logger.info(
-                f"[Explore] 处理候选 {i}/{len(candidates)}: [{candidate.mark_id}] {candidate.text[:30]}..."
-            )
             url = await self.url_extractor.extract_from_element(
-                candidate, snapshot, nav_steps=self.nav_steps
+                candidate,
+                snapshot,
+                nav_steps=self.nav_steps,
             )
+            if not url:
+                continue
 
-            if url and url not in self.visited_detail_urls:
-                visit = build_detail_visit(
-                    list_url=self.list_url,
-                    detail_url=url,
-                    step_index=self.step_index,
-                    element=candidate,
-                )
-                self.detail_visits.append(visit)
-                self.visited_detail_urls.add(url)
-                explored += 1
-                self.step_index += 1
-                logger.info(f"[Explore] ✓ 获取到详情页 URL: {url[:60]}...")
-                logger.info(f"[Explore] 已探索 {explored}/{self.explore_count} 个详情页")
+            if url not in self.collected_urls:
+                self.collected_urls.append(url)
+                await self._publish_url(url)
+                page_urls.append(url)
 
-        return explored
+            if url in self.visited_detail_urls:
+                continue
 
-    async def _handle_click_to_enter(self, llm_decision: dict, snapshot: "SoMSnapshot") -> bool:
-        """处理点击进入详情页的情况
-
-        Args:
-            llm_decision: LLM 的决策字典，应包含 mark_id 和 target_text
-            snapshot: 当前页面的 SoM 快照
-
-        Returns:
-            bool: 是否成功获取到详情页 URL
-        """
-        args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
-        mark_id_raw = args.get("mark_id")
-        target_text = args.get("target_text") or ""
-        logger.info(f"[Explore] LLM 要求点击元素 [{mark_id_raw}] 进入详情页")
-        mark_id = await resolve_click_mark_id(
-            page=self.page,
-            llm=self.decider.llm,
-            snapshot=snapshot,
-            raw_mark_id=mark_id_raw,
-            target_text=target_text,
-        )
-
-        # 查找标注元素并执行模拟点击/导航
-        element = next((m for m in snapshot.marks if m.mark_id == mark_id), None)
-        if element:
-            url = await self.url_extractor.click_and_get_url(
-                element, snapshot, nav_steps=self.nav_steps
+            visit = build_detail_visit(
+                list_url=self.list_url,
+                detail_url=url,
+                step_index=self.step_index,
+                element=candidate,
             )
-            if url and url not in self.visited_detail_urls:
-                # 记录访问详情
-                visit = build_detail_visit(
-                    list_url=self.list_url,
-                    detail_url=url,
-                    step_index=self.step_index,
-                    element=element,
-                )
-                self.detail_visits.append(visit)
-                self.visited_detail_urls.add(url)
-                self.step_index += 1
-                logger.info("[Explore] ✓ 获取到详情页 URL")
-                return True
-        return False
+            self.step_index += 1
+            self.detail_visits.append(visit)
+            self.visited_detail_urls.add(url)
+            page_visits.append(visit)
 
-    def _save_config(self):
-        """将当前采集配置持久化到 JSON 文件，以便断点恢复或脚本生成使用"""
+        return page_urls, page_visits
+
+    async def _preview_urls_with_xpath(self) -> list[str]:
+        if not self.common_detail_xpath:
+            return []
+
+        preview_urls: list[str] = []
+        locators = self.page.locator(f"xpath={self.common_detail_xpath}")
+        count = await locators.count()
+        for index in range(count):
+            locator = locators.nth(index)
+            if self.url_extractor:
+                url = await self.url_extractor.extract_from_locator(locator, self.nav_steps)
+                if url:
+                    preview_urls.append(url)
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for url in preview_urls:
+            value = str(url or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        return normalized
+
+    async def _validate_xpath_rule_on_next_pages(self, validation_pages: int) -> bool:
+        for page_index in range(validation_pages):
+            llm_urls, _ = await self._collect_current_page_with_llm()
+            xpath_urls = await self._preview_urls_with_xpath()
+
+            llm_set = {str(url or "").strip() for url in llm_urls if str(url or "").strip()}
+            xpath_set = {str(url or "").strip() for url in xpath_urls if str(url or "").strip()}
+            if not llm_set or llm_set != xpath_set:
+                logger.info(
+                    "[URLCollector] 验证失败: page=%s, llm=%s, xpath=%s",
+                    page_index + 1,
+                    len(llm_set),
+                    len(xpath_set),
+                )
+                return False
+
+            self._save_progress()
+            if page_index == validation_pages - 1:
+                break
+            if not await self._advance_to_next_page():
+                return False
+
+        return True
+
+    async def _advance_to_next_page(self) -> bool:
+        delay = self.rate_controller.get_delay()
+        await asyncio.sleep(delay)
+        return await self.pagination_handler.find_and_click_next_page()
+
+    def _save_config(self) -> None:
         collection_config = CollectionConfig(
             nav_steps=self.nav_steps,
             common_detail_xpath=self.common_detail_xpath,
@@ -519,24 +379,19 @@ class URLCollector(BaseCollector):
             task_description=self.task_description,
         )
         self.config_persistence.save(collection_config)
-        logger.info("[Phase 4] ✓ 配置已持久化")
+        logger.info("[URLCollector] 配置已持久化")
 
     async def _generate_crawler_script(self) -> str:
-        """根据探索到的 XPath 和导航步数，自动生成独立的 Scrapy 爬虫脚本
-
-        Returns:
-            str: 生成的 Python 脚本代码内容
-        """
         detail_visits_dict = [
             {
-                "detail_page_url": v.detail_page_url,
-                "clicked_element_tag": v.clicked_element_tag,
-                "clicked_element_text": v.clicked_element_text,
-                "clicked_element_href": v.clicked_element_href,
-                "clicked_element_role": v.clicked_element_role,
-                "clicked_element_xpath_candidates": v.clicked_element_xpath_candidates,
+                "detail_page_url": visit.detail_page_url,
+                "clicked_element_tag": visit.clicked_element_tag,
+                "clicked_element_text": visit.clicked_element_text,
+                "clicked_element_href": visit.clicked_element_href,
+                "clicked_element_role": visit.clicked_element_role,
+                "clicked_element_xpath_candidates": visit.clicked_element_xpath_candidates,
             }
-            for v in self.detail_visits
+            for visit in self.detail_visits
         ]
 
         return await self.script_generator.generate_scrapy_playwright_script(
@@ -549,7 +404,6 @@ class URLCollector(BaseCollector):
         )
 
     def _create_result(self) -> URLCollectorResult:
-        """创建本次采集任务的最终结果封装对象"""
         return URLCollectorResult(
             detail_visits=self.detail_visits,
             common_pattern=self.common_pattern,
@@ -560,15 +414,7 @@ class URLCollector(BaseCollector):
         )
 
     async def _save_result(self, result: URLCollectorResult, crawler_script: str = "") -> None:
-        """保存收集结果到本地文件系统
-
-        生成的文件：
-        1. collected_urls.json: 结构化数据结果
-        2. urls.txt: 纯 URL 列表，方便后续处理
-        3. spider.py: 自动生成的独立爬虫脚本
-        """
         output_file = self.output_dir / "collected_urls.json"
-
         data = {
             "list_page_url": result.list_page_url,
             "task_description": result.task_description,
@@ -576,15 +422,15 @@ class URLCollector(BaseCollector):
             "nav_steps": self.nav_steps,
             "detail_visits": [
                 {
-                    "list_page_url": v.list_page_url,
-                    "detail_page_url": v.detail_page_url,
-                    "clicked_element_tag": v.clicked_element_tag,
-                    "clicked_element_text": v.clicked_element_text,
-                    "clicked_element_href": v.clicked_element_href,
-                    "clicked_element_role": v.clicked_element_role,
-                    "clicked_element_xpath_candidates": v.clicked_element_xpath_candidates,
+                    "list_page_url": visit.list_page_url,
+                    "detail_page_url": visit.detail_page_url,
+                    "clicked_element_tag": visit.clicked_element_tag,
+                    "clicked_element_text": visit.clicked_element_text,
+                    "clicked_element_href": visit.clicked_element_href,
+                    "clicked_element_role": visit.clicked_element_role,
+                    "clicked_element_xpath_candidates": visit.clicked_element_xpath_candidates,
                 }
-                for v in result.detail_visits
+                for visit in result.detail_visits
             ],
             "created_at": result.created_at,
         }
@@ -597,7 +443,6 @@ class URLCollector(BaseCollector):
         result.created_at = str((persisted or data).get("created_at") or result.created_at)
         logger.info(f"[Save] 结果已保存到: {output_file}")
 
-        # 保存 URL 列表
         urls_file = self.output_dir / "urls.txt"
         payload = "\n".join(result.collected_urls)
         if payload:
@@ -605,15 +450,12 @@ class URLCollector(BaseCollector):
         write_text_if_changed(urls_file, payload)
         logger.info(f"[Save] URL 列表已保存到: {urls_file}")
 
-        # 保存爬虫脚本
         if crawler_script:
             script_file = self.output_dir / "spider.py"
             write_text_if_changed(script_file, crawler_script)
             logger.info(f"[Save] Scrapy 爬虫脚本已保存到: {script_file}")
-            logger.info(f"[Save] 运行方式: scrapy runspider {script_file} -o output.json")
 
 
-# 便捷函数
 async def collect_detail_urls(
     page: "Page",
     list_url: str,
@@ -626,19 +468,6 @@ async def collect_detail_urls(
     skill_runtime: SkillRuntime | None = None,
     selected_skills: list[dict] | None = None,
 ) -> URLCollectorResult:
-    """收集详情页 URL 的便捷入口函数
-
-    Args:
-        page: Playwright Page 实例
-        list_url: 列表页起始 URL
-        task_description: 采集任务描述
-        explore_count: 探索详情页的数量
-        target_url_count: 目标采集 URL 数量（可覆盖配置）
-        output_dir: 结果输出目录
-
-    Returns:
-        URLCollectorResult: 包含所有收集到的 URL 及其元数据
-    """
     collector = URLCollector(
         page=page,
         list_url=list_url,

@@ -11,6 +11,7 @@ from ..common.channel.base import URLChannel, URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
 from ..common.experience import SkillRuntime
+from ..common.experience.skill_sedimenter import SkillSedimentationPayload
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import BatchFieldExtractor, BatchXPathExtractor
@@ -20,21 +21,20 @@ from .finalization import (
     PipelineFinalizationDependencies,
     PipelineFinalizer,
     build_execution_id as _build_execution_id_impl,
-    build_staged_record as _build_staged_record_impl,
-    build_summary_from_staged_records as _build_summary_from_staged_records_impl,
+    build_record_summary as _build_record_summary_impl,
+    build_run_record as _build_run_record_impl,
     classify_pipeline_result as _classify_pipeline_result_impl,
     cleanup_output_draft_skill as _cleanup_output_draft_skill_impl,
     commit_items_file as _commit_items_file_impl,
     find_output_draft_skill as _find_output_draft_skill_impl,
-    finalize_task_from_staged_record as _finalize_task_from_staged_record_impl,
-    load_staged_records as _load_staged_records_impl,
-    load_validation_failures as _load_validation_failures_impl,
+    finalize_task_from_record as _finalize_task_from_record_impl,
+    load_persisted_run_records as _load_persisted_run_records_impl,
+    persist_pipeline_run as _persist_pipeline_run_impl,
     prepare_fields_config as _prepare_fields_config_impl,
-    prepare_pipeline_workspace as _prepare_pipeline_workspace_impl,
+    prepare_pipeline_output as _prepare_pipeline_output_impl,
     should_promote_skill as _should_promote_skill_impl,
     strip_draft_markers_from_skill_content as _strip_draft_markers_from_skill_content_impl,
     try_sediment_skill as _try_sediment_skill_impl,
-    write_staged_record as _write_staged_record_impl,
     write_summary as _write_summary_impl,
 )
 from .orchestration import (
@@ -60,10 +60,6 @@ def _find_output_draft_skill(list_url: str, output_dir: str):
 
 def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
     _cleanup_output_draft_skill_impl(list_url, output_dir)
-
-
-def _load_validation_failures(output_path: Path) -> list[dict]:
-    return _load_validation_failures_impl(output_path)
 
 
 def _classify_pipeline_result(
@@ -119,37 +115,27 @@ def _build_execution_id(
     )
 
 
-def _prepare_pipeline_workspace(
+def _prepare_pipeline_output(
     *,
     output_path: Path,
-    staging_dir: Path,
     items_path: Path,
     summary_path: Path,
-    manifest_path: Path,
-    execution_id: str,
-    list_url: str,
-    task_description: str,
 ) -> None:
-    _prepare_pipeline_workspace_impl(
+    _prepare_pipeline_output_impl(
         output_path=output_path,
-        staging_dir=staging_dir,
         items_path=items_path,
         summary_path=summary_path,
-        manifest_path=manifest_path,
-        execution_id=execution_id,
-        list_url=list_url,
-        task_description=task_description,
     )
 
 
-def _build_staged_record(
+def _build_run_record(
     *,
     url: str,
     item: dict,
     success: bool,
     failure_reason: str,
 ) -> dict:
-    return _build_staged_record_impl(
+    return _build_run_record_impl(
         url=url,
         item=item,
         success=success,
@@ -157,52 +143,59 @@ def _build_staged_record(
     )
 
 
-def _write_staged_record(staging_dir: Path, record: dict) -> None:
-    _write_staged_record_impl(staging_dir, record)
+def _load_persisted_run_records(execution_id: str) -> dict[str, dict]:
+    return _load_persisted_run_records_impl(execution_id)
 
 
-def _load_staged_records(staging_dir: Path) -> dict[str, dict]:
-    return _load_staged_records_impl(staging_dir)
-
-
-def _build_summary_from_staged_records(records: dict[str, dict]) -> dict[str, int]:
-    return _build_summary_from_staged_records_impl(records)
+def _build_record_summary(records: dict[str, dict]) -> dict[str, int]:
+    return _build_record_summary_impl(records)
 
 
 def _commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
     _commit_items_file_impl(items_path, records)
 
 
-async def _finalize_task_from_staged_record(task: URLTask, staged_record: dict) -> None:
-    await _finalize_task_from_staged_record_impl(task, staged_record)
+async def _finalize_task_from_record(task: URLTask, record: dict) -> None:
+    await _finalize_task_from_record_impl(task, record)
 
 
 def _write_summary(path: Path, summary: dict) -> None:
     _write_summary_impl(path, summary)
 
 
+def _persist_pipeline_run(context: PipelineFinalizationContext, records: dict[str, dict]) -> None:
+    _persist_pipeline_run_impl(context, records)
+
+
 def _try_sediment_skill(
     *,
-    list_url: str,
-    task_description: str,
-    fields: list[FieldDefinition],
     state: dict[str, object],
-    summary: dict,
-    output_dir: str,
+    payload: SkillSedimentationPayload,
 ) -> Path | None:
     return _try_sediment_skill_impl(
-        list_url=list_url,
-        task_description=task_description,
-        fields=fields,
         state=state,
-        summary=summary,
-        output_dir=output_dir,
+        payload=payload,
     )
 
 
 def _set_state_error(state: dict[str, object], error: str) -> None:
     if not state.get("error"):
         state["error"] = error
+
+
+def _resolve_run_redis_key_prefix(
+    *,
+    pipeline_mode: str | None,
+    redis_key_prefix: str | None,
+    execution_id: str,
+) -> str | None:
+    if redis_key_prefix:
+        return redis_key_prefix
+    mode = str(pipeline_mode or config.pipeline.mode).strip().lower()
+    if mode != "redis":
+        return None
+    base_prefix = (config.redis.key_prefix or "autospider:urls").strip() or "autospider:urls"
+    return f"{base_prefix}:run:{execution_id}"
 
 
 async def run_pipeline(
@@ -221,6 +214,7 @@ async def run_pipeline(
     guard_intervention_mode: str = "blocking",
     guard_thread_id: str = "",
     selected_skills: list[dict[str, str]] | None = None,
+    plan_knowledge: str = "",
 ) -> dict:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -240,28 +234,26 @@ async def run_pipeline(
         1,
         int(consumer_concurrency or config.pipeline.consumer_concurrency),
     )
+    effective_redis_key_prefix = _resolve_run_redis_key_prefix(
+        pipeline_mode=pipeline_mode,
+        redis_key_prefix=redis_key_prefix,
+        execution_id=execution_id,
+    )
 
     channel, redis_manager = create_url_channel(
         mode=pipeline_mode,
         output_dir=output_dir,
-        redis_key_prefix=redis_key_prefix,
+        redis_key_prefix=effective_redis_key_prefix,
     )
 
     items_path = output_path / "pipeline_extracted_items.jsonl"
     summary_path = output_path / "pipeline_summary.json"
-    staging_dir = output_path / ".pipeline_items"
-    manifest_path = output_path / "pipeline_execution.json"
-    _prepare_pipeline_workspace(
+    _prepare_pipeline_output(
         output_path=output_path,
-        staging_dir=staging_dir,
         items_path=items_path,
         summary_path=summary_path,
-        manifest_path=manifest_path,
-        execution_id=execution_id,
-        list_url=list_url,
-        task_description=task_description,
     )
-    staged_records = _load_staged_records(staging_dir)
+    run_records = _load_persisted_run_records(execution_id)
     skill_runtime = SkillRuntime()
 
     summary = {
@@ -308,12 +300,12 @@ async def run_pipeline(
         selected_skills=selected_skills,
         channel=channel,
         redis_manager=redis_manager,
-        staged_records=staged_records,
+        run_records=run_records,
         summary=summary,
         tracker=TaskProgressTracker(execution_id),
         skill_runtime=skill_runtime,
         sessions=sessions,
-        staging_dir=staging_dir,
+        plan_knowledge=plan_knowledge,
         url_only_mode=len(fields) == 0,
     )
 
@@ -332,10 +324,9 @@ async def run_pipeline(
 
     finalizer = PipelineFinalizer(
         PipelineFinalizationDependencies(
-            load_staged_records=_load_staged_records,
-            build_summary_from_staged_records=_build_summary_from_staged_records,
-            load_validation_failures=_load_validation_failures,
+            build_record_summary=_build_record_summary,
             classify_pipeline_result=_classify_pipeline_result,
+            persist_pipeline_run=_persist_pipeline_run,
             commit_items_file=_commit_items_file,
             write_summary=_write_summary,
             try_sediment_skill=_try_sediment_skill,
@@ -350,22 +341,30 @@ async def run_pipeline(
             services.consumer_pool.run(),
         )
     finally:
-        await finalizer.finalize(
-            PipelineFinalizationContext(
-                list_url=list_url,
-                task_description=task_description,
-                fields=fields,
-                output_dir=output_dir,
-                output_path=output_path,
-                items_path=items_path,
-                summary_path=summary_path,
-                staging_dir=staging_dir,
-                summary=summary,
-                state=runtime_context.state,
-                tracker=runtime_context.tracker,
-                sessions=sessions,
+        try:
+            await finalizer.finalize(
+                PipelineFinalizationContext(
+                    list_url=list_url,
+                    task_description=task_description,
+                    fields=fields,
+                    thread_id=guard_thread_id,
+                    output_dir=output_dir,
+                    output_path=output_path,
+                    items_path=items_path,
+                    summary_path=summary_path,
+                    committed_records=run_records,
+                    summary=summary,
+                    state=runtime_context.state,
+                    collection_config=dict(runtime_context.state.get("collection_config") or {}),
+                    extraction_config=dict(runtime_context.state.get("extraction_config") or {}),
+                    validation_failures=list(runtime_context.state.get("validation_failures") or []),
+                    plan_knowledge=runtime_context.plan_knowledge,
+                    tracker=runtime_context.tracker,
+                    sessions=sessions,
+                )
             )
-        )
+        finally:
+            await channel.close()
 
     return summary
 
@@ -392,8 +391,7 @@ async def _collect_tasks(
 async def _process_task(
     extractor: BatchXPathExtractor,
     task: URLTask,
-    staging_dir: Path,
-    staged_records: dict[str, dict],
+    run_records: dict[str, dict],
     summary_lock: asyncio.Lock,
     tracker: TaskProgressTracker | None = None,
 ) -> None:
@@ -403,10 +401,15 @@ async def _process_task(
         return
 
     async with summary_lock:
-        existing_record = staged_records.get(url)
+        existing_record = run_records.get(url)
 
     if existing_record is not None:
-        await _finalize_task_from_staged_record(task, existing_record)
+        await _finalize_task_from_record(task, existing_record)
+        if tracker:
+            if existing_record.get("success"):
+                await tracker.record_success(url)
+            else:
+                await tracker.record_failure(url, str(existing_record.get("failure_reason") or ""))
         return
 
     try:
@@ -414,7 +417,7 @@ async def _process_task(
     except BrowserInterventionRequired:
         raise
     except Exception as exc:  # noqa: BLE001
-        staged_record = _build_staged_record(
+        run_record = _build_run_record(
             url=url,
             item={"url": url, "_error": f"extractor_exception: {exc}"},
             success=False,
@@ -426,14 +429,14 @@ async def _process_task(
             item[field_result.field_name] = field_result.value
 
         if record.success:
-            staged_record = _build_staged_record(
+            run_record = _build_run_record(
                 url=url,
                 item=item,
                 success=True,
                 failure_reason="",
             )
         else:
-            staged_record = _build_staged_record(
+            run_record = _build_run_record(
                 url=url,
                 item=item,
                 success=False,
@@ -441,16 +444,15 @@ async def _process_task(
             )
 
     async with summary_lock:
-        _write_staged_record(staging_dir, staged_record)
-        staged_records[url] = staged_record
+        run_records[url] = run_record
 
-    await _finalize_task_from_staged_record(task, staged_record)
+    await _finalize_task_from_record(task, run_record)
 
     if tracker:
-        if staged_record.get("success"):
+        if run_record.get("success"):
             await tracker.record_success(url)
         else:
-            await tracker.record_failure(url, staged_record.get("failure_reason", ""))
+            await tracker.record_failure(url, run_record.get("failure_reason", ""))
 
 
 async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:

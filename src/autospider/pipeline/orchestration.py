@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..common.browser.intervention import BrowserInterventionRequired
@@ -16,6 +15,32 @@ from ..domain.fields import FieldDefinition
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
+
+
+def _build_validation_failures(validation_records: list[Any]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for record in validation_records:
+        fields: list[dict[str, Any]] = []
+        for field_result in list(getattr(record, "fields", []) or []):
+            error = str(getattr(field_result, "error", "") or "").strip()
+            if not error:
+                continue
+            fields.append(
+                {
+                    "field_name": str(getattr(field_result, "field_name", "") or ""),
+                    "xpath": getattr(field_result, "xpath", None),
+                    "error": error,
+                    "xpath_candidates": list(getattr(field_result, "xpath_candidates", []) or []),
+                }
+            )
+        if fields:
+            failures.append(
+                {
+                    "url": str(getattr(record, "url", "") or ""),
+                    "fields": fields,
+                }
+            )
+    return failures
 
 
 @dataclass(slots=True)
@@ -49,16 +74,24 @@ class PipelineRuntimeContext:
     selected_skills: list[dict[str, str]] | None
     channel: URLChannel
     redis_manager: object | None
-    staged_records: dict[str, dict]
+    run_records: dict[str, dict]
     summary: dict[str, Any]
     tracker: TaskProgressTracker
     skill_runtime: SkillRuntime
     sessions: PipelineSessionBundle
-    staging_dir: Path
+    plan_knowledge: str = ""
     url_only_mode: bool = False
     producer_done: asyncio.Event = field(default_factory=asyncio.Event)
     xpath_ready: asyncio.Event = field(default_factory=asyncio.Event)
-    state: dict[str, object] = field(default_factory=lambda: {"fields_config": None, "error": None})
+    state: dict[str, object] = field(
+        default_factory=lambda: {
+            "fields_config": None,
+            "collection_config": {},
+            "extraction_config": {},
+            "validation_failures": [],
+            "error": None,
+        }
+    )
     explore_tasks: list[URLTask] = field(default_factory=list)
 
 
@@ -98,6 +131,23 @@ class ProducerService:
             )
             result = await collector.run()
             self.context.summary["collected_urls"] = len(result.collected_urls)
+            common_detail_xpath = getattr(collector, "common_detail_xpath", None)
+            if common_detail_xpath is not None:
+                common_detail_xpath = str(common_detail_xpath).strip() or None
+            self.context.state["collection_config"] = {
+                "nav_steps": list(getattr(collector, "nav_steps", []) or []),
+                "common_detail_xpath": common_detail_xpath,
+                "pagination_xpath": (
+                    str(getattr(getattr(collector, "pagination_handler", None), "pagination_xpath", "") or "")
+                    or None
+                ),
+                "jump_widget_xpath": dict(
+                    getattr(getattr(collector, "pagination_handler", None), "jump_widget_xpath", None) or {}
+                )
+                or None,
+                "list_url": self.context.list_url,
+                "task_description": self.context.task_description,
+            }
             await self.context.tracker.set_total(len(result.collected_urls))
         except BrowserInterventionRequired:
             raise
@@ -106,7 +156,6 @@ class ProducerService:
             logger.info("[Pipeline] Producer failed: %s", exc)
         finally:
             self.context.producer_done.set()
-            await self.context.channel.close()
 
 
 class ExplorationService:
@@ -117,16 +166,21 @@ class ExplorationService:
     async def run(self) -> None:
         if self.context.url_only_mode:
             logger.info("[Pipeline] 未提供字段定义，启用 URL-only 模式。")
-            self.context.state["fields_config"] = [
-                {
-                    "name": "url",
-                    "description": "详情页 URL",
-                    "xpath": None,
-                    "required": True,
-                    "data_type": "url",
-                    "extraction_source": "task_url",
-                }
-            ]
+            extraction_config = {
+                "fields": [
+                    {
+                        "name": "url",
+                        "description": "详情页 URL",
+                        "xpath": None,
+                        "required": True,
+                        "data_type": "url",
+                        "extraction_source": "task_url",
+                    }
+                ]
+            }
+            self.context.state["fields_config"] = extraction_config["fields"]
+            self.context.state["extraction_config"] = extraction_config
+            self.context.state["validation_failures"] = []
             self.context.xpath_ready.set()
             return
 
@@ -142,6 +196,8 @@ class ExplorationService:
         if not urls:
             self.deps.set_state_error(self.context.state, "no_urls_for_exploration")
             logger.info("[Pipeline] No URLs collected for exploration.")
+            self.context.state["extraction_config"] = {}
+            self.context.state["validation_failures"] = []
             self.context.xpath_ready.set()
             return
 
@@ -154,7 +210,11 @@ class ExplorationService:
             skill_runtime=self.context.skill_runtime,
         )
         result = await extractor.run(urls=urls)
-        raw_fields_config = result.to_extraction_config().get("fields", [])
+        extraction_config = result.to_extraction_config()
+        validation_failures = _build_validation_failures(result.validation_records)
+        self.context.state["extraction_config"] = extraction_config
+        self.context.state["validation_failures"] = validation_failures
+        raw_fields_config = extraction_config.get("fields", [])
         fields_config, missing_required, missing_optional = self.deps.prepare_fields_config(
             raw_fields_config
         )
@@ -177,6 +237,7 @@ class ExplorationService:
 
         self.context.state["fields_config"] = fields_config
         self.context.xpath_ready.set()
+        return
 
 
 class ConsumerPool:
@@ -249,8 +310,7 @@ class ConsumerPool:
                 await self.deps.process_task(
                     extractor=extractor,
                     task=task,
-                    staging_dir=self.context.staging_dir,
-                    staged_records=self.context.staged_records,
+                    run_records=self.context.run_records,
                     summary_lock=summary_lock,
                     tracker=self.context.tracker,
                 )

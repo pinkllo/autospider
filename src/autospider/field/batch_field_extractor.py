@@ -433,7 +433,7 @@ class BatchFieldExtractor:
 
                     if record.success:
                         # 成功：发送 ACK
-                        await self.redis_manager.ack_task(stream_id)
+                        await self.redis_manager.ack_task(stream_id, data_id)
                         acked_count += 1
                     else:
                         # 失败：标记失败（带重试机制）
@@ -448,7 +448,7 @@ class BatchFieldExtractor:
                     stream_id, data_id = self.task_mapping[record.url]
 
                     if record.success:
-                        await self.redis_manager.ack_task(stream_id)
+                        await self.redis_manager.ack_task(stream_id, data_id)
                         acked_count += 1
                     else:
                         await self.redis_manager.fail_task(

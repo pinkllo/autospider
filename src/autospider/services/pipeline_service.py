@@ -39,6 +39,7 @@ class PipelineExecutionService:
             guard_intervention_mode="interrupt",
             guard_thread_id=thread_id,
             selected_skills=list(params.get("selected_skills") or []),
+            plan_knowledge=str(params.get("plan_knowledge") or ""),
         )
 
         summary_file = Path(str(params.get("output_dir") or "output")) / "pipeline_summary.json"

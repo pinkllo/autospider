@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlparse
 
 import yaml
@@ -16,6 +15,7 @@ from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 
 if TYPE_CHECKING:
+    from ..common.experience.skill_sedimenter import SkillSedimentationPayload
     from ..domain.fields import FieldDefinition
     from .orchestration import PipelineSessionBundle
     from .progress_tracker import TaskProgressTracker
@@ -103,18 +103,6 @@ def cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
         logger.info("[Pipeline] 已清理输出目录中的 Draft Skill: %s", draft_path)
     except Exception as exc:  # noqa: BLE001
         logger.debug("[Pipeline] 清理 Draft Skill 失败（不影响主流程）: %s", exc)
-
-
-def load_validation_failures(output_path: Path) -> list[dict]:
-    detail_path = output_path / "extraction_result.json"
-    if not detail_path.exists():
-        return []
-    try:
-        payload = json.loads(detail_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    failures = payload.get("validation_failures", [])
-    return list(failures) if isinstance(failures, list) else []
 
 
 def classify_pipeline_result(
@@ -237,55 +225,18 @@ def build_execution_id(
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def prepare_pipeline_workspace(
+def prepare_pipeline_output(
     *,
     output_path: Path,
-    staging_dir: Path,
     items_path: Path,
     summary_path: Path,
-    manifest_path: Path,
-    execution_id: str,
-    list_url: str,
-    task_description: str,
 ) -> None:
-    previous_execution_id = ""
-    if manifest_path.exists():
-        try:
-            previous_execution_id = str(
-                json.loads(manifest_path.read_text(encoding="utf-8")).get("execution_id") or ""
-            )
-        except Exception:
-            previous_execution_id = ""
-
-    if previous_execution_id and previous_execution_id != execution_id:
-        if staging_dir.exists():
-            shutil.rmtree(staging_dir, ignore_errors=True)
-        if items_path.exists():
-            items_path.unlink(missing_ok=True)
-        if summary_path.exists():
-            summary_path.unlink(missing_ok=True)
-
     output_path.mkdir(parents=True, exist_ok=True)
-    staging_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "execution_id": execution_id,
-        "list_url": list_url,
-        "task_description": task_description,
-        "updated_at": "",
-    }
-    write_json_idempotent(
-        manifest_path,
-        manifest,
-        identity_keys=("execution_id", "list_url", "task_description"),
-    )
+    items_path.unlink(missing_ok=True)
+    summary_path.unlink(missing_ok=True)
 
 
-def staged_record_path(staging_dir: Path, url: str) -> Path:
-    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
-    return staging_dir / f"{digest}.json"
-
-
-def build_staged_record(
+def build_run_record(
     *,
     url: str,
     item: dict,
@@ -300,35 +251,31 @@ def build_staged_record(
     }
 
 
-def write_staged_record(staging_dir: Path, record: dict) -> None:
-    path = staged_record_path(staging_dir, str(record.get("url") or ""))
-    write_json_atomic(path, record)
-
-
-def load_staged_records(staging_dir: Path) -> dict[str, dict]:
-    if not staging_dir.exists():
+def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
+    if not execution_id:
         return {}
 
+    from ..common.db.engine import session_scope
+    from ..common.db.repositories import TaskRepository
+
     records: dict[str, dict] = {}
-    for record_file in sorted(staging_dir.glob("*.json")):
-        try:
-            record = json.loads(record_file.read_text(encoding="utf-8"))
-        except Exception:
+    with session_scope() as session:
+        persisted_items = TaskRepository(session).list_run_items(execution_id)
+    for item in persisted_items:
+        url = str(item.get("url") or "").strip()
+        payload = item.get("item")
+        if not url or not isinstance(payload, dict):
             continue
-        url = str(record.get("url") or "").strip()
-        item = record.get("item")
-        if not url or not isinstance(item, dict):
-            continue
-        records[url] = {
-            "url": url,
-            "success": bool(record.get("success", False)),
-            "failure_reason": str(record.get("failure_reason") or ""),
-            "item": dict(item),
-        }
+        records[url] = build_run_record(
+            url=url,
+            item=payload,
+            success=bool(item.get("success", False)),
+            failure_reason=str(item.get("failure_reason") or ""),
+        )
     return records
 
 
-def build_summary_from_staged_records(records: dict[str, dict]) -> dict[str, int]:
+def build_record_summary(records: dict[str, dict]) -> dict[str, int]:
     total_urls = len(records)
     success_count = sum(1 for record in records.values() if bool(record.get("success")))
     return {
@@ -348,22 +295,12 @@ def commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
     write_text_if_changed(items_path, payload)
 
 
-async def finalize_task_from_staged_record(task: Any, staged_record: dict) -> None:
-    if bool(staged_record.get("success")):
+async def finalize_task_from_record(task: Any, record: dict) -> None:
+    if bool(record.get("success")):
         await task.ack_task()
         return
-    reason = str(staged_record.get("failure_reason") or "extraction_failed")
+    reason = str(record.get("failure_reason") or "extraction_failed")
     await task.fail_task(reason)
-
-
-def write_json_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp_path.replace(path)
 
 
 def write_summary(path: Path, summary: dict) -> None:
@@ -375,66 +312,74 @@ def write_summary(path: Path, summary: dict) -> None:
     )
 
 
+def _coerce_field_names(fields: list["FieldDefinition"]) -> list[str]:
+    names: list[str] = []
+    for field in fields:
+        name = str(getattr(field, "name", "") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def persist_pipeline_run(context: "PipelineFinalizationContext", records: dict[str, dict]) -> None:
+    """将现版本运行结果持久化到 PostgreSQL。"""
+    from ..common.db.engine import session_scope
+    from ..common.db.repositories import TaskRepository, TaskRunPayload
+    from ..common.storage.task_registry import invalidate_task_cache, normalize_url
+
+    normalized_url = normalize_url(context.list_url)
+    if not normalized_url:
+        return
+
+    payload = TaskRunPayload(
+        normalized_url=normalized_url,
+        original_url=context.list_url,
+        task_description=context.task_description,
+        field_names=_coerce_field_names(context.fields),
+        execution_id=str(context.summary.get("execution_id") or context.summary.get("run_id") or ""),
+        thread_id=context.thread_id,
+        output_dir=context.output_dir,
+        pipeline_mode=str(context.summary.get("mode") or ""),
+        execution_state=str(context.summary.get("execution_state") or ""),
+        outcome_state=str(context.summary.get("outcome_state") or ""),
+        promotion_state=str(context.summary.get("promotion_state") or ""),
+        total_urls=int(context.summary.get("total_urls", 0) or 0),
+        success_count=int(context.summary.get("success_count", 0) or 0),
+        failed_count=int(context.summary.get("failed_count", 0) or 0),
+        validation_failure_count=int(context.summary.get("validation_failure_count", 0) or 0),
+        success_rate=float(context.summary.get("success_rate", 0.0) or 0.0),
+        error_message=str(context.summary.get("error") or ""),
+        summary_json=dict(context.summary or {}),
+        collection_config=dict(context.collection_config or {}),
+        extraction_config=dict(context.extraction_config or {}),
+        plan_knowledge=str(context.plan_knowledge or ""),
+        committed_records=list(records.values()),
+        validation_failures=list(context.validation_failures or []),
+    )
+    with session_scope() as session:
+        repo = TaskRepository(session)
+        repo.save_run(payload)
+    invalidate_task_cache(context.list_url)
+
+
 def try_sediment_skill(
     *,
-    list_url: str,
-    task_description: str,
-    fields: list["FieldDefinition"],
     state: dict[str, object],
-    summary: dict,
-    output_dir: str,
+    payload: "SkillSedimentationPayload",
 ) -> Path | None:
     try:
         from ..common.experience import SkillSedimenter
 
-        output_path = Path(output_dir)
-        collection_config: dict = {}
-        cc_path = output_path / "collection_config.json"
-        if cc_path.exists():
-            try:
-                collection_config = json.loads(cc_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-        extraction_config: dict = {}
-        ec_path = output_path / "extraction_config.json"
-        if ec_path.exists():
-            try:
-                extraction_config = json.loads(ec_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-        validation_failures = load_validation_failures(output_path)
         if not should_promote_skill(
             state=state,
-            summary=summary,
-            validation_failures=validation_failures,
+            summary=payload.summary,
+            validation_failures=payload.validation_failures,
         ):
             logger.info("[Pipeline] 本次运行未达到 Skill 提升条件，保留 draft skill")
             return None
 
-        fields_dicts = [field.model_dump() for field in fields]
-        plan_knowledge = ""
-        for candidate in [output_path / "plan_knowledge.md", output_path.parent / "plan_knowledge.md"]:
-            if candidate.exists():
-                try:
-                    plan_knowledge = candidate.read_text(encoding="utf-8")
-                    break
-                except Exception:
-                    pass
-
         sedimenter = SkillSedimenter()
-        result_path = sedimenter.sediment_from_pipeline_result(
-            list_url=list_url,
-            task_description=task_description,
-            fields=fields_dicts,
-            collection_config=collection_config,
-            extraction_config=extraction_config,
-            summary=summary,
-            validation_failures=validation_failures,
-            plan_knowledge=plan_knowledge,
-            status="validated",
-        )
+        result_path = sedimenter.sediment_from_pipeline_result(payload)
         if result_path:
             logger.info("[Pipeline] 经验已沉淀为 Skill: %s", result_path)
         return result_path
@@ -448,23 +393,27 @@ class PipelineFinalizationContext:
     list_url: str
     task_description: str
     fields: list["FieldDefinition"]
+    thread_id: str
     output_dir: str
     output_path: Path
     items_path: Path
     summary_path: Path
-    staging_dir: Path
+    committed_records: dict[str, dict[str, Any]]
     summary: dict[str, Any]
     state: dict[str, object]
+    collection_config: dict[str, Any]
+    extraction_config: dict[str, Any]
+    validation_failures: list[dict[str, Any]]
+    plan_knowledge: str
     tracker: "TaskProgressTracker"
     sessions: "PipelineSessionBundle"
 
 
 @dataclass(frozen=True, slots=True)
 class PipelineFinalizationDependencies:
-    load_staged_records: Callable[[Path], dict[str, dict]]
-    build_summary_from_staged_records: Callable[[dict[str, dict]], dict[str, int]]
-    load_validation_failures: Callable[[Path], list[dict]]
+    build_record_summary: Callable[[dict[str, dict]], dict[str, int]]
     classify_pipeline_result: Callable[..., dict[str, object]]
+    persist_pipeline_run: Callable[["PipelineFinalizationContext", dict[str, dict]], None]
     commit_items_file: Callable[[Path, dict[str, dict]], None]
     write_summary: Callable[[Path, dict], None]
     try_sediment_skill: Callable[..., Path | None]
@@ -477,22 +426,24 @@ class PipelineFinalizer:
 
     async def finalize(self, context: PipelineFinalizationContext) -> None:
         try:
+            from ..common.experience.skill_sedimenter import SkillSedimentationPayload
+
             if context.state.get("error"):
                 context.summary["error"] = context.state.get("error")
 
-            committed_records = self._deps.load_staged_records(context.staging_dir)
-            committed_summary = self._deps.build_summary_from_staged_records(committed_records)
+            committed_records = dict(context.committed_records)
+            committed_summary = self._deps.build_record_summary(committed_records)
             context.summary["total_urls"] = committed_summary["total_urls"]
             context.summary["success_count"] = committed_summary["success_count"]
-            validation_failures = self._deps.load_validation_failures(context.output_path)
             context.summary.update(
                 self._deps.classify_pipeline_result(
                     total_urls=context.summary["total_urls"],
                     success_count=context.summary["success_count"],
                     state_error=context.state.get("error"),
-                    validation_failures=validation_failures,
+                    validation_failures=context.validation_failures,
                 )
             )
+            self._deps.persist_pipeline_run(context, committed_records)
             self._deps.commit_items_file(context.items_path, committed_records)
             self._deps.write_summary(context.summary_path, context.summary)
 
@@ -500,12 +451,18 @@ class PipelineFinalizer:
             await context.tracker.mark_done(final_status)
 
             sedimented_skill_path = self._deps.try_sediment_skill(
-                list_url=context.list_url,
-                task_description=context.task_description,
-                fields=context.fields,
                 state=context.state,
-                summary=context.summary,
-                output_dir=context.output_dir,
+                payload=SkillSedimentationPayload(
+                    list_url=context.list_url,
+                    task_description=context.task_description,
+                    fields=[field.model_dump() for field in context.fields],
+                    collection_config=dict(context.collection_config or {}),
+                    extraction_config=dict(context.extraction_config or {}),
+                    summary=dict(context.summary or {}),
+                    validation_failures=list(context.validation_failures or []),
+                    plan_knowledge=str(context.plan_knowledge or ""),
+                    status="validated",
+                ),
             )
             if sedimented_skill_path:
                 self._deps.cleanup_output_draft_skill(

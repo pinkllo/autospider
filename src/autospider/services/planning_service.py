@@ -79,8 +79,10 @@ class PlanningService:
         fields = list(params.get("fields") or [])
         plan.shared_fields = fields
         plan.total_subtasks = len(plan.subtasks)
+        plan_knowledge = planner.render_plan_knowledge(plan)
         return {
             "task_plan": plan,
+            "plan_knowledge": plan_knowledge,
             "summary": {"total_subtasks": len(plan.subtasks)},
             "selected_skills": list(planner.selected_skills or []),
             "result": {"task_plan": plan},

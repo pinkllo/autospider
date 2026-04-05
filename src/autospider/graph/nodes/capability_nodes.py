@@ -315,6 +315,7 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
         return {
             **_ok(_node_payload(service_result, {"task_plan": task_plan})),
             "task_plan": task_plan,
+            "plan_knowledge": str(service_result.get("plan_knowledge") or ""),
             "summary": dict(service_result.get("summary") or {}),
             "selected_skills": list(service_result.get("selected_skills") or []),
         }

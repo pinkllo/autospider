@@ -11,7 +11,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
 
 from ...common.config import config
 from ...common.logger import get_logger
@@ -381,25 +380,8 @@ class BaseCollector(ABC):
                     break
 
                 locator = locators.nth(i)
-
-                # 尝试模式 1：从 href 获取
-                try:
-                    href = await locator.get_attribute("href")
-                    if href:
-                        url = urljoin(self.list_url, href)
-                        if url not in self.collected_urls:
-                            self.collected_urls.append(url)
-                            await self._publish_url(url)
-                            logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
-                        continue
-                except Exception as e:
-                    logger.debug(f"获取 href 失败: {e}")
-
-                # 尝试模式 2：点击获取（处理某些 JS 动态生成的链接）
                 if self.url_extractor:
-                    url = await self.url_extractor.click_element_and_get_url(
-                        locator, self.nav_steps
-                    )
+                    url = await self.url_extractor.extract_from_locator(locator, self.nav_steps)
                     if url and url not in self.collected_urls:
                         self.collected_urls.append(url)
                         await self._publish_url(url)

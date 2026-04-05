@@ -25,7 +25,6 @@ from .xpath_helpers import (
     build_xpath_fallback_chain,
     clean_xpath,
     normalize_xpath_for_comparison,
-    normalize_xpath_majority_key,
     xpath_stability_score,
 )
 from .models import (
@@ -104,14 +103,15 @@ class FieldXPathExtractor:
         for xpath in xpaths:
             logger.info(f"  - {_escape_markup(xpath)}")
 
-        majority = self._select_majority_pattern(xpaths)
-        if not majority:
-            logger.info("[FieldXPathExtractor] ⚠ 未找到公共 XPath 模式")
+        xpath_rule = self._build_exact_xpath_rule(xpaths)
+        if not xpath_rule:
+            logger.info("[FieldXPathExtractor] ⚠ 未找到可用的完整 XPath 规则")
             return None
 
-        common_pattern = str(majority["xpath"])
-        support_count = int(majority["support_count"])
-        support_rate = float(majority["support_rate"])
+        common_pattern = str(xpath_rule["xpath"])
+        fallback_xpaths = list(xpath_rule["fallback_xpaths"])
+        support_count = int(xpath_rule["support_count"])
+        support_rate = float(xpath_rule["support_rate"])
 
         if self._is_over_broad_pattern(common_pattern):
             logger.info("[FieldXPathExtractor] ⚠ 多数投票结果过宽，放弃该字段模式")
@@ -128,7 +128,7 @@ class FieldXPathExtractor:
         return CommonFieldXPath(
             field_name=field_name,
             xpath_pattern=common_pattern,
-            fallback_xpaths=[],
+            fallback_xpaths=fallback_xpaths,
             source_xpaths=xpaths,
             confidence=support_rate,
         )
@@ -151,44 +151,52 @@ class FieldXPathExtractor:
             xpaths.append(xpath)
         return xpaths
 
-    def _normalize_majority_key(self, xpath: str) -> str:
-        return normalize_xpath_majority_key(xpath)
-
-    def _select_majority_pattern(self, xpaths: list[str]) -> dict[str, float | int | str] | None:
-        if len(xpaths) < 2:
+    def _build_exact_xpath_rule(self, xpaths: list[str]) -> dict[str, float | int | str | list[str]] | None:
+        cleaned = [xpath.strip() for xpath in xpaths if xpath and xpath.strip()]
+        if not cleaned:
             return None
 
-        grouped: dict[str, list[str]] = {}
-        order: list[str] = []
-        for xpath in xpaths:
-            normalized = self._normalize_majority_key(xpath)
-            if not normalized:
-                continue
-            if normalized not in grouped:
-                grouped[normalized] = []
-                order.append(normalized)
-            grouped[normalized].append(xpath)
+        primary_xpath = self._find_dominant_exact_xpath(cleaned)
+        if primary_xpath is None:
+            ranked = self._rank_exact_xpaths(cleaned)
+            if not ranked:
+                return None
+            primary_xpath = ranked[0]
 
-        if not grouped:
+        if not primary_xpath:
             return None
 
-        primary_key = max(
-            order,
-            key=lambda key: (len(grouped[key]), -order.index(key)),
-        )
-        support_count = len(grouped[primary_key])
-        support_rate = support_count / len(xpaths)
-
-        if support_count < 2:
-            return None
-        if support_rate < 0.6:
-            return None
+        fallback_xpaths = self._build_priority_fallback_xpaths(cleaned, primary_xpath)
+        support_count = sum(1 for xpath in cleaned if xpath == primary_xpath)
+        support_rate = support_count / len(cleaned)
 
         return {
-            "xpath": primary_key,
+            "xpath": primary_xpath,
+            "fallback_xpaths": fallback_xpaths,
             "support_count": support_count,
             "support_rate": support_rate,
         }
+
+    def _rank_exact_xpaths(self, xpaths: list[str]) -> list[str]:
+        cleaned = [xpath.strip() for xpath in xpaths if xpath and xpath.strip()]
+        if not cleaned:
+            return []
+
+        order_map: dict[str, int] = {}
+        counter: Counter[str] = Counter()
+        for idx, xpath in enumerate(cleaned):
+            if xpath not in order_map:
+                order_map[xpath] = idx
+            counter[xpath] += 1
+
+        return sorted(
+            counter.keys(),
+            key=lambda xpath: (
+                -counter[xpath],
+                -self._xpath_stability_score(xpath),
+                order_map.get(xpath, 10**9),
+            ),
+        )
 
     async def _generate_common_pattern_with_llm(
         self,
@@ -293,7 +301,6 @@ class FieldXPathExtractor:
         if not primary:
             return []
 
-        primary_norm = self._normalize_for_comparison(primary)
         order_map: dict[str, int] = {}
         counter: Counter[str] = Counter()
 
@@ -301,8 +308,7 @@ class FieldXPathExtractor:
             value = (xpath or "").strip()
             if not value:
                 continue
-            # 同构变体（仅索引不同）视为同一模板，不放入回退链
-            if self._normalize_for_comparison(value) == primary_norm:
+            if value == primary:
                 continue
             if value not in order_map:
                 order_map[value] = idx
@@ -1202,13 +1208,15 @@ async def validate_xpath_pattern(
                 trace["attempts"].append(attempt)
                 continue
 
-            # 命中多个不同候选时，保留“使用第一个值继续语义验证”的策略
             normalized_uniq_values = {_normalize_text(v) for v in uniq_values}
             if len(normalized_uniq_values) != 1:
+                attempt["reason"] = "multiple_distinct_values"
+                trace["attempts"].append(attempt)
                 logger.info(
-                    "[validate_xpath_pattern] XPath 命中多个不同值，使用第一个候选继续校验: %s",
+                    "[validate_xpath_pattern] XPath 命中多个不同值，判定失败: %s",
                     xpath_candidate,
                 )
+                continue
 
             selected_value = uniq_values[0]
             last_value = selected_value
