@@ -40,7 +40,7 @@ class _UnusedExtractor:
     def __init__(self):
         self.called = False
 
-    async def _extract_from_url(self, url: str):
+    async def extract(self, url: str):
         self.called = True
         raise AssertionError(f"extractor should not run for {url}")
 
@@ -342,18 +342,27 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
                 },
             )()
 
-    class _FakeBatchFieldExtractor:
+    class _FakeDetailPageWorker:
         def __init__(self, *args, **kwargs):
-            return None
+            self.fields = kwargs["fields"]
 
-        async def run(self, urls: list[str]):
-            assert len(urls) == 7
-
-            class _Result:
-                validation_records: list[object] = []
-
-                def to_extraction_config(self):
-                    return {
+        async def extract(self, url: str):
+            record = PageExtractionRecord(
+                url=url,
+                fields=[
+                    FieldExtractionResult(
+                        field_name="project_name",
+                        value=f"value:{url.rsplit('/', 1)[-1]}",
+                    )
+                ],
+                success=True,
+            )
+            return type(
+                "_Result",
+                (),
+                {
+                    "record": record,
+                    "extraction_config": {
                         "fields": [
                             {
                                 "name": "project_name",
@@ -365,25 +374,9 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
                                 "fixed_value": None,
                             }
                         ]
-                    }
-
-            return _Result()
-
-    class _FakeBatchXPathExtractor:
-        def __init__(self, *args, **kwargs):
-            return None
-
-        async def _extract_from_url(self, url: str):
-            return PageExtractionRecord(
-                url=url,
-                fields=[
-                    FieldExtractionResult(
-                        field_name="project_name",
-                        value=f"value:{url.rsplit('/', 1)[-1]}",
-                    )
-                ],
-                success=True,
-            )
+                    },
+                },
+            )()
 
     monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
     monkeypatch.setattr(pipeline_runner, "URLCollector", _PublishingCollector)
@@ -392,8 +385,7 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
         "create_url_channel",
         lambda **kwargs: (channel, None),
     )
-    monkeypatch.setattr(pipeline_runner, "BatchFieldExtractor", _FakeBatchFieldExtractor)
-    monkeypatch.setattr(pipeline_runner, "BatchXPathExtractor", _FakeBatchXPathExtractor)
+    monkeypatch.setattr(pipeline_runner, "DetailPageWorker", _FakeDetailPageWorker)
     monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
     monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)

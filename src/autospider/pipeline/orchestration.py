@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from ..common.browser.intervention import BrowserInterventionRequired
-from ..common.channel.base import URLChannel, URLTask
+from ..common.channel.base import URLChannel
 from ..common.config import config
 from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
@@ -15,34 +15,6 @@ from ..domain.fields import FieldDefinition
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
-
-
-def _build_validation_failures(validation_records: list[Any]) -> list[dict[str, Any]]:
-    failures: list[dict[str, Any]] = []
-    for record in validation_records:
-        fields: list[dict[str, Any]] = []
-        for field_result in list(getattr(record, "fields", []) or []):
-            error = str(getattr(field_result, "error", "") or "").strip()
-            if not error:
-                continue
-            fields.append(
-                {
-                    "field_name": str(getattr(field_result, "field_name", "") or ""),
-                    "xpath": getattr(field_result, "xpath", None),
-                    "error": error,
-                    "xpath_candidates": list(getattr(field_result, "xpath_candidates", []) or []),
-                }
-            )
-        if fields:
-            failures.append(
-                {
-                    "url": str(getattr(record, "url", "") or ""),
-                    "fields": fields,
-                }
-            )
-    return failures
-
-
 @dataclass(slots=True)
 class PipelineSessionBundle:
     list_session: Any
@@ -82,30 +54,23 @@ class PipelineRuntimeContext:
     plan_knowledge: str = ""
     url_only_mode: bool = False
     producer_done: asyncio.Event = field(default_factory=asyncio.Event)
-    xpath_ready: asyncio.Event = field(default_factory=asyncio.Event)
     state: dict[str, object] = field(
         default_factory=lambda: {
-            "fields_config": None,
             "collection_config": {},
             "extraction_config": {},
             "validation_failures": [],
             "error": None,
         }
     )
-    explore_tasks: list[URLTask] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
 class PipelineRuntimeDependencies:
     browser_session_factory: Callable[..., Any]
     collector_cls: type
-    batch_field_extractor_cls: type
-    batch_xpath_extractor_cls: type
-    prepare_fields_config: Callable[[list[dict]], tuple[list[dict], list[str], list[str]]]
+    detail_page_worker_cls: type
     set_state_error: Callable[[dict[str, object], str], None]
-    collect_tasks: Callable[[URLChannel, int, asyncio.Event], Awaitable[list[URLTask]]]
     process_task: Callable[..., Awaitable[None]]
-    fail_tasks: Callable[[list[URLTask], str], Awaitable[None]]
 
 
 class ProducerService:
@@ -158,101 +123,12 @@ class ProducerService:
             self.context.producer_done.set()
 
 
-class ExplorationService:
-    def __init__(self, context: PipelineRuntimeContext, deps: PipelineRuntimeDependencies) -> None:
-        self.context = context
-        self.deps = deps
-
-    async def run(self) -> None:
-        if self.context.url_only_mode:
-            logger.info("[Pipeline] 未提供字段定义，启用 URL-only 模式。")
-            extraction_config = {
-                "fields": [
-                    {
-                        "name": "url",
-                        "description": "详情页 URL",
-                        "xpath": None,
-                        "required": True,
-                        "data_type": "url",
-                        "extraction_source": "task_url",
-                    }
-                ]
-            }
-            self.context.state["fields_config"] = extraction_config["fields"]
-            self.context.state["extraction_config"] = extraction_config
-            self.context.state["validation_failures"] = []
-            self.context.xpath_ready.set()
-            return
-
-        needed = self.context.explore_count + self.context.validate_count
-        tasks = await self.deps.collect_tasks(
-            channel=self.context.channel,
-            needed=needed,
-            producer_done=self.context.producer_done,
-        )
-        self.context.explore_tasks.extend(tasks)
-        urls = [task.url for task in tasks if task.url]
-
-        if not urls:
-            self.deps.set_state_error(self.context.state, "no_urls_for_exploration")
-            logger.info("[Pipeline] No URLs collected for exploration.")
-            self.context.state["extraction_config"] = {}
-            self.context.state["validation_failures"] = []
-            self.context.xpath_ready.set()
-            return
-
-        extractor = self.deps.batch_field_extractor_cls(
-            page=self.context.sessions.detail_session.page,
-            fields=self.context.fields,
-            explore_count=self.context.explore_count,
-            validate_count=self.context.validate_count,
-            output_dir=self.context.output_dir,
-            skill_runtime=self.context.skill_runtime,
-        )
-        result = await extractor.run(urls=urls)
-        extraction_config = result.to_extraction_config()
-        validation_failures = _build_validation_failures(result.validation_records)
-        self.context.state["extraction_config"] = extraction_config
-        self.context.state["validation_failures"] = validation_failures
-        raw_fields_config = extraction_config.get("fields", [])
-        fields_config, missing_required, missing_optional = self.deps.prepare_fields_config(
-            raw_fields_config
-        )
-
-        if missing_optional:
-            logger.info("[Pipeline] Optional fields missing XPath and will be skipped: %s", missing_optional)
-
-        if missing_required:
-            self.deps.set_state_error(
-                self.context.state,
-                f"required_fields_xpath_missing: {', '.join(missing_required)}",
-            )
-            logger.info("[Pipeline] Required fields missing XPath: %s", missing_required)
-            self.context.state["fields_config"] = []
-            self.context.xpath_ready.set()
-            return
-        if not fields_config:
-            self.deps.set_state_error(self.context.state, "no_valid_fields_config")
-            logger.info("[Pipeline] No valid fields config generated from exploration.")
-
-        self.context.state["fields_config"] = fields_config
-        self.context.xpath_ready.set()
-        return
-
-
 class ConsumerPool:
     def __init__(self, context: PipelineRuntimeContext, deps: PipelineRuntimeDependencies) -> None:
         self.context = context
         self.deps = deps
 
     async def run(self) -> None:
-        await self.context.xpath_ready.wait()
-        fields_config = self.context.state.get("fields_config") or []
-        if not fields_config:
-            fail_reason = str(self.context.state.get("error") or "xpath_config_missing")
-            await self.deps.fail_tasks(self.context.explore_tasks, fail_reason)
-            return
-
         logger.info("[Pipeline] Consumer workers: %s", self.context.consumer_workers)
         queue_size = max(
             self.context.consumer_workers * 2,
@@ -266,10 +142,7 @@ class ConsumerPool:
             *(self._worker(task_queue, summary_lock) for _ in range(self.context.consumer_workers)),
         )
 
-    async def _feeder(self, task_queue: asyncio.Queue[URLTask | None]) -> None:
-        for task in self.context.explore_tasks:
-            await task_queue.put(task)
-
+    async def _feeder(self, task_queue: asyncio.Queue[Any | None]) -> None:
         while True:
             batch = await self.context.channel.fetch(
                 max_items=config.pipeline.batch_fetch_size,
@@ -287,7 +160,7 @@ class ConsumerPool:
 
     async def _worker(
         self,
-        task_queue: asyncio.Queue[URLTask | None],
+        task_queue: asyncio.Queue[Any | None],
         summary_lock: asyncio.Lock,
     ) -> None:
         session = self.deps.browser_session_factory(
@@ -296,9 +169,9 @@ class ConsumerPool:
             guard_thread_id=self.context.guard_thread_id,
         )
         await session.start()
-        extractor = self.deps.batch_xpath_extractor_cls(
+        extractor = self.deps.detail_page_worker_cls(
             page=session.page,
-            fields_config=self.context.state.get("fields_config") or [],
+            fields=self.context.fields,
             output_dir=self.context.output_dir,
             skill_runtime=self.context.skill_runtime,
         )
@@ -312,6 +185,7 @@ class ConsumerPool:
                     task=task,
                     run_records=self.context.run_records,
                     summary_lock=summary_lock,
+                    state=self.context.state,
                     tracker=self.context.tracker,
                 )
         finally:
@@ -321,7 +195,6 @@ class ConsumerPool:
 @dataclass(slots=True)
 class PipelineServiceBundle:
     producer: ProducerService
-    exploration: ExplorationService
     consumer_pool: ConsumerPool
 
 
@@ -331,6 +204,5 @@ def create_pipeline_services(
 ) -> PipelineServiceBundle:
     return PipelineServiceBundle(
         producer=ProducerService(context, deps),
-        exploration=ExplorationService(context, deps),
         consumer_pool=ConsumerPool(context, deps),
     )

@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 _engine: Engine | None = None
 _SessionFactory: sessionmaker[Session] | None = None
 _LEGACY_TABLES = [
+    "field_xpaths",
     "task_run_validation_failures",
     "task_run_items",
     "task_runs",
@@ -83,6 +84,18 @@ _EXPECTED_COLUMNS = {
         "url",
         "failure_data",
         "created_at",
+    },
+    "field_xpaths": {
+        "id",
+        "domain",
+        "field_name",
+        "xpath",
+        "success_count",
+        "failure_count",
+        "last_success_at",
+        "last_failure_at",
+        "created_at",
+        "updated_at",
     },
 }
 

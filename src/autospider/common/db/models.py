@@ -5,6 +5,7 @@
 - `task_runs` 保存每次运行的完整快照与摘要。
 - `task_run_items` 保存每个 URL 的最终提取结果。
 - `task_run_validation_failures` 保存探索阶段的校验失败明细。
+- `field_xpaths` 保存详情页字段的已验证完整 XPath 统计。
 """
 
 from __future__ import annotations
@@ -191,3 +192,28 @@ class TaskRunValidationFailure(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     task_run: Mapped[TaskRun] = relationship(back_populates="validation_failures")
+
+
+class FieldXPath(Base):
+    """详情页字段 XPath 统计。"""
+
+    __tablename__ = "field_xpaths"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    domain: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    field_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    xpath: Mapped[str] = mapped_column(Text, nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        onupdate=datetime.now,
+    )
+
+    __table_args__ = (
+        Index("ix_field_xpaths_domain_field_xpath", "domain", "field_name", "xpath", unique=True),
+    )

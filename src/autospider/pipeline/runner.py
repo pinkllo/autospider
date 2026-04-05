@@ -14,7 +14,7 @@ from ..common.experience import SkillRuntime
 from ..common.experience.skill_sedimenter import SkillSedimentationPayload
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
-from ..field import BatchFieldExtractor, BatchXPathExtractor
+from ..field import DetailPageWorker
 from autospider.common.logger import get_logger
 from .finalization import (
     PipelineFinalizationContext,
@@ -312,13 +312,9 @@ async def run_pipeline(
     runtime_deps = PipelineRuntimeDependencies(
         browser_session_factory=BrowserSession,
         collector_cls=URLCollector,
-        batch_field_extractor_cls=BatchFieldExtractor,
-        batch_xpath_extractor_cls=BatchXPathExtractor,
-        prepare_fields_config=_prepare_fields_config,
+        detail_page_worker_cls=DetailPageWorker,
         set_state_error=_set_state_error,
-        collect_tasks=_collect_tasks,
         process_task=_process_task,
-        fail_tasks=_fail_tasks,
     )
     services = create_pipeline_services(runtime_context, runtime_deps)
 
@@ -337,7 +333,6 @@ async def run_pipeline(
     try:
         await asyncio.gather(
             services.producer.run(),
-            services.exploration.run(),
             services.consumer_pool.run(),
         )
     finally:
@@ -367,32 +362,12 @@ async def run_pipeline(
             await channel.close()
 
     return summary
-
-
-async def _collect_tasks(
-    channel: URLChannel,
-    needed: int,
-    producer_done: asyncio.Event,
-) -> list[URLTask]:
-    tasks: list[URLTask] = []
-    while len(tasks) < needed:
-        batch = await channel.fetch(
-            max_items=needed - len(tasks),
-            timeout_s=config.pipeline.fetch_timeout_s,
-        )
-        if not batch:
-            if producer_done.is_set():
-                break
-            continue
-        tasks.extend(batch)
-    return tasks
-
-
 async def _process_task(
-    extractor: BatchXPathExtractor,
+    extractor: DetailPageWorker,
     task: URLTask,
     run_records: dict[str, dict],
     summary_lock: asyncio.Lock,
+    state: dict[str, object] | None = None,
     tracker: TaskProgressTracker | None = None,
 ) -> None:
     url = (task.url or "").strip()
@@ -413,7 +388,8 @@ async def _process_task(
         return
 
     try:
-        record = await extractor._extract_from_url(url)
+        worker_result = await extractor.extract(url)
+        record = worker_result.record
     except BrowserInterventionRequired:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -424,6 +400,8 @@ async def _process_task(
             failure_reason=f"extractor_exception: {exc}",
         )
     else:
+        if state is not None:
+            state["extraction_config"] = dict(worker_result.extraction_config or {})
         item = {"url": record.url}
         for field_result in record.fields:
             item[field_result.field_name] = field_result.value
@@ -453,13 +431,6 @@ async def _process_task(
             await tracker.record_success(url)
         else:
             await tracker.record_failure(url, run_record.get("failure_reason", ""))
-
-
-async def _fail_tasks(tasks: list[URLTask], reason: str) -> None:
-    for task in tasks:
-        await task.fail_task(reason)
-
-
 def _build_error_reason(record) -> str:
     errors = []
     for field_result in record.fields:

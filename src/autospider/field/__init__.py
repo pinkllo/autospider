@@ -14,6 +14,7 @@ from .field_decider import FieldDecider
 from .xpath_pattern import FieldXPathExtractor, validate_xpath_pattern
 from .batch_field_extractor import BatchFieldExtractor, extract_fields_from_urls
 from .batch_xpath_extractor import BatchXPathExtractor, batch_extract_fields_from_urls
+from .detail_page_worker import DetailPageWorker, DetailPageWorkerResult
 from .runner import run_field_pipeline
 
 __all__ = [
@@ -29,6 +30,8 @@ __all__ = [
     "FieldXPathExtractor",
     "BatchFieldExtractor",
     "BatchXPathExtractor",
+    "DetailPageWorker",
+    "DetailPageWorkerResult",
     # 便捷函数
     "extract_fields_from_urls",
     "batch_extract_fields_from_urls",
