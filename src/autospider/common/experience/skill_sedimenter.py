@@ -123,6 +123,7 @@ class SkillSedimenter:
         task_description: str,
         fields: list[dict[str, Any]],
         subtask_results: list[dict[str, Any]],
+        plan_knowledge: str = "",
     ) -> Path | None:
         """从多个子任务结果聚合沉淀为一个统一 Skill（Map-Reduce）。"""
         try:
@@ -161,6 +162,7 @@ class SkillSedimenter:
                     summary=merged_summary,
                     validation_failures=merged_failures,
                     subtask_names=subtask_names,
+                    plan_knowledge=plan_knowledge,
                 )
             )
 

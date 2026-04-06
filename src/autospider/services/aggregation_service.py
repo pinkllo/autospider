@@ -22,16 +22,51 @@ class AggregationService:
         self._aggregator_cls = aggregator_cls
         self._artifact_builder = artifact_builder
 
+    def _sediment_site_skill(
+        self,
+        *,
+        params: dict[str, Any],
+        task_plan: TaskPlan,
+        subtask_results: list[dict[str, Any]],
+        plan_knowledge: str,
+    ) -> Path | None:
+        effective_results = [
+            result
+            for result in subtask_results
+            if int(result.get("summary", {}).get("success_count", 0) or 0) > 0
+        ]
+        if not effective_results:
+            return None
+
+        from ..common.experience import SkillSedimenter
+
+        sedimenter = SkillSedimenter()
+        return sedimenter.sediment_from_subtask_results(
+            list_url=str(params.get("list_url") or task_plan.site_url or ""),
+            task_description=str(params.get("task_description") or task_plan.original_request or ""),
+            fields=list(getattr(task_plan, "shared_fields", []) or []),
+            subtask_results=effective_results,
+            plan_knowledge=plan_knowledge,
+        )
+
     def execute(
         self,
         *,
         params: dict[str, Any],
         task_plan: TaskPlan,
         dispatch_result: dict[str, Any] | None = None,
+        subtask_results: list[dict[str, Any]] | None = None,
+        plan_knowledge: str = "",
     ) -> dict[str, Any]:
         aggregate_result = self._aggregator_cls().aggregate(
             plan=task_plan,
             output_dir=str(params.get("output_dir") or "output"),
+        )
+        sedimented_skill = self._sediment_site_skill(
+            params=params,
+            task_plan=task_plan,
+            subtask_results=list(subtask_results or []),
+            plan_knowledge=plan_knowledge,
         )
         summary = dict(dispatch_result or {})
         summary.update(
@@ -48,12 +83,27 @@ class AggregationService:
             "artifacts": [
                 self._artifact_builder("merged_results", output_dir / "merged_results.jsonl"),
                 self._artifact_builder("merged_summary", output_dir / "merged_summary.json"),
+                *(
+                    [self._artifact_builder("site_skill", sedimented_skill)]
+                    if sedimented_skill
+                    else []
+                ),
             ],
         }
 
-    def run(self, *, plan: TaskPlan, output_dir: str, dispatch_result: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        plan: TaskPlan,
+        output_dir: str,
+        dispatch_result: dict[str, Any] | None = None,
+        subtask_results: list[dict[str, Any]] | None = None,
+        plan_knowledge: str = "",
+    ) -> dict[str, Any]:
         return self.execute(
             params={"output_dir": output_dir},
             task_plan=plan,
             dispatch_result=dispatch_result,
+            subtask_results=subtask_results,
+            plan_knowledge=plan_knowledge,
         )

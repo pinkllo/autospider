@@ -392,7 +392,12 @@ async def run_pipeline(
         finally:
             await channel.close()
 
+    summary["collection_config"] = dict(runtime_context.state.get("collection_config") or {})
+    summary["extraction_config"] = dict(runtime_context.state.get("extraction_config") or {})
+    summary["validation_failures"] = list(runtime_context.state.get("validation_failures") or [])
     return summary
+
+
 async def _process_task(
     extractor: DetailPageWorker,
     task: URLTask,

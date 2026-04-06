@@ -177,11 +177,15 @@ async def execute_aggregation(
     params: dict[str, Any],
     task_plan: TaskPlan,
     dispatch_result: dict[str, Any] | None = None,
+    subtask_results: list[dict[str, Any]] | None = None,
+    plan_knowledge: str = "",
 ) -> dict[str, Any]:
     return AggregationService().execute(
         params=params,
         task_plan=task_plan,
         dispatch_result=dispatch_result,
+        subtask_results=subtask_results,
+        plan_knowledge=plan_knowledge,
     )
 
 
@@ -335,6 +339,8 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
             params=params,
             task_plan=task_plan,
             dispatch_result=dict(state.get("dispatch_result") or {}),
+            subtask_results=list(state.get("subtask_results") or []),
+            plan_knowledge=str(state.get("plan_knowledge") or ""),
         )
         return {
             **_ok(_node_payload(service_result), _node_artifacts(service_result)),

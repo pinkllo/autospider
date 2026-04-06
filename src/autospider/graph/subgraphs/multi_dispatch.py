@@ -161,6 +161,22 @@ def _build_subtask_result(
         "retry_count": int(subtask.retry_count or 0),
         "result_file": str(run_result.get("items_file") or subtask.result_file or ""),
         "collected_count": int(run_result.get("total_urls", 0) or subtask.collected_count or 0),
+        "summary": {
+            "total_urls": int(run_result.get("total_urls", 0) or 0),
+            "success_count": int(run_result.get("success_count", 0) or 0),
+            "failed_count": int(run_result.get("failed_count", 0) or 0),
+            "success_rate": float(run_result.get("success_rate", 0.0) or 0.0),
+            "required_field_success_rate": float(run_result.get("required_field_success_rate", 0.0) or 0.0),
+            "validation_failure_count": int(run_result.get("validation_failure_count", 0) or 0),
+            "execution_state": str(run_result.get("execution_state") or ""),
+            "outcome_state": str(run_result.get("outcome_state") or ""),
+            "promotion_state": str(run_result.get("promotion_state") or ""),
+            "execution_id": str(run_result.get("execution_id") or ""),
+            "items_file": str(run_result.get("items_file") or ""),
+        },
+        "collection_config": dict(run_result.get("collection_config") or {}),
+        "extraction_config": dict(run_result.get("extraction_config") or {}),
+        "validation_failures": list(run_result.get("validation_failures") or []),
         "journal_entries": list(run_result.get("journal_entries") or []),
     }
 
