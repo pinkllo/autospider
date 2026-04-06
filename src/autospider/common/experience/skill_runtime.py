@@ -230,12 +230,8 @@ class SkillRuntime:
         available = self.discover_by_url(url)
         seeded = self._coerce_metadata_list(preselected_skills or [], host=host)
         if seeded:
-            seen_paths = {item.path for item in available}
-            for meta in seeded:
-                if meta.path in seen_paths:
-                    continue
-                seen_paths.add(meta.path)
-                available.append(meta)
+            self._selection_cache[cache_key] = list(seeded)
+            return list(seeded)
         selected = await self.select_for_phase(
             phase=phase,
             url=url,

@@ -206,15 +206,23 @@ def build_execution_id(
     *,
     list_url: str,
     task_description: str,
+    execution_brief: dict[str, Any] | None = None,
     fields: list["FieldDefinition"],
     target_url_count: int | None,
     max_pages: int | None,
     pipeline_mode: str | None,
     thread_id: str,
+    page_state_signature: str = "",
+    anchor_url: str | None = None,
+    variant_label: str | None = None,
 ) -> str:
     payload = {
         "list_url": list_url,
+        "anchor_url": anchor_url,
+        "page_state_signature": page_state_signature,
+        "variant_label": variant_label,
         "task_description": task_description,
+        "execution_brief": dict(execution_brief or {}),
         "fields": [field.model_dump(mode="python") for field in fields],
         "target_url_count": target_url_count,
         "max_pages": max_pages,
@@ -307,7 +315,7 @@ def write_summary(path: Path, summary: dict) -> None:
     write_json_idempotent(
         path,
         summary,
-        identity_keys=("run_id", "list_url", "task_description"),
+        identity_keys=("run_id", "page_state_signature", "list_url", "task_description"),
         volatile_keys={"created_at", "updated_at", "timestamp", "last_updated"},
     )
 
@@ -334,6 +342,9 @@ def persist_pipeline_run(context: "PipelineFinalizationContext", records: dict[s
     payload = TaskRunPayload(
         normalized_url=normalized_url,
         original_url=context.list_url,
+        page_state_signature=str(context.page_state_signature or ""),
+        anchor_url=str(context.anchor_url or ""),
+        variant_label=str(context.variant_label or ""),
         task_description=context.task_description,
         field_names=_coerce_field_names(context.fields),
         execution_id=str(context.summary.get("execution_id") or context.summary.get("run_id") or ""),
@@ -353,6 +364,8 @@ def persist_pipeline_run(context: "PipelineFinalizationContext", records: dict[s
         collection_config=dict(context.collection_config or {}),
         extraction_config=dict(context.extraction_config or {}),
         plan_knowledge=str(context.plan_knowledge or ""),
+        task_plan=dict(context.task_plan or {}),
+        plan_journal=list(context.plan_journal or []),
         committed_records=list(records.values()),
         validation_failures=list(context.validation_failures or []),
     )
@@ -391,7 +404,11 @@ def try_sediment_skill(
 @dataclass(slots=True)
 class PipelineFinalizationContext:
     list_url: str
+    anchor_url: str | None
+    page_state_signature: str
+    variant_label: str | None
     task_description: str
+    execution_brief: dict[str, Any]
     fields: list["FieldDefinition"]
     thread_id: str
     output_dir: str
@@ -405,6 +422,8 @@ class PipelineFinalizationContext:
     extraction_config: dict[str, Any]
     validation_failures: list[dict[str, Any]]
     plan_knowledge: str
+    task_plan: dict[str, Any]
+    plan_journal: list[dict[str, Any]]
     tracker: "TaskProgressTracker"
     sessions: "PipelineSessionBundle"
 

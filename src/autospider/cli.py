@@ -385,6 +385,7 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
             f"[bold]字段探索数:[/bold] {effective.get('field_explore_count') if effective.get('field_explore_count') is not None else '默认'}\n"
             f"[bold]字段校验数:[/bold] {effective.get('field_validate_count') if effective.get('field_validate_count') is not None else '默认'}\n"
             f"[bold]消费者并发:[/bold] {effective.get('consumer_concurrency') if effective.get('consumer_concurrency') is not None else '默认'}\n"
+            f"[bold]串行模式:[/bold] {bool(effective.get('serial_mode', False))}\n"
             f"[bold]模式:[/bold] {mode_text}\n"
             f"[bold]执行引擎:[/bold] {effective.get('execution_mode') or 'multi'}\n"
             f"[bold]多任务并发:[/bold] {effective.get('max_concurrent') if effective.get('max_concurrent') is not None else '默认'}\n"
@@ -592,6 +593,11 @@ def chat_pipeline_command(
         "--consumer-concurrency",
         help="详情抽取消费者并发数（默认取配置）",
     ),
+    serial_mode: bool = typer.Option(
+        config.pipeline.local_serial_mode,
+        "--serial/--no-serial",
+        help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发",
+    ),
     pipeline_mode: str = typer.Option(
         "",
         "--mode",
@@ -651,6 +657,7 @@ def chat_pipeline_command(
                 "max_pages": max_pages,
                 "target_url_count": target_url_count,
                 "consumer_concurrency": consumer_concurrency,
+                "serial_mode": serial_mode,
                 "field_explore_count": field_explore_count,
                 "field_validate_count": field_validate_count,
                 "pipeline_mode": pipeline_mode.strip() or None,
@@ -730,6 +737,11 @@ def multi_pipeline_command(
         "--max-concurrent",
         help="子任务最大并发数（默认取配置）",
     ),
+    serial_mode: bool = typer.Option(
+        config.pipeline.local_serial_mode,
+        "--serial/--no-serial",
+        help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发",
+    ),
     headless: bool = typer.Option(
         config.browser.headless,
         "--headless/--no-headless",
@@ -779,6 +791,7 @@ def multi_pipeline_command(
             f"[bold]采集需求:[/bold] {request}\n"
             f"[bold]字段数量:[/bold] {len(fields_dicts) if fields_dicts else '待定'}\n"
             f"[bold]最大并发:[/bold] {max_concurrent if max_concurrent else '默认'}\n"
+            f"[bold]串行模式:[/bold] {serial_mode}\n"
             f"[bold]无头模式:[/bold] {headless}\n"
             f"[bold]输出目录:[/bold] {output_dir}",
             title="多分类并行采集",
@@ -794,6 +807,7 @@ def multi_pipeline_command(
                 "request": request,
                 "fields": fields_dicts,
                 "max_concurrent": max_concurrent,
+                "serial_mode": serial_mode,
                 "headless": headless,
                 "output_dir": output_dir,
             },

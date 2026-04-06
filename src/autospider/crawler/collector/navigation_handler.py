@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ...common.browser import ActionExecutor
 from ...common.browser.click_utils import click_and_capture_new_page
 from ...common.logger import get_logger
+from ...domain.planning import format_execution_brief
 from ...common.som import (
     clear_overlay,
     inject_and_scan,
@@ -35,6 +36,7 @@ class NavigationHandler:
         list_url: str,
         task_description: str,
         max_nav_steps: int,
+        execution_brief: dict | None = None,
         decider: "LLMDecider" = None,
         screenshots_dir: "Path" = None,
     ):
@@ -42,6 +44,7 @@ class NavigationHandler:
         self.list_url = list_url
         self.task_description = task_description
         self.max_nav_steps = max_nav_steps
+        self.execution_brief = dict(execution_brief or {})
         self.decider = decider
         self.screenshots_dir = screenshots_dir
         self.executor: ActionExecutor | None = None
@@ -64,6 +67,9 @@ class NavigationHandler:
         # 设置决策器的任务计划
         self.decider.task_plan = f"""任务分析: 你需要先在列表页进行筛选操作，达到以下目标：
 {self.task_description}
+
+执行简报:
+{format_execution_brief(self.execution_brief)}
 
 执行步骤:
 1. 观察页面上的筛选条件（标签、下拉框、勾选框等）
@@ -254,72 +260,57 @@ class NavigationHandler:
             step_success = True
 
             if action_type in ["click", "type"]:
-                xpath_candidates = step.get("clicked_element_xpath_candidates", [])
-                if not xpath_candidates:
+                locator = await self._resolve_replay_locator(step)
+                if locator is None:
                     step_success = False
                 else:
-                    xpath_candidates_sorted = sorted(
-                        xpath_candidates, key=lambda x: x.get("priority", 99)
-                    )
-                    xpath = (
-                        xpath_candidates_sorted[0].get("xpath") if xpath_candidates_sorted else None
-                    )
-                    if not xpath:
+                    try:
+                        if action_type == "click":
+                            target_text = step.get("target_text") or step.get(
+                                "clicked_element_text", ""
+                            )
+                            logger.info(
+                                "[Replay] 点击: %s...",
+                                target_text[:30],
+                            )
+                            try:
+                                new_page = await click_and_capture_new_page(
+                                    page=self.page,
+                                    locator=locator,
+                                    click_timeout_ms=5000,
+                                    expect_page_timeout_ms=3000,
+                                    load_state="domcontentloaded",
+                                    load_timeout_ms=10000,
+                                )
+                                if new_page is not None:
+                                    self.page = new_page
+                                    self.list_url = self.page.url
+                                    logger.info(
+                                        "[Replay] ✓ 切换到新标签页: %s", self.page.url
+                                    )
+                            except Exception:
+                                pass
+                            await asyncio.sleep(1)
+                        elif action_type == "type":
+                            text = step.get("text") or ""
+                            key = step.get("key") or "Enter"
+                            logger.info(
+                                "[Replay] 输入: %s...",
+                                text[:30],
+                            )
+                            await locator.click(timeout=5000)
+                            await locator.fill(text, timeout=5000)
+                            try:
+                                await locator.press(key, timeout=5000)
+                            except Exception:
+                                try:
+                                    await self.page.keyboard.press(key)
+                                except Exception:
+                                    pass
+                            await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.error("[Replay] ✗ 执行失败: %s", e)
                         step_success = False
-                    else:
-                        try:
-                            locator = self.page.locator(f"xpath={xpath}")
-                            if await locator.count() == 0:
-                                step_success = False
-                            else:
-                                if action_type == "click":
-                                    target_text = step.get("target_text") or step.get(
-                                        "clicked_element_text", ""
-                                    )
-                                    logger.info(
-                                        "[Replay] 点击: %s... (xpath: %s...)",
-                                        target_text[:30],
-                                        xpath[:50],
-                                    )
-                                    try:
-                                        new_page = await click_and_capture_new_page(
-                                            page=self.page,
-                                            locator=locator.first,
-                                            click_timeout_ms=5000,
-                                            expect_page_timeout_ms=3000,
-                                            load_state="domcontentloaded",
-                                            load_timeout_ms=10000,
-                                        )
-                                        if new_page is not None:
-                                            self.page = new_page
-                                            self.list_url = self.page.url
-                                            logger.info(
-                                                "[Replay] ✓ 切换到新标签页: %s", self.page.url
-                                            )
-                                    except Exception:
-                                        pass
-                                    await asyncio.sleep(1)
-                                elif action_type == "type":
-                                    text = step.get("text") or ""
-                                    key = step.get("key") or "Enter"
-                                    logger.info(
-                                        "[Replay] 输入: %s... (xpath: %s...)",
-                                        text[:30],
-                                        xpath[:50],
-                                    )
-                                    await locator.first.click(timeout=5000)
-                                    await locator.first.fill(text, timeout=5000)
-                                    try:
-                                        await locator.first.press(key, timeout=5000)
-                                    except Exception:
-                                        try:
-                                            await self.page.keyboard.press(key)
-                                        except Exception:
-                                            pass
-                                    await asyncio.sleep(0.5)
-                        except Exception as e:
-                            logger.error("[Replay] ✗ 执行失败: %s", e)
-                            step_success = False
             elif action_type == "scroll":
                 delta = step.get("scroll_delta") or (0, 300)
                 try:
@@ -391,3 +382,48 @@ class NavigationHandler:
                 all_success = False
 
         return executed_steps > 0 and all_success
+
+    async def _resolve_replay_locator(self, step: dict):
+        xpath_candidates = list(step.get("clicked_element_xpath_candidates") or [])
+        target_text = str(step.get("target_text") or step.get("clicked_element_text") or "").strip()
+        xpath_candidates_sorted = sorted(xpath_candidates, key=lambda x: x.get("priority", 99))
+
+        for candidate in xpath_candidates_sorted:
+            xpath = str(candidate.get("xpath") or "").strip()
+            if not xpath:
+                continue
+            locator = self.page.locator(f"xpath={xpath}")
+            count = await locator.count()
+            if count == 0:
+                continue
+            if count == 1:
+                return locator.first
+            if target_text:
+                matched = await self._pick_locator_by_text(locator, target_text, count)
+                if matched is not None:
+                    return matched
+
+        if target_text:
+            fallback = self.page.get_by_text(target_text, exact=True)
+            if await fallback.count() > 0:
+                return fallback.first
+            contains = self.page.get_by_text(target_text, exact=False)
+            if await contains.count() > 0:
+                return contains.first
+        return None
+
+    async def _pick_locator_by_text(self, locator, target_text: str, count: int | None = None):
+        normalized_target = "".join(str(target_text or "").split())
+        if not normalized_target:
+            return None
+        total = count if count is not None else await locator.count()
+        for index in range(total):
+            candidate = locator.nth(index)
+            try:
+                text = await candidate.inner_text(timeout=1000)
+            except Exception:
+                text = ""
+            normalized_text = "".join(str(text or "").split())
+            if normalized_target and normalized_target in normalized_text:
+                return candidate
+        return None

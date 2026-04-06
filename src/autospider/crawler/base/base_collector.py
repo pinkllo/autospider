@@ -57,6 +57,7 @@ class BaseCollector(ABC):
         page: "Page",
         list_url: str,
         task_description: str,
+        execution_brief: dict | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         redis_manager: "RedisQueueManager | None" = None,
@@ -76,6 +77,7 @@ class BaseCollector(ABC):
         self.page = page
         self.list_url = list_url
         self.task_description = task_description
+        self.execution_brief = dict(execution_brief or {})
         self.persist_progress = bool(persist_progress)
 
         # 初始化输出路径
@@ -164,6 +166,7 @@ class BaseCollector(ABC):
             list_url=self.list_url,
             task_description=self.task_description,
             max_nav_steps=10,
+            execution_brief=self.execution_brief,
             screenshots_dir=self.screenshots_dir,
         )
 

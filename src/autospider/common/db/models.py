@@ -1,7 +1,7 @@
 """现版本 PostgreSQL 持久化模型。
 
 数据库层现在承担主持久化职责：
-- `tasks` 保存可复用任务定义，按 `(normalized_url, task_description)` 唯一。
+- `tasks` 保存可复用任务定义，按 `(normalized_url, page_state_signature, task_description)` 唯一。
 - `task_runs` 保存每次运行的完整快照与摘要。
 - `task_run_items` 保存每个 URL 的最终提取结果。
 - `task_run_validation_failures` 保存探索阶段的校验失败明细。
@@ -33,6 +33,9 @@ class TaskRecord(Base):
     registry_id: Mapped[str] = mapped_column(String(16), nullable=False)
     normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
     original_url: Mapped[str] = mapped_column(Text, nullable=False)
+    page_state_signature: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    anchor_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    variant_label: Mapped[str] = mapped_column(Text, default="", nullable=False)
     task_description: Mapped[str] = mapped_column(Text, nullable=False)
     field_names: Mapped[list[str]] = mapped_column(JSON_VALUE, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -49,7 +52,13 @@ class TaskRecord(Base):
     )
 
     __table_args__ = (
-        Index("ix_tasks_norm_url_desc", "normalized_url", "task_description", unique=True),
+        Index(
+            "ix_tasks_norm_state_desc",
+            "normalized_url",
+            "page_state_signature",
+            "task_description",
+            unique=True,
+        ),
     )
 
     @property
@@ -68,6 +77,9 @@ class TaskRecord(Base):
             "registry_id": self.registry_id,
             "normalized_url": self.normalized_url,
             "original_url": self.original_url,
+            "page_state_signature": self.page_state_signature,
+            "anchor_url": self.anchor_url,
+            "variant_label": self.variant_label,
             "task_description": self.task_description,
             "fields": list(self.field_names or []),
             "execution_id": run.execution_id,
@@ -108,6 +120,8 @@ class TaskRun(Base):
     collection_config: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     extraction_config: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     plan_knowledge: Mapped[str] = mapped_column(Text, default="")
+    plan_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    plan_journal: Mapped[list[dict[str, Any]]] = mapped_column(JSON_VALUE, default=list)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

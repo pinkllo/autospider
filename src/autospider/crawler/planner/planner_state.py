@@ -17,16 +17,7 @@ class PlannerPageState:
     def __init__(self, page: Any) -> None:
         self.page = page
 
-    def stable_nav_step_payload(self, step: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            "action": str(step.get("action") or "").strip().lower(),
-            "target_text": str(step.get("target_text") or "").strip(),
-            "text": str(step.get("text") or "").strip(),
-            "key": str(step.get("key") or "").strip(),
-            "url": str(step.get("url") or "").strip(),
-            "scroll_delta": step.get("scroll_delta"),
-        }
-
+    def _stable_xpath_candidates(self, step: dict[str, Any]) -> list[dict[str, object]]:
         xpath_candidates = step.get("clicked_element_xpath_candidates") or []
         stable_candidates: list[dict[str, object]] = []
         for candidate in xpath_candidates:
@@ -40,6 +31,19 @@ class PlannerPageState:
                     "strategy": str((candidate or {}).get("strategy") or "").strip(),
                 }
             )
+        return stable_candidates
+
+    def stable_nav_step_payload(self, step: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "action": str(step.get("action") or "").strip().lower(),
+            "target_text": str(step.get("target_text") or "").strip(),
+            "text": str(step.get("text") or "").strip(),
+            "key": str(step.get("key") or "").strip(),
+            "url": str(step.get("url") or "").strip(),
+            "scroll_delta": step.get("scroll_delta"),
+        }
+
+        stable_candidates = self._stable_xpath_candidates(step)
         if stable_candidates:
             payload["clicked_element_xpath_candidates"] = stable_candidates
 
@@ -47,6 +51,17 @@ class PlannerPageState:
 
     def normalize_nav_steps(self, nav_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         return [self.stable_nav_step_payload(dict(step or {})) for step in nav_steps or []]
+
+    def replay_nav_step_payload(self, step: dict[str, Any]) -> dict[str, Any]:
+        payload = self.stable_nav_step_payload(step)
+        payload["success"] = step.get("success") is not False
+        return payload
+
+    def normalize_replay_nav_steps(
+        self,
+        nav_steps: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        return [self.replay_nav_step_payload(dict(step or {})) for step in nav_steps or []]
 
     def build_page_state_signature(
         self,
@@ -83,9 +98,28 @@ class PlannerPageState:
         from ..collector.navigation_handler import NavigationHandler
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
-        replay_ok = await nav_handler.replay_nav_steps(self.normalize_nav_steps(nav_steps))
+        replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
         if not replay_ok:
             logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
+            return False
+
+        await self.page.wait_for_timeout(500)
+        return True
+
+    async def replay_nav_steps_from_current_state(
+        self,
+        target_url: str,
+        nav_steps: list[dict[str, Any]] | None,
+    ) -> bool:
+        if not nav_steps:
+            return True
+
+        from ..collector.navigation_handler import NavigationHandler
+
+        nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
+        replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
+        if not replay_ok:
+            logger.warning("[Planner] 基于当前页面重放子状态失败，nav_steps=%d", len(nav_steps))
             return False
 
         await self.page.wait_for_timeout(500)
@@ -110,7 +144,7 @@ class PlannerPageState:
         extra_steps = list(child_nav_steps or [])[len(list(current_nav_steps or [])) :]
         if not extra_steps:
             return True
-        return await self.restore_page_state(current_url, child_nav_steps)
+        return await self.replay_nav_steps_from_current_state(current_url, extra_steps)
 
     def build_nav_click_step(self, snapshot: object, mark_id: int) -> dict[str, Any] | None:
         marks = getattr(snapshot, "marks", None) or []

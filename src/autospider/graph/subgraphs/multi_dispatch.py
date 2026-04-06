@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 import operator
+from pathlib import Path
 from typing import Any, Annotated, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -8,7 +10,8 @@ from langgraph.types import Send, interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.config import config
-from ...domain.planning import SubTask, SubTaskStatus, TaskPlan
+from ...domain.planning import ExecutionBrief, PlanJournalEntry, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
+from ...crawler.planner.planner_artifacts import PlannerArtifacts
 from ...pipeline.worker import SubTaskWorker
 
 
@@ -65,7 +68,10 @@ def _artifact(label: str, path: str | Path) -> dict[str, str]:
 
 
 def _subtask_signature(payload: dict[str, Any]) -> tuple[str, str, str]:
-    """生成子任务唯一特征指纹用于排重（name + url + task_description）。"""
+    """生成子任务唯一特征指纹，优先按页面状态签名排重。"""
+    page_state_signature = str(payload.get("page_state_signature") or "").strip()
+    if page_state_signature:
+        return ("state", page_state_signature, "")
     return (
         str(payload.get("name") or "").strip(),
         str(payload.get("list_url") or "").strip(),
@@ -97,13 +103,13 @@ def _inherit_parent_nav_steps(payload: dict[str, Any], plan: TaskPlan) -> dict[s
 
 
 def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
-    default_value = int(getattr(config.planner, "runtime_subtasks_max_children", 1) or 1)
+    default_value = int(getattr(config.planner, "runtime_subtasks_max_children", 0) or 0)
     raw_value = params.get("runtime_subtask_max_children")
     try:
         resolved = int(raw_value) if raw_value is not None else default_value
     except (TypeError, ValueError):
         resolved = default_value
-    return max(1, resolved)
+    return max(0, resolved)
 
 
 def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
@@ -141,12 +147,21 @@ def _build_subtask_result(
         "id": subtask.id,
         "name": subtask.name,
         "list_url": subtask.list_url,
+        "anchor_url": str(subtask.anchor_url or ""),
+        "page_state_signature": str(subtask.page_state_signature or ""),
+        "variant_label": str(subtask.variant_label or ""),
         "task_description": subtask.task_description,
+        "mode": str(subtask.mode.value),
+        "execution_brief": subtask.execution_brief.model_dump(mode="python"),
+        "parent_id": str(subtask.parent_id or ""),
+        "depth": int(subtask.depth or 0),
+        "context": dict(subtask.context or {}),
         "status": status.value,
         "error": error,
         "retry_count": int(subtask.retry_count or 0),
         "result_file": str(run_result.get("items_file") or subtask.result_file or ""),
         "collected_count": int(run_result.get("total_urls", 0) or subtask.collected_count or 0),
+        "journal_entries": list(run_result.get("journal_entries") or []),
     }
 
 
@@ -166,6 +181,12 @@ def _apply_result_to_plan(plan: TaskPlan, result_item: dict[str, Any]) -> None:
         subtask.error = str(result_item.get("error") or "") or None
         subtask.result_file = str(result_item.get("result_file") or "") or None
         subtask.collected_count = int(result_item.get("collected_count", 0) or 0)
+        if result_item.get("task_description"):
+            subtask.task_description = str(result_item.get("task_description") or "")
+        if result_item.get("mode"):
+            subtask.mode = SubTaskMode(str(result_item.get("mode") or SubTaskMode.COLLECT.value))
+        if result_item.get("execution_brief"):
+            subtask.execution_brief = ExecutionBrief.model_validate(result_item.get("execution_brief") or {})
         return
 
 
@@ -176,6 +197,7 @@ def _build_dispatch_summary(plan: TaskPlan, subtask_results: list[dict[str, Any]
 
     total = len(plan.subtasks)
     completed = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.COMPLETED)
+    expanded = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.EXPANDED)
     failed = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.FAILED)
     skipped = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.SKIPPED)
     total_collected = sum(int(subtask.collected_count or 0) for subtask in plan.subtasks)
@@ -185,10 +207,49 @@ def _build_dispatch_summary(plan: TaskPlan, subtask_results: list[dict[str, Any]
     return {
         "total": total,
         "completed": completed,
+        "expanded": expanded,
         "failed": failed,
         "skipped": skipped,
         "total_collected": total_collected,
     }
+
+
+def _merge_plan_journal(plan: TaskPlan, result_items: list[dict[str, Any]]) -> None:
+    existing_keys = {
+        (
+            str(entry.entry_id or ""),
+            str(entry.phase or ""),
+            str(entry.action or ""),
+            str(entry.created_at or ""),
+        )
+        for entry in list(plan.journal or [])
+    }
+    for item in result_items:
+        for raw in list(item.get("journal_entries") or []):
+            entry = dict(raw or {})
+            key = (
+                str(entry.get("entry_id") or ""),
+                str(entry.get("phase") or ""),
+                str(entry.get("action") or ""),
+                str(entry.get("created_at") or ""),
+            )
+            if key in existing_keys:
+                continue
+            existing_keys.add(key)
+            plan.journal.append(PlanJournalEntry.model_validate(entry))
+
+
+def _refresh_plan_artifacts(plan: TaskPlan, params: dict[str, Any]) -> tuple[TaskPlan, str]:
+    output_dir = str(params.get("output_dir") or "output")
+    artifacts = PlannerArtifacts(
+        site_url=str(plan.site_url or ""),
+        user_request=str(plan.original_request or ""),
+        output_dir=output_dir,
+    )
+    plan.updated_at = datetime.now().isoformat(timespec="seconds")
+    persisted_plan = artifacts.save_plan(plan)
+    artifacts.write_knowledge_doc(persisted_plan)
+    return persisted_plan, artifacts.build_knowledge_doc(persisted_plan)
 
 
 def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
@@ -291,17 +352,29 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
             ),
             selected_skills=list(params.get("selected_skills") or []),
             plan_knowledge=plan_knowledge,
+            task_plan_snapshot=plan.model_dump(mode="python") if isinstance(plan, TaskPlan) else {},
+            plan_journal=[
+                entry.model_dump(mode="python")
+                for entry in list(getattr(plan, "journal", []) or [])
+            ]
+            if isinstance(plan, TaskPlan)
+            else [],
         )
         result = await worker.execute()
     except BrowserInterventionRequired as exc:
         interrupt(exc.payload)
         return await run_subtask_worker_node(state)
     except Exception as exc:  # noqa: BLE001
-        result = {"error": str(exc), "items_file": "", "total_urls": 0}
+        result = {"error": str(exc), "items_file": "", "total_urls": 0, "spawned_subtasks": []}
 
+    effective_subtask = _restore_subtask(result.get("effective_subtask") or subtask.model_dump(mode="python"))
+    spawned_subtasks = list(result.get("spawned_subtasks") or [])
 
     pipeline_error = str(result.get("error") or "").strip()
-    if pipeline_error:
+    if str(result.get("execution_state") or "").strip().lower() == SubTaskStatus.EXPANDED.value:
+        status = SubTaskStatus.EXPANDED
+        error = ""
+    elif pipeline_error:
         status = SubTaskStatus.FAILED
         error = pipeline_error[:500]
     elif int(result.get("total_urls", 0) or 0) <= 0:
@@ -312,7 +385,8 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
         error = ""
 
     return {
-        "subtask_result": _build_subtask_result(subtask, status=status, error=error, result=result),
+        "subtask_result": _build_subtask_result(effective_subtask, status=status, error=error, result=result),
+        "spawned_subtasks": spawned_subtasks,
         "artifacts": [
             _artifact("subtask_items", result["items_file"])
             for _ in [1]
@@ -345,8 +419,10 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
             "node_error": {"code": "missing_task_plan", "message": "缺少任务计划，无法合并调度结果"},
         }
 
+    result_items = list(state.get("subtask_results") or [])
+    _merge_plan_journal(plan, result_items)
     known = {_subtask_signature(subtask.model_dump(mode="python")) for subtask in plan.subtasks}
-    queue: list[dict[str, Any]] = []
+    queue: list[dict[str, Any]] = list(state.get("dispatch_queue") or [])
     for payload in list(state.get("spawned_subtasks") or []):
         payload = _inherit_parent_nav_steps(payload, plan)
         signature = _subtask_signature(payload)
@@ -356,9 +432,14 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         plan.subtasks.append(_restore_subtask(payload))
         queue.append(payload)
 
-    summary = _build_dispatch_summary(plan, list(state.get("subtask_results") or []))
+    summary = _build_dispatch_summary(plan, result_items)
+    persisted_plan, plan_knowledge = _refresh_plan_artifacts(
+        plan,
+        dict(state.get("normalized_params") or {}),
+    )
     return {
-        "task_plan": plan,
+        "task_plan": persisted_plan,
+        "plan_knowledge": plan_knowledge,
         "dispatch_queue": queue,
         "current_batch": [],
         "spawned_subtasks": [],
@@ -384,9 +465,16 @@ def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
             "node_error": {"code": "missing_task_plan", "message": "缺少任务计划，无法完成调度"},
         }
 
-    summary = _build_dispatch_summary(plan, list(state.get("subtask_results") or []))
+    result_items = list(state.get("subtask_results") or [])
+    _merge_plan_journal(plan, result_items)
+    summary = _build_dispatch_summary(plan, result_items)
+    persisted_plan, plan_knowledge = _refresh_plan_artifacts(
+        plan,
+        dict(state.get("normalized_params") or {}),
+    )
     return {
-        "task_plan": plan,
+        "task_plan": persisted_plan,
+        "plan_knowledge": plan_knowledge,
         "dispatch_result": summary,
         "summary": summary,
         "node_status": "ok",

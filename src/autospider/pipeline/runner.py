@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from ..common.browser import BrowserSession
 from ..common.browser.intervention import BrowserInterventionRequired
@@ -98,20 +99,28 @@ def _build_execution_id(
     *,
     list_url: str,
     task_description: str,
+    execution_brief: dict[str, Any] | None,
     fields: list[FieldDefinition],
     target_url_count: int | None,
     max_pages: int | None,
     pipeline_mode: str | None,
     thread_id: str,
+    page_state_signature: str = "",
+    anchor_url: str | None = None,
+    variant_label: str | None = None,
 ) -> str:
     return _build_execution_id_impl(
         list_url=list_url,
         task_description=task_description,
+        execution_brief=dict(execution_brief or {}),
         fields=fields,
         target_url_count=target_url_count,
         max_pages=max_pages,
         pipeline_mode=pipeline_mode,
         thread_id=thread_id,
+        page_state_signature=page_state_signature,
+        anchor_url=anchor_url,
+        variant_label=variant_label,
     )
 
 
@@ -202,6 +211,7 @@ async def run_pipeline(
     list_url: str,
     task_description: str,
     fields: list[FieldDefinition],
+    execution_brief: dict[str, Any] | None = None,
     output_dir: str = "output",
     headless: bool = False,
     explore_count: int | None = None,
@@ -215,17 +225,27 @@ async def run_pipeline(
     guard_thread_id: str = "",
     selected_skills: list[dict[str, str]] | None = None,
     plan_knowledge: str = "",
+    task_plan_snapshot: dict[str, Any] | None = None,
+    plan_journal: list[dict[str, Any]] | None = None,
+    initial_nav_steps: list[dict[str, Any]] | None = None,
+    anchor_url: str | None = None,
+    page_state_signature: str = "",
+    variant_label: str | None = None,
 ) -> dict:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     execution_id = _build_execution_id(
         list_url=list_url,
         task_description=task_description,
+        execution_brief=dict(execution_brief or {}),
         fields=fields,
         target_url_count=target_url_count,
         max_pages=max_pages,
         pipeline_mode=pipeline_mode,
         thread_id=guard_thread_id,
+        page_state_signature=page_state_signature,
+        anchor_url=anchor_url,
+        variant_label=variant_label,
     )
 
     explore_count = explore_count or config.field_extractor.explore_count
@@ -259,6 +279,9 @@ async def run_pipeline(
     summary = {
         "run_id": execution_id,
         "list_url": list_url,
+        "anchor_url": str(anchor_url or ""),
+        "page_state_signature": str(page_state_signature or ""),
+        "variant_label": str(variant_label or ""),
         "task_description": task_description,
         "mode": (pipeline_mode or config.pipeline.mode),
         "total_urls": 0,
@@ -276,17 +299,16 @@ async def run_pipeline(
             guard_intervention_mode=guard_intervention_mode,
             guard_thread_id=guard_thread_id,
         ),
-        detail_session=BrowserSession(
-            headless=headless,
-            guard_intervention_mode=guard_intervention_mode,
-            guard_thread_id=guard_thread_id,
-        ),
     )
     await sessions.start()
 
     runtime_context = PipelineRuntimeContext(
         list_url=list_url,
+        anchor_url=anchor_url,
+        page_state_signature=page_state_signature,
+        variant_label=variant_label,
         task_description=task_description,
+        execution_brief=dict(execution_brief or {}),
         fields=fields,
         output_dir=output_dir,
         headless=headless,
@@ -306,6 +328,9 @@ async def run_pipeline(
         skill_runtime=skill_runtime,
         sessions=sessions,
         plan_knowledge=plan_knowledge,
+        task_plan_snapshot=dict(task_plan_snapshot or {}),
+        plan_journal=list(plan_journal or []),
+        initial_nav_steps=list(initial_nav_steps or []),
         url_only_mode=len(fields) == 0,
     )
 
@@ -340,7 +365,11 @@ async def run_pipeline(
             await finalizer.finalize(
                 PipelineFinalizationContext(
                     list_url=list_url,
+                    anchor_url=anchor_url,
+                    page_state_signature=page_state_signature,
+                    variant_label=variant_label,
                     task_description=task_description,
+                    execution_brief=dict(execution_brief or {}),
                     fields=fields,
                     thread_id=guard_thread_id,
                     output_dir=output_dir,
@@ -354,6 +383,8 @@ async def run_pipeline(
                     extraction_config=dict(runtime_context.state.get("extraction_config") or {}),
                     validation_failures=list(runtime_context.state.get("validation_failures") or []),
                     plan_knowledge=runtime_context.plan_knowledge,
+                    task_plan=dict(runtime_context.task_plan_snapshot or {}),
+                    plan_journal=list(runtime_context.plan_journal or []),
                     tracker=runtime_context.tracker,
                     sessions=sessions,
                 )

@@ -18,8 +18,12 @@ from autospider.common.db.models import (
 )
 
 
-def _build_registry_id(normalized_url: str, task_description: str) -> str:
-    raw = f"{normalized_url}:{task_description}"
+def _build_registry_id(
+    normalized_url: str,
+    task_description: str,
+    page_state_signature: str = "",
+) -> str:
+    raw = f"{normalized_url}:{page_state_signature}:{task_description}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -31,7 +35,10 @@ def _build_auto_execution_id(now: datetime) -> str:
 class TaskRunPayload:
     normalized_url: str
     original_url: str
-    task_description: str
+    page_state_signature: str = ""
+    anchor_url: str = ""
+    variant_label: str = ""
+    task_description: str = ""
     field_names: list[str] = field(default_factory=list)
     execution_id: str = ""
     thread_id: str = ""
@@ -50,6 +57,8 @@ class TaskRunPayload:
     collection_config: dict[str, Any] = field(default_factory=dict)
     extraction_config: dict[str, Any] = field(default_factory=dict)
     plan_knowledge: str = ""
+    task_plan: dict[str, Any] = field(default_factory=dict)
+    plan_journal: list[dict[str, Any]] = field(default_factory=list)
     committed_records: list[dict[str, Any]] = field(default_factory=list)
     validation_failures: list[dict[str, Any]] = field(default_factory=list)
     started_at: datetime | None = None
@@ -75,6 +84,9 @@ class TaskRepository:
         task = self._upsert_task(
             normalized_url=payload.normalized_url,
             original_url=payload.original_url,
+            page_state_signature=payload.page_state_signature,
+            anchor_url=payload.anchor_url,
+            variant_label=payload.variant_label,
             task_description=payload.task_description,
             field_names=list(payload.field_names),
             now=now,
@@ -158,6 +170,9 @@ class TaskRepository:
                 "registry_id": run.task.registry_id,
                 "normalized_url": run.task.normalized_url,
                 "original_url": run.task.original_url,
+                "page_state_signature": run.task.page_state_signature,
+                "anchor_url": run.task.anchor_url,
+                "variant_label": run.task.variant_label,
                 "task_description": run.task.task_description,
                 "fields": list(run.task.field_names or []),
                 "created_at": run.task.created_at.isoformat() if run.task.created_at else "",
@@ -169,6 +184,8 @@ class TaskRepository:
                 "collection_config": dict(run.collection_config or {}),
                 "extraction_config": dict(run.extraction_config or {}),
                 "plan_knowledge": run.plan_knowledge or "",
+                "plan_snapshot": dict(run.plan_snapshot or {}),
+                "plan_journal": list(run.plan_journal or []),
             },
             "items": self._serialize_run_items(run),
             "validation_failures": self._serialize_validation_failures(run),
@@ -217,20 +234,38 @@ class TaskRepository:
         *,
         normalized_url: str,
         original_url: str,
+        page_state_signature: str,
+        anchor_url: str,
+        variant_label: str,
         task_description: str,
         field_names: list[str],
         now: datetime,
     ) -> TaskRecord:
-        existing = self._find_task(normalized_url, task_description)
+        existing = self._find_task(normalized_url, page_state_signature, task_description)
         if existing is not None:
-            return self._update_task(existing, original_url, field_names, now)
-        return self._create_task(normalized_url, original_url, task_description, field_names, now)
+            return self._update_task(existing, original_url, anchor_url, variant_label, field_names, now)
+        return self._create_task(
+            normalized_url,
+            original_url,
+            page_state_signature,
+            anchor_url,
+            variant_label,
+            task_description,
+            field_names,
+            now,
+        )
 
-    def _find_task(self, normalized_url: str, task_description: str) -> TaskRecord | None:
+    def _find_task(
+        self,
+        normalized_url: str,
+        page_state_signature: str,
+        task_description: str,
+    ) -> TaskRecord | None:
         return (
             self._session.query(TaskRecord)
             .filter(
                 TaskRecord.normalized_url == normalized_url,
+                TaskRecord.page_state_signature == (page_state_signature or ""),
                 TaskRecord.task_description == task_description,
             )
             .first()
@@ -240,10 +275,14 @@ class TaskRepository:
         self,
         task: TaskRecord,
         original_url: str,
+        anchor_url: str,
+        variant_label: str,
         field_names: list[str],
         now: datetime,
     ) -> TaskRecord:
         task.original_url = original_url
+        task.anchor_url = anchor_url or ""
+        task.variant_label = variant_label or ""
         task.field_names = field_names
         task.updated_at = now
         self._session.flush()
@@ -253,14 +292,20 @@ class TaskRepository:
         self,
         normalized_url: str,
         original_url: str,
+        page_state_signature: str,
+        anchor_url: str,
+        variant_label: str,
         task_description: str,
         field_names: list[str],
         now: datetime,
     ) -> TaskRecord:
         task = TaskRecord(
-            registry_id=_build_registry_id(normalized_url, task_description),
+            registry_id=_build_registry_id(normalized_url, task_description, page_state_signature),
             normalized_url=normalized_url,
             original_url=original_url,
+            page_state_signature=page_state_signature or "",
+            anchor_url=anchor_url or "",
+            variant_label=variant_label or "",
             task_description=task_description,
             field_names=field_names,
             created_at=now,
@@ -274,10 +319,10 @@ class TaskRepository:
             return task
         except IntegrityError:
             savepoint.rollback()
-            existing = self._find_task(normalized_url, task_description)
+            existing = self._find_task(normalized_url, page_state_signature, task_description)
             if existing is None:
                 raise
-            return self._update_task(existing, original_url, field_names, now)
+            return self._update_task(existing, original_url, anchor_url, variant_label, field_names, now)
 
     def _create_run(
         self,
@@ -306,6 +351,8 @@ class TaskRepository:
             collection_config=dict(payload.collection_config),
             extraction_config=dict(payload.extraction_config),
             plan_knowledge=payload.plan_knowledge,
+            plan_snapshot=dict(payload.task_plan),
+            plan_journal=list(payload.plan_journal),
             started_at=payload.started_at or now,
             completed_at=self._resolve_completed_at(payload=payload, now=now),
             created_at=now,
@@ -340,6 +387,8 @@ class TaskRepository:
         run.collection_config = dict(payload.collection_config)
         run.extraction_config = dict(payload.extraction_config)
         run.plan_knowledge = payload.plan_knowledge
+        run.plan_snapshot = dict(payload.task_plan)
+        run.plan_journal = list(payload.plan_journal)
         if payload.started_at:
             run.started_at = payload.started_at
         run.completed_at = self._resolve_completed_at(payload=payload, now=now)

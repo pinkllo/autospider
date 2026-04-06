@@ -18,21 +18,22 @@ logger = get_logger(__name__)
 @dataclass(slots=True)
 class PipelineSessionBundle:
     list_session: Any
-    detail_session: Any
 
     async def start(self) -> None:
         await self.list_session.start()
-        await self.detail_session.start()
 
     async def stop(self) -> None:
         await self.list_session.stop()
-        await self.detail_session.stop()
 
 
 @dataclass(slots=True)
 class PipelineRuntimeContext:
     list_url: str
+    anchor_url: str | None
+    page_state_signature: str
+    variant_label: str | None
     task_description: str
+    execution_brief: dict[str, Any]
     fields: list[FieldDefinition]
     output_dir: str
     headless: bool
@@ -52,6 +53,9 @@ class PipelineRuntimeContext:
     skill_runtime: SkillRuntime
     sessions: PipelineSessionBundle
     plan_knowledge: str = ""
+    task_plan_snapshot: dict[str, Any] = field(default_factory=dict)
+    plan_journal: list[dict[str, Any]] = field(default_factory=list)
+    initial_nav_steps: list[dict[str, Any]] = field(default_factory=list)
     url_only_mode: bool = False
     producer_done: asyncio.Event = field(default_factory=asyncio.Event)
     state: dict[str, object] = field(
@@ -84,6 +88,7 @@ class ProducerService:
                 page=self.context.sessions.list_session.page,
                 list_url=self.context.list_url,
                 task_description=self.context.task_description,
+                execution_brief=dict(self.context.execution_brief or {}),
                 explore_count=self.context.explore_count,
                 output_dir=self.context.output_dir,
                 url_channel=self.context.channel,
@@ -93,6 +98,7 @@ class ProducerService:
                 persist_progress=False,
                 skill_runtime=self.context.skill_runtime,
                 selected_skills=self.context.selected_skills,
+                initial_nav_steps=list(self.context.initial_nav_steps or []),
             )
             result = await collector.run()
             self.context.summary["collected_urls"] = len(result.collected_urls)
@@ -111,6 +117,9 @@ class ProducerService:
                 )
                 or None,
                 "list_url": self.context.list_url,
+                "anchor_url": str(self.context.anchor_url or ""),
+                "page_state_signature": str(self.context.page_state_signature or ""),
+                "variant_label": str(self.context.variant_label or ""),
                 "task_description": self.context.task_description,
             }
             await self.context.tracker.set_total(len(result.collected_urls))

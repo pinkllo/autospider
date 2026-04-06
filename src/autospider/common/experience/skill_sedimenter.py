@@ -371,7 +371,7 @@ class SkillSedimenter:
         context_parts.append(f"成功率: {success_count}/{total_urls}")
 
         if plan_knowledge:
-            context_parts.append(f"DFS 发现过程记录：\n{plan_knowledge[:2000]}")
+            context_parts.append(f"规划发现过程记录：\n{plan_knowledge[:2000]}")
 
         ext_fields = extraction_config.get("fields", [])
         if ext_fields:

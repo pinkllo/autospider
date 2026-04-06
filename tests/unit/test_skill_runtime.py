@@ -83,6 +83,33 @@ def test_skill_runtime_selects_loads_and_caches():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def test_skill_runtime_reuses_preselected_skills_without_reselection():
+    base = _make_test_dir()
+    try:
+        store = SkillStore(skills_dir=base)
+        store.save("www.doubao.com", _skill_content("doubao-chat", "聊天页技能"))
+
+        runtime = SkillRuntime(store=store)
+        llm = _FakeLLM({"selected_indexes": [1], "reasoning": "最相关"})
+        seeded = runtime.discover_by_url("https://www.doubao.com/chat/1")
+
+        async def _run():
+            return await runtime.get_or_select(
+                phase="planner",
+                url="https://www.doubao.com/chat/1",
+                task_context={"request": "采集聊天页", "fields": [{"name": "title"}]},
+                llm=llm,
+                preselected_skills=seeded,
+            )
+
+        selected = asyncio.run(_run())
+
+        assert llm.calls == 0
+        assert [item.domain for item in selected] == ["www.doubao.com"]
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def test_skill_runtime_formats_available_skills_as_structured_json():
     runtime = SkillRuntime()
     rendered = runtime._format_available_skills(

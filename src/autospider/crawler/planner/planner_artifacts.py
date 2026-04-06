@@ -12,7 +12,7 @@ import yaml
 
 from ...common.logger import get_logger
 from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
-from ...domain.planning import SubTask, TaskPlan
+from ...domain.planning import PlanJournalEntry, PlanNode, PlanNodeType, SubTask, TaskPlan
 
 logger = get_logger(__name__)
 
@@ -25,7 +25,13 @@ class PlannerArtifacts:
         self.user_request = user_request
         self.output_dir = output_dir
 
-    def build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
+    def build_plan(
+        self,
+        subtasks: list[SubTask],
+        *,
+        nodes: list[PlanNode] | None = None,
+        journal: list[PlanJournalEntry] | None = None,
+    ) -> TaskPlan:
         existing = self._load_saved_plan()
         created_at = existing.created_at if existing else ""
         updated_at = existing.updated_at if existing else ""
@@ -35,6 +41,8 @@ class PlannerArtifacts:
             original_request=self.user_request,
             site_url=self.site_url,
             subtasks=subtasks,
+            nodes=list(nodes or []),
+            journal=list(journal or []),
             total_subtasks=len(subtasks),
             created_at=created_at,
             updated_at=updated_at,
@@ -56,8 +64,8 @@ class PlannerArtifacts:
         logger.info("[Planner] 任务计划已成功持久化至: %s", plan_file)
         return TaskPlan.model_validate(persisted)
 
-    def write_knowledge_doc(self, knowledge_entries: list[dict], plan: TaskPlan) -> None:
-        content = self.build_knowledge_doc(knowledge_entries, plan)
+    def write_knowledge_doc(self, plan: TaskPlan) -> None:
+        content = self.build_knowledge_doc(plan)
         if not content:
             return
 
@@ -66,12 +74,12 @@ class PlannerArtifacts:
         doc_path.write_text(content, encoding="utf-8")
         logger.info("[Planner] 知识文档已写入: %s", doc_path)
 
-    def build_knowledge_doc(self, knowledge_entries: list[dict], plan: TaskPlan) -> str:
-        if not knowledge_entries:
+    def build_knowledge_doc(self, plan: TaskPlan) -> str:
+        if not plan.nodes and not plan.subtasks:
             return ""
 
         domain = urlparse(self.site_url).netloc
-        leaf_count = sum(1 for entry in knowledge_entries if entry["is_leaf"])
+        leaf_count = sum(1 for node in plan.nodes if node.is_leaf) or len(plan.subtasks)
 
         lines: list[str] = []
         lines.append(f"# 采集计划: {domain}")
@@ -84,26 +92,15 @@ class PlannerArtifacts:
         lines.append("")
         lines.append("## 发现过程")
         lines.append("")
-
-        for entry in knowledge_entries:
-            depth = entry["depth"]
-            heading_level = "#" * (depth + 3)
-            leaf_mark = " ✅" if entry["is_leaf"] else ""
-            children_info = ""
-            if not entry["is_leaf"] and entry["children_count"] > 0:
-                children_info = f"（{entry['children_count']} 个子分类）"
-
-            lines.append(f"{heading_level} {entry['name']}{leaf_mark}{children_info}")
-            lines.append(f"- URL: {entry['url']}")
-            lines.append(f"- 类型: {entry['page_type']}")
-            if entry["observations"]:
-                lines.append(f"- 观察: {entry['observations']}")
-            lines.append("")
+        if plan.nodes:
+            lines.extend(self._render_nodes(plan))
+        else:
+            lines.extend(self._render_subtasks(plan))
 
         return "\n".join(lines)
 
-    def sediment_draft_skill(self, knowledge_entries: list[dict], plan: TaskPlan) -> None:
-        if not knowledge_entries:
+    def sediment_draft_skill(self, plan: TaskPlan) -> None:
+        if not plan.nodes and not plan.subtasks:
             return
 
         try:
@@ -115,7 +112,7 @@ class PlannerArtifacts:
                 {
                     "name": f"{domain} 站点采集",
                     "description": (
-                        f"{domain} 数据采集技能（草稿）。DFS 发现阶段生成，待 Worker 执行后补充字段提取规则。"
+                        f"{domain} 数据采集技能（草稿）。规划发现阶段生成，待 Worker 执行后补充字段提取规则。"
                     ),
                 },
                 allow_unicode=True,
@@ -145,10 +142,9 @@ class PlannerArtifacts:
                     lines.append(f"- {subtask_name}")
                 lines.append("")
 
-            knowledge_path = Path(self.output_dir) / "plan_knowledge.md"
-            if knowledge_path.exists():
-                knowledge = knowledge_path.read_text(encoding="utf-8")
-                lines.append("## DFS 发现过程")
+            knowledge = self.build_knowledge_doc(plan)
+            if knowledge:
+                lines.append("## 规划发现过程")
                 lines.append("")
                 lines.append(knowledge.strip())
                 lines.append("")
@@ -181,3 +177,79 @@ class PlannerArtifacts:
             return TaskPlan.model_validate(data)
         except Exception:
             return None
+
+    def _render_nodes(self, plan: TaskPlan) -> list[str]:
+        children_by_parent: dict[str, list[PlanNode]] = {}
+        journal_by_node: dict[str, list[PlanJournalEntry]] = {}
+        for node in plan.nodes:
+            parent_id = str(node.parent_node_id or "")
+            children_by_parent.setdefault(parent_id, []).append(node)
+        for entry in plan.journal:
+            journal_by_node.setdefault(entry.node_id, []).append(entry)
+
+        lines: list[str] = []
+        for node in children_by_parent.get("", []):
+            self._append_node(lines, node, children_by_parent, journal_by_node)
+        return lines
+
+    def _append_node(
+        self,
+        lines: list[str],
+        node: PlanNode,
+        children_by_parent: dict[str, list[PlanNode]],
+        journal_by_node: dict[str, list[PlanJournalEntry]],
+    ) -> None:
+        level = max(3, node.depth + 3)
+        heading_level = "#" * level
+        marks: list[str] = []
+        if node.is_leaf:
+            marks.append("✅")
+        if node.executable and not node.is_leaf:
+            marks.append("可执行")
+        suffix = f" {' '.join(marks)}" if marks else ""
+        child_count = len(children_by_parent.get(node.node_id, []))
+        child_text = f"（{child_count} 个子节点）" if child_count > 0 else ""
+
+        lines.append(f"{heading_level} {node.name}{suffix}{child_text}")
+        lines.append(f"- 节点ID: {node.node_id}")
+        if node.url:
+            lines.append(f"- URL: {node.url}")
+        lines.append(f"- 类型: {node.node_type.value}")
+        if node.task_description:
+            lines.append(f"- 任务: {node.task_description}")
+        if node.context:
+            lines.append(f"- 上下文: {json.dumps(node.context, ensure_ascii=False)}")
+        if node.observations:
+            lines.append(f"- 观察: {node.observations}")
+
+        related = journal_by_node.get(node.node_id, [])
+        if related:
+            lines.append(f"{'#' * (level + 1)} Journal")
+            for entry in related:
+                action = str(entry.action or "").strip()
+                reason = str(entry.reason or "").strip()
+                evidence = str(entry.evidence or "").strip()
+                prefix = f"- [{entry.phase}] {action}".strip()
+                if reason:
+                    prefix = f"{prefix}: {reason}"
+                lines.append(prefix)
+                if evidence:
+                    lines.append(f"  依据: {evidence}")
+                if entry.metadata:
+                    lines.append(f"  元数据: {json.dumps(entry.metadata, ensure_ascii=False)}")
+        lines.append("")
+
+        for child in children_by_parent.get(node.node_id, []):
+            self._append_node(lines, child, children_by_parent, journal_by_node)
+
+    def _render_subtasks(self, plan: TaskPlan) -> list[str]:
+        lines: list[str] = []
+        for subtask in plan.subtasks:
+            lines.append(f"### {subtask.name} ✅")
+            lines.append(f"- URL: {subtask.list_url}")
+            lines.append(f"- 类型: {PlanNodeType.LEAF.value}")
+            lines.append(f"- 任务: {subtask.task_description}")
+            if subtask.context:
+                lines.append(f"- 上下文: {json.dumps(subtask.context, ensure_ascii=False)}")
+            lines.append("")
+        return lines

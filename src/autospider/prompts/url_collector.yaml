@@ -47,6 +47,9 @@ ask_llm_decision_user_message: |
   ## 任务描述
   {{task_description}}
 
+  ## 执行简报
+  {{execution_brief}}
+
   ## 当前页面 URL
   {{current_url}}
 

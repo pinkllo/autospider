@@ -49,6 +49,7 @@ class URLCollector(BaseCollector):
         page: "Page",
         list_url: str,
         task_description: str,
+        execution_brief: dict | None = None,
         explore_count: int = 3,
         max_nav_steps: int = 10,
         target_url_count: int | None = None,
@@ -60,11 +61,13 @@ class URLCollector(BaseCollector):
         skill_runtime: SkillRuntime | None = None,
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
+        initial_nav_steps: list[dict] | None = None,
     ):
         super().__init__(
             page=page,
             list_url=list_url,
             task_description=task_description,
+            execution_brief=execution_brief,
             output_dir=output_dir,
             url_channel=url_channel,
             redis_manager=redis_manager,
@@ -78,6 +81,7 @@ class URLCollector(BaseCollector):
         self.skill_runtime = skill_runtime or SkillRuntime()
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
+        self.initial_nav_steps = list(initial_nav_steps or [])
 
         self.detail_visits: list[DetailPageVisit] = []
         self.step_index = 0
@@ -100,11 +104,19 @@ class URLCollector(BaseCollector):
         await asyncio.sleep(1)
         self._initialize_handlers()
 
-        logger.info("\n[Phase 1] 导航阶段：根据任务描述进行筛选操作...")
-        nav_success = await self.navigation_handler.run_navigation_phase()
-        if not nav_success:
-            logger.info("[URLCollector] 导航阶段未完全完成，将在当前页面继续采集")
-        self.nav_steps = self.navigation_handler.nav_steps
+        if self.initial_nav_steps:
+            logger.info("\n[Phase 1] 重放 planner 导航路径...")
+            nav_success = await self.navigation_handler.replay_nav_steps(self.initial_nav_steps)
+            if not nav_success:
+                raise RuntimeError("planner_nav_steps_replay_failed")
+            self.nav_steps = list(self.initial_nav_steps)
+            logger.info("[URLCollector] ✓ planner 导航路径重放完成，共 %s 步", len(self.nav_steps))
+        else:
+            logger.info("\n[Phase 1] 导航阶段：根据任务描述进行筛选操作...")
+            nav_success = await self.navigation_handler.run_navigation_phase()
+            if not nav_success:
+                logger.info("[URLCollector] 导航阶段未完全完成，将在当前页面继续采集")
+            self.nav_steps = self.navigation_handler.nav_steps
 
         if self.navigation_handler and self.navigation_handler.page is not self.page:
             new_page = self.navigation_handler.page
@@ -183,6 +195,7 @@ class URLCollector(BaseCollector):
             list_url=self.list_url,
             selected_skills_context=self.selected_skills_context,
             selected_skills=self.selected_skills,
+            execution_brief=self.execution_brief,
         )
         super()._initialize_handlers()
         self.navigation_handler = NavigationHandler(
@@ -191,6 +204,7 @@ class URLCollector(BaseCollector):
             task_description=self.task_description,
             max_nav_steps=self.max_nav_steps,
             decider=self.decider,
+            execution_brief=self.execution_brief,
             screenshots_dir=self.screenshots_dir,
         )
 

@@ -12,6 +12,7 @@ from ...common.logger import get_logger
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
 from ...common.protocol import parse_protocol_message
 from ...common.utils.paths import get_prompt_path
+from ...domain.planning import format_execution_brief
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -37,6 +38,7 @@ class LLMDecisionMaker:
         list_url: str,
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
+        execution_brief: dict | None = None,
     ):
         self.page = page
         self.decider = decider
@@ -46,6 +48,7 @@ class LLMDecisionMaker:
         self.list_url = list_url
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
+        self.execution_brief = dict(execution_brief or {})
 
     async def ask_for_decision(
         self,
@@ -90,6 +93,7 @@ class LLMDecisionMaker:
                 "current_url": current_url,
                 "visited_count": len(self.visited_detail_urls),
                 "collected_urls_str": collected_urls_str,
+                "execution_brief": format_execution_brief(self.execution_brief),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )

@@ -10,12 +10,13 @@ class _DummyPage:
     pass
 
 
-def test_subtask_worker_infers_context_value_for_category_field():
+def test_subtask_worker_uses_explicit_context_for_category_field():
     subtask = SubTask(
         id="category_01",
         name="水利工程采集",
         list_url="https://example.com/list",
         task_description="采集该分类数据，筛选条件为'水利工程'子类",
+        context={"category_name": "水利工程"},
     )
     raw_fields = [
         {"name": "project_name", "description": "项目名称", "required": True, "data_type": "text"},
@@ -32,6 +33,45 @@ def test_subtask_worker_infers_context_value_for_category_field():
     assert category.fixed_value == "水利工程"
     assert project_name is not None
     assert project_name.extraction_source is None
+
+
+def test_subtask_worker_prefers_explicit_context_over_name_guess():
+    subtask = SubTask(
+        id="category_02",
+        name="默认名称",
+        list_url="https://example.com/list",
+        task_description="采集该分类数据",
+        context={"category_name": "工程建设"},
+    )
+    raw_fields = [
+        {"name": "category", "description": "项目所属分类", "required": True, "data_type": "text"},
+    ]
+    worker = SubTaskWorker(subtask=subtask, fields=raw_fields, output_dir="output", headless=True)
+
+    prepared = worker._prepare_fields()
+    category = prepared[0]
+
+    assert category.extraction_source == "subtask_context"
+    assert category.fixed_value == "工程建设"
+
+
+def test_subtask_worker_does_not_guess_context_without_explicit_value():
+    subtask = SubTask(
+        id="category_03",
+        name="土地矿业采集",
+        list_url="https://example.com/list",
+        task_description="访问'工程建设'与'土地矿业'分类后采集数据",
+    )
+    raw_fields = [
+        {"name": "category_name", "description": "项目所属分类", "required": True, "data_type": "text"},
+    ]
+    worker = SubTaskWorker(subtask=subtask, fields=raw_fields, output_dir="output", headless=True)
+
+    prepared = worker._prepare_fields()
+    category = prepared[0]
+
+    assert category.extraction_source is None
+    assert category.fixed_value is None
 
 
 def test_prepare_fields_config_accepts_required_context_field_without_xpath():

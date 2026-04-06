@@ -40,6 +40,12 @@ class PipelineExecutionService:
             guard_thread_id=thread_id,
             selected_skills=list(params.get("selected_skills") or []),
             plan_knowledge=str(params.get("plan_knowledge") or ""),
+            task_plan_snapshot=dict(params.get("task_plan_snapshot") or {}),
+            plan_journal=list(params.get("plan_journal") or []),
+            initial_nav_steps=list(params.get("initial_nav_steps") or []),
+            anchor_url=params.get("anchor_url"),
+            page_state_signature=str(params.get("page_state_signature") or ""),
+            variant_label=params.get("variant_label"),
         )
 
         summary_file = Path(str(params.get("output_dir") or "output")) / "pipeline_summary.json"

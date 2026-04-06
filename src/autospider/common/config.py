@@ -265,6 +265,10 @@ class PipelineConfig(BaseModel):
     consumer_concurrency: int = Field(
         default_factory=lambda: int(os.getenv("PIPELINE_CONSUMER_CONCURRENCY", "3"))
     )
+    # 本机调试时可显式开启串行模式：强制将任务并发与消费者并发都压成 1
+    local_serial_mode: bool = Field(
+        default_factory=lambda: os.getenv("LOCAL_SERIAL_MODE", "false").lower() == "true"
+    )
 
 
 class PlannerConfig(BaseModel):

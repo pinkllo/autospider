@@ -7,7 +7,7 @@ from sqlalchemy import inspect
 
 from autospider.common.config import config
 from autospider.common.db.engine import close_db, get_engine, init_db, session_scope
-from autospider.common.db.models import TaskRunItem, TaskRunValidationFailure
+from autospider.common.db.models import TaskRecord, TaskRunItem, TaskRunValidationFailure
 from autospider.common.db.repositories import TaskRepository, TaskRunPayload
 from autospider.common.storage.task_registry import TaskRegistry
 from autospider.services import TaskRunQueryService
@@ -72,6 +72,9 @@ def test_repository_persists_run_and_registry_reads_reusable_history(monkeypatch
     reusable_payload = TaskRunPayload(
         normalized_url="example.com/list",
         original_url="https://example.com/list?page=1",
+        page_state_signature="state_engineering",
+        anchor_url="https://example.com/root",
+        variant_label="工程建设",
         task_description="采集公告",
         field_names=["title", "date"],
         execution_id="exec_reusable",
@@ -114,6 +117,9 @@ def test_repository_persists_run_and_registry_reads_reusable_history(monkeypatch
     diagnostic_payload = TaskRunPayload(
         normalized_url="example.com/list",
         original_url="https://example.com/list?page=2",
+        page_state_signature="state_land",
+        anchor_url="https://example.com/root",
+        variant_label="土地矿业",
         task_description="采集公告",
         field_names=["title", "date"],
         execution_id="exec_diagnostic",
@@ -144,6 +150,54 @@ def test_repository_persists_run_and_registry_reads_reusable_history(monkeypatch
     assert history[0]["execution_id"] == "exec_reusable"
     assert history[0]["fields"] == ["title", "date"]
     assert history[0]["collected_count"] == 2
+    assert history[0]["page_state_signature"] == "state_engineering"
+    assert history[0]["variant_label"] == "工程建设"
+    close_db()
+
+
+def test_repository_allows_same_url_different_page_states(monkeypatch, tmp_path):
+    _configure_database(monkeypatch, tmp_path)
+    init_db(reset=True)
+
+    with session_scope() as session:
+        repo = TaskRepository(session)
+        repo.save_run(
+            TaskRunPayload(
+                normalized_url="example.com/list",
+                original_url="https://example.com/list",
+                page_state_signature="state_a",
+                anchor_url="https://example.com/root",
+                variant_label="工程建设",
+                task_description="采集公告",
+                execution_id="exec_a",
+                promotion_state="reusable",
+                execution_state="completed",
+                outcome_state="success",
+                total_urls=1,
+                success_count=1,
+                success_rate=1.0,
+            )
+        )
+        repo.save_run(
+            TaskRunPayload(
+                normalized_url="example.com/list",
+                original_url="https://example.com/list",
+                page_state_signature="state_b",
+                anchor_url="https://example.com/root",
+                variant_label="土地矿业",
+                task_description="采集公告",
+                execution_id="exec_b",
+                promotion_state="reusable",
+                execution_state="completed",
+                outcome_state="success",
+                total_urls=1,
+                success_count=1,
+                success_rate=1.0,
+            )
+        )
+
+    with session_scope() as session:
+        assert session.query(TaskRecord).count() == 2
     close_db()
 
 
@@ -156,6 +210,9 @@ def test_task_run_query_service_reads_detail(monkeypatch, tmp_path):
             TaskRunPayload(
                 normalized_url="example.com/list",
                 original_url="https://example.com/list",
+                page_state_signature="state_detail",
+                anchor_url="https://example.com/root",
+                variant_label="公告",
                 task_description="采集公告",
                 field_names=["title"],
                 execution_id="exec_detail",
@@ -185,6 +242,7 @@ def test_task_run_query_service_reads_detail(monkeypatch, tmp_path):
 
     assert detail is not None
     assert detail["task"]["task_description"] == "采集公告"
+    assert detail["task"]["page_state_signature"] == "state_detail"
     assert detail["run"]["execution_id"] == "exec_detail"
     assert len(detail["items"]) == 1
     assert detail["items"][0]["item"]["title"] == "公告1"

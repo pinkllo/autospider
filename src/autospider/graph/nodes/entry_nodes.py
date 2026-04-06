@@ -182,6 +182,23 @@ def _coalesce_cli_option(cli_args: dict[str, Any], key: str, fallback: Any) -> A
     return fallback if value is None else value
 
 
+def _is_serial_mode_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _apply_serial_mode_overrides(params: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(params or {})
+    serial_mode = _is_serial_mode_enabled(normalized.get("serial_mode"))
+    normalized["serial_mode"] = serial_mode
+    if not serial_mode:
+        return normalized
+    normalized["consumer_concurrency"] = 1
+    normalized["max_concurrent"] = 1
+    return normalized
+
+
 def _normalize_resume_answer(payload: Any) -> str:
     if isinstance(payload, dict):
         answer = payload.get("answer")
@@ -227,7 +244,7 @@ def _build_review_payload(
     dispatch_mode: str,
 ) -> dict[str, Any]:
     cli_args = dict(state.get("cli_args") or {})
-    effective_options = {
+    effective_options = _apply_serial_mode_overrides({
         "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
         "target_url_count": _coalesce_cli_option(cli_args, "target_url_count", task.get("target_url_count")),
         "consumer_concurrency": _coalesce_cli_option(
@@ -249,6 +266,7 @@ def _build_review_payload(
         "execution_mode": dispatch_mode,
         "headless": bool(cli_args.get("headless", False)),
         "output_dir": str(cli_args.get("output_dir") or "output"),
+        "serial_mode": cli_args.get("serial_mode"),
         "max_concurrent": _coalesce_cli_option(
             cli_args,
             "max_concurrent",
@@ -258,7 +276,7 @@ def _build_review_payload(
                 task.get("consumer_concurrency"),
             ),
         ),
-    }
+    })
     return {
         "type": "chat_review",
         "thread_id": str(state.get("thread_id") or ""),
@@ -286,7 +304,7 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("invalid_entry_mode", f"不支持的 entry_mode: {mode}")
     return {
         **_ok({"entry_mode": mode}),
-        "normalized_params": dict(state.get("cli_args") or {}),
+        "normalized_params": _apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
     }
 
 
@@ -295,7 +313,7 @@ def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
     """pipeline-run 参数归一化。"""
     return {
         **_ok({"normalized": True}),
-        "normalized_params": dict(state.get("cli_args") or {}),
+        "normalized_params": _apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
     }
 
 
@@ -464,7 +482,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
 
     dispatch_mode = _resolve_chat_dispatch_mode()
     # `clarified_task` 是 chat 阶段产物，这里只做进入 planning 的参数交接。
-    normalized = {
+    normalized = _apply_serial_mode_overrides({
         "list_url": task.get("list_url", ""),
         "task_description": task.get("task_description", ""),
         "fields": [_field_to_dict(item) for item in task.get("fields", [])],
@@ -492,6 +510,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "pipeline_mode": cli_args.get("pipeline_mode"),
         "headless": bool(cli_args.get("headless", False)),
         "output_dir": str(cli_args.get("output_dir") or "output"),
+        "serial_mode": cli_args.get("serial_mode"),
         "request": str(cli_args.get("request") or task.get("task_description") or ""),
         "max_concurrent": _coalesce_cli_option(
             cli_args,
@@ -506,7 +525,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
         "selected_skills": list(state.get("selected_skills") or []),
-    }
+    })
 
     return {
         **_ok({"execution_mode_resolved": "multi"}),
