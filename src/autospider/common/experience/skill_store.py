@@ -15,6 +15,7 @@ SKILL.md 文件格式：
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -55,6 +56,25 @@ class SkillFieldRule:
 
 
 @dataclass(frozen=True)
+class SkillVariantRule:
+    """按页面状态/分类上下文组织的变体规则。"""
+
+    label: str = ""
+    page_state_signature: str = ""
+    anchor_url: str = ""
+    task_description: str = ""
+    context: dict[str, str] = field(default_factory=dict)
+    success_rate: float = 0.0
+    success_rate_text: str = ""
+    detail_xpath: str = ""
+    pagination_xpath: str = ""
+    jump_input_selector: str = ""
+    jump_button_selector: str = ""
+    nav_steps: list[dict[str, str]] = field(default_factory=list)
+    fields: dict[str, SkillFieldRule] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SkillRuleData:
     """结构化规则层。"""
 
@@ -73,6 +93,7 @@ class SkillRuleData:
     nav_steps: list[dict[str, str]] = field(default_factory=list)
     subtask_names: list[str] = field(default_factory=list)
     fields: dict[str, SkillFieldRule] = field(default_factory=dict)
+    variants: list[SkillVariantRule] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -102,7 +123,7 @@ def _normalize_host(host: str) -> str:
     return value.rstrip(".")
 
 
-def _extract_domain(url: str) -> str:
+def extract_domain(url: str) -> str:
     """从 URL 中提取归一化域名。"""
     try:
         parsed = urlparse(url)
@@ -307,6 +328,52 @@ def _parse_fields(section: str) -> dict[str, SkillFieldRule]:
     return fields
 
 
+def _variant_section_title(label: str, index: int) -> str:
+    text = str(label or "").strip()
+    return text or f"变体 {index}"
+
+
+def _parse_variant_sections(body: str) -> list[SkillVariantRule]:
+    section = _extract_between_sections(body, "变体规则")
+    if not section:
+        return []
+
+    variants: list[SkillVariantRule] = []
+    matches = list(re.finditer(r"(?ms)^###\s+(.+?)\s*$\n(.*?)(?=^### |^## |\Z)", section))
+    for match in matches:
+        label = str(match.group(1) or "").strip()
+        block = str(match.group(2) or "").strip()
+        context = _extract_between_sections(block, "上下文")
+        nav = _extract_between_sections(block, "导航")
+        field_section = _extract_between_sections(block, "字段提取规则")
+        variants.append(
+            SkillVariantRule(
+                label=label,
+                page_state_signature=_clean_code_ticks(_extract_basic_value(context, "页面状态签名")),
+                anchor_url=_clean_code_ticks(_extract_basic_value(context, "锚点 URL")),
+                task_description=_extract_basic_value(context, "任务描述"),
+                context={
+                    str(key).strip(): str(value).strip()
+                    for key, value in (
+                        json.loads(_extract_basic_value(context, "上下文字典") or "{}")
+                        if _extract_basic_value(context, "上下文字典")
+                        else {}
+                    ).items()
+                    if str(key).strip() and str(value).strip()
+                },
+                success_rate=_parse_success_rate(_extract_basic_value(context, "成功率"))[0],
+                success_rate_text=_parse_success_rate(_extract_basic_value(context, "成功率"))[1],
+                detail_xpath=_clean_code_ticks(_extract_basic_value(nav, "详情链接 XPath")),
+                pagination_xpath=_clean_code_ticks(_extract_basic_value(nav, "分页控件 XPath")),
+                jump_input_selector=_clean_code_ticks(_extract_basic_value(nav, "跳转输入框")),
+                jump_button_selector=_clean_code_ticks(_extract_basic_value(nav, "跳转按钮")),
+                nav_steps=_parse_list_nav(nav)[4],
+                fields=_parse_fields(field_section),
+            )
+        )
+    return variants
+
+
 def parse_skill_document(content: str) -> SkillDocument:
     frontmatter, body = _split_frontmatter(content)
     name = str(frontmatter.get("name") or "").strip()
@@ -324,6 +391,7 @@ def parse_skill_document(content: str) -> SkillDocument:
     list_nav = _extract_between_sections(body, "列表页导航")
     detail_xpath, pagination_xpath, jump_input, jump_button, nav_steps = _parse_list_nav(list_nav)
     fields = _parse_fields(_extract_between_sections(body, "字段提取规则"))
+    variants = _parse_variant_sections(body)
     insights_markdown = _extract_between_sections(body, "站点特征与经验")
 
     rules = SkillRuleData(
@@ -346,6 +414,7 @@ def parse_skill_document(content: str) -> SkillDocument:
             if line.strip().startswith("- ")
         ],
         fields=fields,
+        variants=variants,
     )
     return SkillDocument(
         frontmatter=frontmatter,
@@ -353,6 +422,90 @@ def parse_skill_document(content: str) -> SkillDocument:
         rules=rules,
         insights_markdown=insights_markdown,
     )
+
+
+def _append_rule_fields(lines: list[str], rules: dict[str, SkillFieldRule]) -> None:
+    for field_name, rule in rules.items():
+        heading = f"### {field_name}"
+        if rule.description:
+            heading += f"（{rule.description}）"
+        lines.append(heading)
+        lines.append("")
+        lines.append(f"- **数据类型**: {rule.data_type or 'text'}")
+        if rule.extraction_source in {"constant", "subtask_context"}:
+            lines.append(f"- **提取方式**: {rule.extraction_source}")
+            if rule.fixed_value:
+                lines.append(f"- **固定值**: `{rule.fixed_value}`")
+        elif rule.primary_xpath:
+            lines.append(f"- **主 XPath**: `{rule.primary_xpath}`")
+            for fallback in rule.fallback_xpaths:
+                lines.append(f"- **备选 XPath**: `{fallback}`")
+        status_mark = "✓ 已验证" if rule.validated else "⚠ 未验证"
+        lines.append(f"- **验证状态**: {status_mark}")
+        lines.append(f"- **置信度**: {rule.confidence}")
+        lines.append("")
+
+
+def _append_nav_section(
+    lines: list[str],
+    *,
+    detail_xpath: str,
+    pagination_xpath: str,
+    jump_input_selector: str,
+    jump_button_selector: str,
+    nav_steps: list[dict[str, str]],
+) -> None:
+    has_nav = (
+        detail_xpath
+        or pagination_xpath
+        or jump_input_selector
+        or jump_button_selector
+        or nav_steps
+    )
+    if not has_nav:
+        return
+
+    if detail_xpath:
+        lines.append("### 详情链接定位")
+        lines.append("")
+        lines.append("使用以下 XPath 从列表页中定位每个详情条目的入口：")
+        lines.append("")
+        lines.append("```xpath")
+        lines.append(detail_xpath)
+        lines.append("```")
+        lines.append("")
+    if jump_input_selector or jump_button_selector:
+        lines.append("### 分页处理（跳转式）")
+        lines.append("")
+        lines.append("本站使用跳转式分页控件，操作步骤：")
+        lines.append("")
+        if jump_input_selector:
+            lines.append(f"1. 在页码输入框中输入目标页码，选择器: `{jump_input_selector}`")
+        if jump_button_selector:
+            lines.append(f"2. 点击跳转按钮，选择器: `{jump_button_selector}`")
+        lines.append("")
+    elif pagination_xpath:
+        lines.append("### 分页处理")
+        lines.append("")
+        lines.append(f"分页控件 XPath: `{pagination_xpath}`")
+        lines.append("")
+    if nav_steps:
+        lines.append("### 导航步骤")
+        lines.append("")
+        for index, step in enumerate(nav_steps, start=1):
+            action = str(step.get("action") or "").strip()
+            description = str(step.get("description") or "").strip()
+            line = f"{index}. **{action}**"
+            if description:
+                line += f" — {description}"
+            lines.append(line)
+            xpath = str(step.get("xpath") or "").strip()
+            value = str(step.get("value") or "").strip()
+            if xpath:
+                lines.append(f"   - XPath: `{xpath}`")
+            if value:
+                lines.append(f"   - 值: `{value}`")
+        lines.append("")
 
 
 def render_skill_document(document: SkillDocument) -> str:
@@ -380,80 +533,74 @@ def render_skill_document(document: SkillDocument) -> str:
         lines.append(f"- **成功率**: {rules.success_rate_text}")
     lines.append("")
 
-    has_nav = (
-        rules.detail_xpath
-        or rules.pagination_xpath
-        or rules.jump_input_selector
-        or rules.jump_button_selector
-        or rules.nav_steps
+    has_nav = any(
+        [
+            rules.detail_xpath,
+            rules.pagination_xpath,
+            rules.jump_input_selector,
+            rules.jump_button_selector,
+            rules.nav_steps,
+        ]
     )
     if has_nav:
         lines.append("## 列表页导航")
         lines.append("")
-        if rules.detail_xpath:
-            lines.append("### 详情链接定位")
-            lines.append("")
-            lines.append("使用以下 XPath 从列表页中定位每个详情条目的入口：")
-            lines.append("")
-            lines.append("```xpath")
-            lines.append(rules.detail_xpath)
-            lines.append("```")
-            lines.append("")
-        if rules.jump_input_selector or rules.jump_button_selector:
-            lines.append("### 分页处理（跳转式）")
-            lines.append("")
-            lines.append("本站使用跳转式分页控件，操作步骤：")
-            lines.append("")
-            if rules.jump_input_selector:
-                lines.append(f"1. 在页码输入框中输入目标页码，选择器: `{rules.jump_input_selector}`")
-            if rules.jump_button_selector:
-                lines.append(f"2. 点击跳转按钮，选择器: `{rules.jump_button_selector}`")
-            lines.append("")
-        elif rules.pagination_xpath:
-            lines.append("### 分页处理")
-            lines.append("")
-            lines.append(f"分页控件 XPath: `{rules.pagination_xpath}`")
-            lines.append("")
-        if rules.nav_steps:
-            lines.append("### 导航步骤")
-            lines.append("")
-            for index, step in enumerate(rules.nav_steps, start=1):
-                action = str(step.get("action") or "").strip()
-                description = str(step.get("description") or "").strip()
-                line = f"{index}. **{action}**"
-                if description:
-                    line += f" — {description}"
-                lines.append(line)
-                xpath = str(step.get("xpath") or "").strip()
-                value = str(step.get("value") or "").strip()
-                if xpath:
-                    lines.append(f"   - XPath: `{xpath}`")
-                if value:
-                    lines.append(f"   - 值: `{value}`")
-            lines.append("")
+    _append_nav_section(
+        lines,
+        detail_xpath=rules.detail_xpath,
+        pagination_xpath=rules.pagination_xpath,
+        jump_input_selector=rules.jump_input_selector,
+        jump_button_selector=rules.jump_button_selector,
+        nav_steps=rules.nav_steps,
+    )
 
     if rules.fields:
         lines.append("## 字段提取规则")
         lines.append("")
-        for field_name, rule in rules.fields.items():
-            heading = f"### {field_name}"
-            if rule.description:
-                heading += f"（{rule.description}）"
-            lines.append(heading)
+        _append_rule_fields(lines, rules.fields)
+
+    if rules.variants:
+        lines.append("## 变体规则")
+        lines.append("")
+        for index, variant in enumerate(rules.variants, start=1):
+            lines.append(f"### {_variant_section_title(variant.label, index)}")
             lines.append("")
-            lines.append(f"- **数据类型**: {rule.data_type or 'text'}")
-            if rule.extraction_source in {"constant", "subtask_context"}:
-                lines.append(f"- **提取方式**: {rule.extraction_source}")
-                if rule.fixed_value:
-                    lines.append(f"- **固定值**: `{rule.fixed_value}`")
-            elif rule.primary_xpath:
-                lines.append(f"- **主 XPath**: `{rule.primary_xpath}`")
-                for fallback in rule.fallback_xpaths:
-                    lines.append(f"- **备选 XPath**: `{fallback}`")
-            status_mark = "✓ 已验证" if rule.validated else "⚠ 未验证"
-            lines.append(f"- **验证状态**: {status_mark}")
-            lines.append(f"- **置信度**: {rule.confidence}")
+            lines.append("#### 上下文")
             lines.append("")
+            if variant.page_state_signature:
+                lines.append(f"- **页面状态签名**: `{variant.page_state_signature}`")
+            if variant.anchor_url:
+                lines.append(f"- **锚点 URL**: `{variant.anchor_url}`")
+            if variant.task_description:
+                lines.append(f"- **任务描述**: {variant.task_description}")
+            if variant.context:
+                lines.append(f"- **上下文字典**: {json.dumps(variant.context, ensure_ascii=False)}")
+            if variant.success_rate_text:
+                lines.append(f"- **成功率**: {variant.success_rate_text}")
+            lines.append("")
+            lines.append("#### 导航")
+            lines.append("")
+            if variant.detail_xpath:
+                lines.append(f"- **详情链接 XPath**: `{variant.detail_xpath}`")
+            if variant.pagination_xpath:
+                lines.append(f"- **分页控件 XPath**: `{variant.pagination_xpath}`")
+            if variant.jump_input_selector:
+                lines.append(f"- **跳转输入框**: `{variant.jump_input_selector}`")
+            if variant.jump_button_selector:
+                lines.append(f"- **跳转按钮**: `{variant.jump_button_selector}`")
+            lines.append("")
+            _append_nav_section(
+                lines,
+                detail_xpath="",
+                pagination_xpath="",
+                jump_input_selector="",
+                jump_button_selector="",
+                nav_steps=variant.nav_steps,
+            )
+            if variant.fields:
+                lines.append("#### 字段提取规则")
+                lines.append("")
+                _append_rule_fields(lines, variant.fields)
 
     if document.insights_markdown.strip():
         lines.append("## 站点特征与经验")
@@ -499,6 +646,48 @@ def _merge_field_rule(existing: SkillFieldRule, incoming: SkillFieldRule) -> Ski
     )
 
 
+def _merge_variant_rule(existing: SkillVariantRule, incoming: SkillVariantRule) -> SkillVariantRule:
+    merged_fields: dict[str, SkillFieldRule] = {}
+    all_field_names = list(existing.fields.keys())
+    for name in incoming.fields.keys():
+        if name not in all_field_names:
+            all_field_names.append(name)
+
+    for field_name in all_field_names:
+        existing_field = existing.fields.get(field_name)
+        incoming_field = incoming.fields.get(field_name)
+        if existing_field and incoming_field:
+            merged_fields[field_name] = _merge_field_rule(existing_field, incoming_field)
+        elif incoming_field:
+            merged_fields[field_name] = incoming_field
+        elif existing_field:
+            merged_fields[field_name] = existing_field
+
+    return SkillVariantRule(
+        label=incoming.label or existing.label,
+        page_state_signature=incoming.page_state_signature or existing.page_state_signature,
+        anchor_url=incoming.anchor_url or existing.anchor_url,
+        task_description=incoming.task_description or existing.task_description,
+        context=dict(existing.context or {}) | dict(incoming.context or {}),
+        success_rate=max(incoming.success_rate, existing.success_rate),
+        success_rate_text=incoming.success_rate_text or existing.success_rate_text,
+        detail_xpath=incoming.detail_xpath or existing.detail_xpath,
+        pagination_xpath=incoming.pagination_xpath or existing.pagination_xpath,
+        jump_input_selector=incoming.jump_input_selector or existing.jump_input_selector,
+        jump_button_selector=incoming.jump_button_selector or existing.jump_button_selector,
+        nav_steps=incoming.nav_steps or existing.nav_steps,
+        fields=merged_fields,
+    )
+
+
+def _variant_identity_key(variant: SkillVariantRule) -> tuple[str, str, str]:
+    return (
+        str(variant.page_state_signature or "").strip(),
+        str(variant.anchor_url or "").strip(),
+        str(variant.label or "").strip(),
+    )
+
+
 def merge_skill_documents(existing: SkillDocument, incoming: SkillDocument) -> SkillDocument:
     existing_rules = existing.rules
     incoming_rules = incoming.rules
@@ -535,6 +724,25 @@ def merge_skill_documents(existing: SkillDocument, incoming: SkillDocument) -> S
         elif existing_field:
             merged_fields[field_name] = existing_field
 
+    existing_variants: dict[tuple[str, str, str], SkillVariantRule] = {
+        _variant_identity_key(variant): variant
+        for variant in list(existing_rules.variants or [])
+    }
+    merged_variants: list[SkillVariantRule] = []
+    seen_variant_keys: set[tuple[str, str, str]] = set()
+
+    for variant in list(incoming_rules.variants or []):
+        key = _variant_identity_key(variant)
+        seen_variant_keys.add(key)
+        if key in existing_variants:
+            merged_variants.append(_merge_variant_rule(existing_variants[key], variant))
+        else:
+            merged_variants.append(variant)
+
+    for key, variant in existing_variants.items():
+        if key not in seen_variant_keys:
+            merged_variants.append(variant)
+
     merged_rules = SkillRuleData(
         domain=incoming_rules.domain or existing_rules.domain,
         name=incoming_rules.name or existing_rules.name,
@@ -551,6 +759,7 @@ def merge_skill_documents(existing: SkillDocument, incoming: SkillDocument) -> S
         nav_steps=incoming_rules.nav_steps or existing_rules.nav_steps,
         subtask_names=incoming_rules.subtask_names or existing_rules.subtask_names,
         fields=merged_fields,
+        variants=merged_variants,
     )
 
     merged_frontmatter = dict(existing.frontmatter or {})
@@ -579,7 +788,13 @@ class SkillStore:
             self.skills_dir = self._find_project_root() / _DEFAULT_SKILLS_DIR
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_document(self, domain: str, document: SkillDocument) -> Path:
+    def save_document(
+        self,
+        domain: str,
+        document: SkillDocument,
+        *,
+        overwrite_existing: bool = False,
+    ) -> Path:
         """保存结构化 Skill 文档。"""
         dirname = _domain_to_dirname(domain)
         skill_dir = self.skills_dir / dirname
@@ -587,14 +802,22 @@ class SkillStore:
         filepath = skill_dir / "SKILL.md"
 
         final_document = document
-        existing_content = self.load(domain)
+        existing_content = None if overwrite_existing else self.load(domain)
         if existing_content:
             existing_doc = parse_skill_document(existing_content)
             final_document = merge_skill_documents(existing_doc, document)
 
-        final_content = render_skill_document(final_document).strip()
+        final_content = render_skill_document(final_document).strip() + "\n"
+        try:
+            if filepath.read_text(encoding="utf-8") == final_content:
+                return filepath
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.debug("[SkillStore] 读取现有 Skill 失败 %s: %s", filepath, exc)
+
         temp_path = filepath.with_suffix(".md.tmp")
-        temp_path.write_text(final_content + "\n", encoding="utf-8")
+        temp_path.write_text(final_content, encoding="utf-8")
         temp_path.replace(filepath)
 
         logger.info("[SkillStore] Skill 已保存: %s", filepath)
@@ -613,11 +836,10 @@ class SkillStore:
         """
         dirname = _domain_to_dirname(domain)
         filepath = self.skills_dir / dirname / "SKILL.md"
-        if not filepath.exists():
-            return None
-
         try:
             return filepath.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
         except Exception as exc:
             logger.debug("[SkillStore] 读取文件失败 %s: %s", filepath, exc)
             return None
@@ -625,11 +847,10 @@ class SkillStore:
     def load_by_path(self, path: str | Path) -> str | None:
         """按文件路径加载 Skill 内容。"""
         filepath = Path(path)
-        if not filepath.exists():
-            return None
-
         try:
             return filepath.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
         except Exception as exc:
             logger.debug("[SkillStore] 读取文件失败 %s: %s", filepath, exc)
             return None
@@ -637,8 +858,6 @@ class SkillStore:
     def is_llm_eligible_path(self, path: str | Path) -> bool:
         """判断指定 Skill 文件是否可以暴露给 LLM。"""
         filepath = Path(path)
-        if not filepath.exists():
-            return False
         return not _is_draft_skill_path(filepath)
 
     def find_by_url(self, url: str) -> str | None:
@@ -647,21 +866,21 @@ class SkillStore:
         Returns:
             SKILL.md 的完整文本内容，或 None。
         """
-        domain = _extract_domain(url)
+        domain = extract_domain(url)
         if not domain:
             return None
         return self.load(domain)
 
     def list_by_url(self, url: str) -> list[SkillMetadata]:
         """按 URL 枚举同一 host 下的所有 Skill 元信息。"""
-        domain = _extract_domain(url)
+        domain = extract_domain(url)
         if not domain:
             return []
         return self.list_by_domain(domain)
 
     def list_by_domain(self, domain: str) -> list[SkillMetadata]:
         """按精确 host 枚举所有 Skill 元信息。"""
-        target = _extract_domain(domain) or _normalize_host(domain)
+        target = extract_domain(domain) or _normalize_host(domain)
         if not target:
             return []
 

@@ -8,10 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import yaml
-
 from ...common.logger import get_logger
 from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
+from ...common.experience import SkillCandidate
 from ...domain.planning import PlanJournalEntry, PlanNode, PlanNodeType, SubTask, TaskPlan
 
 logger = get_logger(__name__)
@@ -104,55 +103,38 @@ class PlannerArtifacts:
             return
 
         try:
-            from ...common.experience import SkillStore
-
             domain = urlparse(self.site_url).netloc
+            output_path = Path(self.output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            draft_path = output_path / "draft_skill_candidate.json"
             subtask_names = [subtask.name for subtask in plan.subtasks]
-            frontmatter = yaml.safe_dump(
-                {
-                    "name": f"{domain} 站点采集",
-                    "description": (
-                        f"{domain} 数据采集技能（草稿）。规划发现阶段生成，待 Worker 执行后补充字段提取规则。"
-                    ),
+            candidate = SkillCandidate(
+                domain=domain,
+                list_url=self.site_url,
+                task_description=self.user_request,
+                status="draft",
+                summary={"success_count": 0, "total_urls": 0},
+                collection_config={
+                    "list_url": self.site_url,
+                    "anchor_url": self.site_url,
                 },
-                allow_unicode=True,
-                sort_keys=False,
-            ).strip()
-
-            lines: list[str] = []
-            lines.append("---")
-            lines.extend(frontmatter.splitlines())
-            lines.append("---")
-            lines.append("")
-            lines.append(f"# {domain} 采集指南（草稿）")
-            lines.append("")
-            lines.append("## 基本信息")
-            lines.append("")
-            lines.append(f"- **列表页 URL**: `{self.site_url}`")
-            lines.append(f"- **任务描述**: {self.user_request}")
-            lines.append(f"- **状态**: 📝 draft")
-            lines.append("")
-
-            if subtask_names:
-                lines.append("## 子任务")
-                lines.append("")
-                lines.append(f"本站共 {len(subtask_names)} 个子任务分类：")
-                lines.append("")
-                for subtask_name in subtask_names:
-                    lines.append(f"- {subtask_name}")
-                lines.append("")
-
-            knowledge = self.build_knowledge_doc(plan)
-            if knowledge:
-                lines.append("## 规划发现过程")
-                lines.append("")
-                lines.append(knowledge.strip())
-                lines.append("")
-
-            content = "\n".join(lines)
-            store = SkillStore(skills_dir=Path(self.output_dir) / "draft_skills")
-            skill_path = store.save(domain, content)
-            logger.info("[Planner] Draft Skill 已写入输出目录: %s", skill_path)
+                extraction_config={"fields": []},
+                validation_failures=[],
+                plan_knowledge=self.build_knowledge_doc(plan),
+                subtask_names=subtask_names,
+                source="planner",
+            )
+            write_json_idempotent(
+                draft_path,
+                {
+                    "candidate": candidate.__dict__,
+                    "plan_id": str(plan.plan_id or ""),
+                    "site_url": self.site_url,
+                    "user_request": self.user_request,
+                },
+                identity_keys=("site_url", "user_request", "plan_id"),
+            )
+            logger.info("[Planner] Draft skill candidate 已写入输出目录: %s", draft_path)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[Planner] Draft Skill 生成失败（不影响主流程）: %s", exc)
 

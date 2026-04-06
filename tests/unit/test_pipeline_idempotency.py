@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from autospider.common.experience.skill_sedimenter import SkillPromotionContext
 from autospider.common.channel.base import URLTask
 from autospider.common.config import config
 from autospider.domain.fields import FieldDefinition
@@ -430,4 +431,105 @@ def test_try_sediment_skill_skips_low_quality_run(tmp_path):
     )
 
     assert result is None
+
+
+def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_path):
+    captured: dict[str, object] = {}
+
+    def _fake_try_sediment_skill(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    finalizer = pipeline_runner.PipelineFinalizer(
+        pipeline_runner.PipelineFinalizationDependencies(
+            build_record_summary=lambda records: {"total_urls": 1, "success_count": 1},
+            classify_pipeline_result=lambda **kwargs: {
+                "outcome_state": "success",
+                "promotion_state": "reusable",
+                "success_rate": 1.0,
+                "validation_failure_count": 0,
+                "execution_state": "completed",
+            },
+            persist_pipeline_run=lambda context, records: None,
+            commit_items_file=lambda items_path, records: None,
+            write_summary=lambda summary_path, summary: None,
+            try_sediment_skill=_fake_try_sediment_skill,
+            cleanup_output_draft_skill=lambda list_url, output_dir: None,
+        )
+    )
+
+    class _Field:
+        def model_dump(self):
+            return {"name": "title", "description": "标题"}
+
+    class _Sessions:
+        def __init__(self):
+            self.stopped = False
+
+        async def stop(self):
+            self.stopped = True
+
+    sessions = _Sessions()
+    tracker = _NoopTracker("run-1")
+
+    context = pipeline_runner.PipelineFinalizationContext(
+        list_url="https://example.com/list",
+        anchor_url="https://example.com/category",
+        page_state_signature="state-a",
+        variant_label="招标公告",
+        task_description="采集标题",
+        execution_brief={},
+        fields=[_Field()],
+        thread_id="",
+        output_dir=str(tmp_path),
+        output_path=tmp_path,
+        items_path=tmp_path / "items.jsonl",
+        summary_path=tmp_path / "summary.json",
+        committed_records={
+            "https://example.com/detail/1": _build_run_record(
+                url="https://example.com/detail/1",
+                item={"url": "https://example.com/detail/1", "title": "A"},
+                success=True,
+                failure_reason="",
+            )
+        },
+        summary={},
+        state={
+            "collection_config": {},
+            "extraction_config": {},
+            "validation_failures": [],
+            "extraction_evidence": [
+                {
+                    "url": "https://example.com/detail/1",
+                    "success": True,
+                    "extraction_config": {
+                        "fields": [{"name": "title", "xpath": "//h1", "xpath_validated": True}]
+                    },
+                }
+            ],
+        },
+        collection_config={},
+        extraction_config={},
+        validation_failures=[],
+        plan_knowledge="",
+        task_plan={},
+        plan_journal=[],
+        promote_skill=True,
+        promotion_context={"category_name": "招标公告"},
+        tracker=tracker,
+        sessions=sessions,
+    )
+
+    import asyncio
+    asyncio.run(finalizer.finalize(context))
+
+    payload = captured["payload"]
+    assert payload.extraction_evidence[0]["url"] == "https://example.com/detail/1"
+    assert payload.promotion_context == SkillPromotionContext(
+        anchor_url="https://example.com/category",
+        page_state_signature="state-a",
+        variant_label="招标公告",
+        context={"category_name": "招标公告"},
+    )
+    assert sessions.stopped is True
 

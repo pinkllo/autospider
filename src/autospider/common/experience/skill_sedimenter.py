@@ -14,7 +14,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from ..config import config
 from ..logger import get_logger
@@ -23,18 +22,19 @@ from .skill_store import (
     SkillFieldRule,
     SkillRuleData,
     SkillStore,
+    SkillVariantRule,
+    extract_domain,
 )
 
 logger = get_logger(__name__)
 
 
-def _extract_domain(url: str) -> str:
-    """从 URL 中提取域名。"""
-    try:
-        parsed = urlparse(url)
-        return parsed.netloc or ""
-    except Exception:
-        return ""
+@dataclass(frozen=True, slots=True)
+class SkillPromotionContext:
+    anchor_url: str = ""
+    page_state_signature: str = ""
+    variant_label: str = ""
+    context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,13 +42,45 @@ class SkillSedimentationPayload:
     list_url: str
     task_description: str
     fields: list[dict[str, Any]]
+    promotion_context: SkillPromotionContext = field(default_factory=SkillPromotionContext)
     collection_config: dict[str, Any] = field(default_factory=dict)
     extraction_config: dict[str, Any] = field(default_factory=dict)
+    extraction_evidence: list[dict[str, Any]] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
     validation_failures: list[dict[str, Any]] = field(default_factory=list)
     subtask_names: list[str] = field(default_factory=list)
     plan_knowledge: str = ""
     status: str = "validated"
+
+
+@dataclass(frozen=True, slots=True)
+class SkillCandidate:
+    domain: str
+    list_url: str
+    task_description: str
+    status: str
+    summary: dict[str, Any] = field(default_factory=dict)
+    collection_config: dict[str, Any] = field(default_factory=dict)
+    extraction_config: dict[str, Any] = field(default_factory=dict)
+    extraction_evidence: list[dict[str, Any]] = field(default_factory=list)
+    validation_failures: list[dict[str, Any]] = field(default_factory=list)
+    plan_knowledge: str = ""
+    subtask_names: list[str] = field(default_factory=list)
+    source: str = "single_run"
+    page_state_signature: str = ""
+    anchor_url: str = ""
+    variant_label: str = ""
+    context: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SkillPromotionPayload:
+    list_url: str
+    task_description: str
+    fields: list[dict[str, Any]]
+    candidates: list[SkillCandidate] = field(default_factory=list)
+    plan_knowledge: str = ""
+    overwrite_existing: bool = False
 
 
 class SkillSedimenter:
@@ -60,9 +92,90 @@ class SkillSedimenter:
     def __init__(self, skills_dir: str | Path | None = None):
         self.store = SkillStore(skills_dir=skills_dir)
 
+    def build_candidate_from_payload(
+        self,
+        payload: SkillSedimentationPayload,
+        *,
+        source: str = "single_run",
+    ) -> SkillCandidate | None:
+        summary = dict(payload.summary or {})
+        if int(summary.get("success_count", 0) or 0) <= 0:
+            return None
+
+        domain = extract_domain(payload.list_url)
+        if not domain:
+            return None
+
+        collection_config = dict(payload.collection_config or {})
+        promotion_context = payload.promotion_context
+        extraction_evidence = list(payload.extraction_evidence or [])
+        effective_extraction_config = self._build_effective_extraction_config(
+            fields=payload.fields,
+            extraction_config=dict(payload.extraction_config or {}),
+            extraction_evidence=extraction_evidence,
+        )
+        if not self._candidate_has_usable_rules(effective_extraction_config):
+            return None
+        return SkillCandidate(
+            domain=domain,
+            list_url=payload.list_url,
+            task_description=payload.task_description,
+            status=str(payload.status or "draft"),
+            summary=summary,
+            collection_config=collection_config,
+            extraction_config=effective_extraction_config,
+            extraction_evidence=extraction_evidence,
+            validation_failures=list(payload.validation_failures or []),
+            plan_knowledge=str(payload.plan_knowledge or ""),
+            subtask_names=list(payload.subtask_names or []),
+            source=source,
+            page_state_signature=str(
+                promotion_context.page_state_signature
+                or collection_config.get("page_state_signature")
+                or ""
+            ),
+            anchor_url=str(
+                promotion_context.anchor_url or collection_config.get("anchor_url") or ""
+            ),
+            variant_label=str(
+                promotion_context.variant_label or collection_config.get("variant_label") or ""
+            ),
+            context={
+                str(key).strip(): str(value).strip()
+                for key, value in dict(promotion_context.context or {}).items()
+                if str(key).strip() and str(value).strip()
+            },
+        )
+
+    def promote_candidates(self, payload: SkillPromotionPayload) -> Path | None:
+        try:
+            candidates = [candidate for candidate in list(payload.candidates or []) if candidate.domain]
+            if not candidates:
+                return None
+
+            domain = candidates[0].domain
+            document = self._compile_document(
+                domain=domain,
+                list_url=payload.list_url,
+                task_description=payload.task_description,
+                fields=payload.fields,
+                candidates=candidates,
+                plan_knowledge=payload.plan_knowledge,
+            )
+            return self.store.save_document(
+                domain,
+                document,
+                overwrite_existing=payload.overwrite_existing,
+            )
+        except Exception as exc:
+            logger.debug("[SkillSedimenter] Candidate promotion failed: %s", exc)
+            return None
+
     def sediment_from_pipeline_result(
         self,
         payload: SkillSedimentationPayload,
+        *,
+        overwrite_existing: bool = False,
     ) -> Path | None:
         """从单个 Pipeline 运行结果沉淀 Skill。
 
@@ -70,48 +183,20 @@ class SkillSedimenter:
             生成的 SKILL.md 文件路径，如果沉淀失败则返回 None
         """
         try:
-            summary = dict(payload.summary or {})
-            collection_config = dict(payload.collection_config or {})
-            extraction_config = dict(payload.extraction_config or {})
-            validation_failures = list(payload.validation_failures or [])
-
-            success_count = int(summary.get("success_count", 0) or 0)
-            if success_count <= 0:
-                logger.debug("[SkillSedimenter] 任务无成功记录，跳过沉淀")
+            candidate = self.build_candidate_from_payload(payload)
+            if candidate is None:
+                logger.debug("[SkillSedimenter] 任务无有效 candidate，跳过沉淀")
                 return None
-
-            domain = _extract_domain(payload.list_url)
-            if not domain:
-                logger.debug("[SkillSedimenter] 无法从 URL 提取域名，跳过沉淀")
-                return None
-
-            # 第一步：提取结构化规则层
-            rules = self._build_rule_data(
-                domain=domain,
-                list_url=payload.list_url,
-                task_description=payload.task_description,
-                fields=payload.fields,
-                collection_config=collection_config,
-                extraction_config=extraction_config,
-                summary=summary,
-                subtask_names=payload.subtask_names,
-                status=payload.status,
+            return self.promote_candidates(
+                SkillPromotionPayload(
+                    list_url=payload.list_url,
+                    task_description=payload.task_description,
+                    fields=payload.fields,
+                    candidates=[candidate],
+                    plan_knowledge=payload.plan_knowledge,
+                    overwrite_existing=overwrite_existing,
+                )
             )
-
-            # 第二步：生成软经验总结
-            insights = self._generate_insights(
-                domain=domain,
-                fields=payload.fields,
-                extraction_config=extraction_config,
-                validation_failures=validation_failures,
-                summary=summary,
-                plan_knowledge=payload.plan_knowledge,
-            )
-
-            # 第三步：产出结构化文档并统一保存
-            document = self._build_skill_document(rules=rules, insights=insights)
-            return self.store.save_document(domain, document)
-
         except Exception as exc:
             logger.debug("[SkillSedimenter] 沉淀失败（不影响主流程）: %s", exc)
             return None
@@ -124,74 +209,156 @@ class SkillSedimenter:
         fields: list[dict[str, Any]],
         subtask_results: list[dict[str, Any]],
         plan_knowledge: str = "",
+        overwrite_existing: bool = False,
+        source: str = "subtask_run",
     ) -> Path | None:
         """从多个子任务结果聚合沉淀为一个统一 Skill（Map-Reduce）。"""
         try:
             if not subtask_results:
                 return None
 
-            merged_xpaths = self._merge_subtask_xpaths(subtask_results, fields)
-            merged_collection = self._merge_subtask_configs(subtask_results)
-            merged_failures = self._merge_subtask_failures(subtask_results)
-            subtask_names = [str(r.get("name", "")) for r in subtask_results if r.get("name")]
+            candidates: list[SkillCandidate] = []
+            for result in subtask_results:
+                payload = SkillSedimentationPayload(
+                    list_url=str(result.get("list_url") or list_url or ""),
+                    task_description=str(result.get("task_description") or task_description or ""),
+                    fields=fields,
+                    promotion_context=SkillPromotionContext(
+                        anchor_url=str(result.get("anchor_url") or ""),
+                        page_state_signature=str(result.get("page_state_signature") or ""),
+                        variant_label=str(result.get("variant_label") or ""),
+                        context={
+                            str(key).strip(): str(value).strip()
+                            for key, value in dict(result.get("context") or {}).items()
+                            if str(key).strip() and str(value).strip()
+                        },
+                    ),
+                    collection_config=dict(result.get("collection_config") or {}),
+                    extraction_config=dict(result.get("extraction_config") or {}),
+                    extraction_evidence=list(result.get("extraction_evidence") or []),
+                    summary=dict(result.get("summary") or {}),
+                    validation_failures=list(result.get("validation_failures") or []),
+                    subtask_names=[str(result.get("name") or "")] if result.get("name") else [],
+                    plan_knowledge=str(plan_knowledge or ""),
+                    status="validated",
+                )
+                candidate = self.build_candidate_from_payload(
+                    payload,
+                    source=source,
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
 
-            total_success = sum(
-                int(r.get("summary", {}).get("success_count", 0) or 0)
-                for r in subtask_results
-            )
-            total_urls = sum(
-                int(r.get("summary", {}).get("total_urls", 0) or 0)
-                for r in subtask_results
-            )
-            merged_summary = {
-                "success_count": total_success,
-                "total_urls": total_urls,
-            }
-
-            if total_success <= 0:
-                logger.debug("[SkillSedimenter] 所有子任务均无成功记录，跳过沉淀")
+            if not candidates:
+                logger.debug("[SkillSedimenter] 所有子任务均无有效 candidate，跳过沉淀")
                 return None
 
-            return self.sediment_from_pipeline_result(
-                SkillSedimentationPayload(
+            return self.promote_candidates(
+                SkillPromotionPayload(
                     list_url=list_url,
                     task_description=task_description,
                     fields=fields,
-                    collection_config=merged_collection,
-                    extraction_config=merged_xpaths,
-                    summary=merged_summary,
-                    validation_failures=merged_failures,
-                    subtask_names=subtask_names,
+                    candidates=candidates,
                     plan_knowledge=plan_knowledge,
+                    overwrite_existing=overwrite_existing,
                 )
             )
-
         except Exception as exc:
             logger.debug("[SkillSedimenter] 子任务聚合沉淀失败: %s", exc)
             return None
 
-    # ===== 内部方法 =====
+    def _build_variant_rule(
+        self,
+        *,
+        candidate: SkillCandidate,
+        fields: list[dict[str, Any]],
+    ) -> SkillVariantRule:
+        field_desc_map = {
+            str(f.get("name", "")): str(f.get("description", ""))
+            for f in fields
+            if isinstance(f, dict) and f.get("name")
+        }
+        field_rules = self._build_field_rules(candidate.extraction_config, field_desc_map)
+        collection_config = dict(candidate.collection_config or {})
+        nav_steps = self._build_nav_steps(collection_config)
+        jump_input_selector, jump_button_selector = self._extract_jump_selectors(collection_config)
+        label = str(candidate.variant_label or "").strip()
+        if not label:
+            label = str((candidate.context or {}).get("category_name") or "").strip()
+        if not label:
+            label = str(candidate.task_description or "").strip()
 
-    def _build_rule_data(
+        return SkillVariantRule(
+            label=label,
+            page_state_signature=str(candidate.page_state_signature or ""),
+            anchor_url=str(candidate.anchor_url or ""),
+            task_description=str(candidate.task_description or ""),
+            context=dict(candidate.context or {}),
+            success_rate=float(candidate.summary.get("success_rate", 0.0) or 0.0),
+            success_rate_text=self._build_success_rate_text(candidate.summary),
+            detail_xpath=str(collection_config.get("common_detail_xpath") or ""),
+            pagination_xpath=str(collection_config.get("pagination_xpath") or ""),
+            jump_input_selector=jump_input_selector,
+            jump_button_selector=jump_button_selector,
+            nav_steps=nav_steps,
+            fields=field_rules,
+        )
+
+    def _compile_document(
         self,
         *,
         domain: str,
         list_url: str,
         task_description: str,
         fields: list[dict[str, Any]],
-        collection_config: dict[str, Any],
-        extraction_config: dict[str, Any],
-        summary: dict[str, Any],
-        subtask_names: list[str] | None = None,
-        status: str = "validated",
-    ) -> SkillRuleData:
-        """提取结构化规则层（纯代码逻辑，不用 LLM）。"""
-        field_desc_map = {
-            str(f.get("name", "")): str(f.get("description", ""))
-            for f in fields
-            if isinstance(f, dict) and f.get("name")
-        }
+        candidates: list[SkillCandidate],
+        plan_knowledge: str = "",
+    ) -> SkillDocument:
+        ordered_candidates = sorted(
+            candidates,
+            key=lambda candidate: (
+                str(candidate.page_state_signature or ""),
+                str(candidate.variant_label or ""),
+                str(candidate.task_description or ""),
+            ),
+        )
+        primary = ordered_candidates[0]
+        primary_collection = dict(primary.collection_config or {})
+        summary = self._merge_candidate_summaries(ordered_candidates)
+        merged_extraction_config = self._merge_candidate_xpaths(ordered_candidates, fields)
+        rules = self._build_rule_data(
+            domain=domain,
+            list_url=list_url,
+            task_description=task_description,
+            fields=fields,
+            collection_config=primary_collection,
+            extraction_config=merged_extraction_config,
+            summary=summary,
+            subtask_names=self._merge_candidate_subtask_names(ordered_candidates),
+            status=str(primary.status or "validated"),
+        )
+        variants = [
+            self._build_variant_rule(candidate=candidate, fields=fields)
+            for candidate in ordered_candidates
+        ]
+        rules = SkillRuleData(
+            **{**rules.__dict__, "variants": variants}
+        )
+        insights = self._generate_insights(
+            domain=domain,
+            fields=fields,
+            extraction_config=merged_extraction_config,
+            validation_failures=self._merge_candidate_failures(ordered_candidates),
+            summary=summary,
+            plan_knowledge=plan_knowledge,
+        )
+        return self._build_skill_document(rules=rules, insights=insights)
 
+    def _build_field_rules(
+        self,
+        extraction_config: dict[str, Any],
+        field_desc_map: dict[str, str],
+    ) -> dict[str, SkillFieldRule]:
         field_rules: dict[str, SkillFieldRule] = {}
         extraction_fields = extraction_config.get("fields", [])
         for ef in extraction_fields:
@@ -217,7 +384,9 @@ class SkillSedimenter:
                 extraction_source=str(ef.get("extraction_source") or ""),
                 fixed_value=str(ef.get("fixed_value") or ""),
             )
+        return field_rules
 
+    def _build_nav_steps(self, collection_config: dict[str, Any]) -> list[dict[str, str]]:
         nav_steps: list[dict[str, str]] = []
         for step in collection_config.get("nav_steps", []):
             if not isinstance(step, dict):
@@ -228,20 +397,136 @@ class SkillSedimenter:
                 "value": str(step.get("value") or ""),
                 "description": str(step.get("description", "")),
             })
+        return nav_steps
 
-        success_count = int(summary.get("success_count", 0) or 0)
-        total_urls = int(summary.get("total_urls", 0) or 0)
-        success_rate = round(success_count / max(total_urls, 1), 2)
-        success_rate_text = ""
-        if total_urls > 0:
-            success_rate_text = f"{success_rate * 100:.0f}% ({success_count}/{total_urls})"
-
+    def _extract_jump_selectors(self, collection_config: dict[str, Any]) -> tuple[str, str]:
         jump_widget = collection_config.get("jump_widget_xpath")
         jump_input_selector = ""
         jump_button_selector = ""
         if isinstance(jump_widget, dict):
             jump_input_selector = str(jump_widget.get("input") or "")
             jump_button_selector = str(jump_widget.get("button") or "")
+        return jump_input_selector, jump_button_selector
+
+    def _build_success_rate_text(self, summary: dict[str, Any]) -> str:
+        success_count = int(summary.get("success_count", 0) or 0)
+        total_urls = int(summary.get("total_urls", 0) or 0)
+        if total_urls <= 0:
+            return ""
+        success_rate = round(success_count / max(total_urls, 1), 2)
+        return f"{success_rate * 100:.0f}% ({success_count}/{total_urls})"
+
+    def _merge_candidate_xpaths(
+        self,
+        candidates: list[SkillCandidate],
+        fields: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        subtask_results = [
+            {"extraction_config": dict(candidate.extraction_config or {})}
+            for candidate in candidates
+        ]
+        return self._merge_subtask_xpaths(subtask_results, fields)
+
+    def _merge_candidate_failures(self, candidates: list[SkillCandidate]) -> list[dict[str, Any]]:
+        failures: list[dict[str, Any]] = []
+        for candidate in candidates:
+            failures.extend(list(candidate.validation_failures or []))
+        return failures
+
+    def _candidate_has_usable_rules(self, extraction_config: dict[str, Any]) -> bool:
+        for field in list(dict(extraction_config or {}).get("fields") or []):
+            if not isinstance(field, dict):
+                continue
+            if str(field.get("xpath") or "").strip():
+                return True
+            source = str(field.get("extraction_source") or "").strip().lower()
+            fixed_value = str(field.get("fixed_value") or "").strip()
+            if source in {"constant", "subtask_context", "task_url"} and fixed_value:
+                return True
+        return False
+
+    def _build_effective_extraction_config(
+        self,
+        *,
+        fields: list[dict[str, Any]],
+        extraction_config: dict[str, Any],
+        extraction_evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        successful_records = [
+            {"extraction_config": dict(item.get("extraction_config") or {})}
+            for item in extraction_evidence
+            if isinstance(item, dict) and item.get("success")
+        ]
+        if successful_records:
+            merged = self._merge_subtask_xpaths(successful_records, fields)
+            if self._candidate_has_usable_rules(merged):
+                return self._merge_evidence_into_config(
+                    base_config=extraction_config,
+                    merged_fields=merged,
+                )
+        return dict(extraction_config or {})
+
+    def _merge_evidence_into_config(
+        self,
+        *,
+        base_config: dict[str, Any],
+        merged_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged_config = dict(base_config or {})
+        merged_config["fields"] = list(dict(merged_fields or {}).get("fields") or [])
+        return merged_config
+
+    def _merge_candidate_subtask_names(self, candidates: list[SkillCandidate]) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            for name in list(candidate.subtask_names or []):
+                text = str(name or "").strip()
+                if text and text not in seen:
+                    seen.add(text)
+                    names.append(text)
+        return names
+
+    def _merge_candidate_summaries(self, candidates: list[SkillCandidate]) -> dict[str, Any]:
+        total_success = 0
+        total_urls = 0
+        for candidate in candidates:
+            total_success += int(candidate.summary.get("success_count", 0) or 0)
+            total_urls += int(candidate.summary.get("total_urls", 0) or 0)
+        return {
+            "success_count": total_success,
+            "total_urls": total_urls,
+        }
+
+    # ===== 内部方法 =====
+
+    def _build_rule_data(
+        self,
+        *,
+        domain: str,
+        list_url: str,
+        task_description: str,
+        fields: list[dict[str, Any]],
+        collection_config: dict[str, Any],
+        extraction_config: dict[str, Any],
+        summary: dict[str, Any],
+        subtask_names: list[str] | None = None,
+        status: str = "validated",
+    ) -> SkillRuleData:
+        """提取结构化规则层（纯代码逻辑，不用 LLM）。"""
+        field_desc_map = {
+            str(f.get("name", "")): str(f.get("description", ""))
+            for f in fields
+            if isinstance(f, dict) and f.get("name")
+        }
+        field_rules = self._build_field_rules(extraction_config, field_desc_map)
+        nav_steps = self._build_nav_steps(collection_config)
+
+        success_count = int(summary.get("success_count", 0) or 0)
+        total_urls = int(summary.get("total_urls", 0) or 0)
+        success_rate = round(success_count / max(total_urls, 1), 2)
+        success_rate_text = self._build_success_rate_text(summary)
+        jump_input_selector, jump_button_selector = self._extract_jump_selectors(collection_config)
 
         return SkillRuleData(
             domain=domain,

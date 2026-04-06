@@ -323,6 +323,7 @@ class SubTaskWorker:
             page_state_signature=working_subtask.page_state_signature,
             variant_label=working_subtask.variant_label,
             execution_brief=working_subtask.execution_brief.model_dump(mode="python"),
+            promote_skill=False,
         )
 
         logger.info(

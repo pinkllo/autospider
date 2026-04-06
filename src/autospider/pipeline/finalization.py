@@ -381,7 +381,7 @@ def try_sediment_skill(
     payload: "SkillSedimentationPayload",
 ) -> Path | None:
     try:
-        from ..common.experience import SkillSedimenter
+        from ..common.experience import SkillPromotionContext, SkillPromotionPayload, SkillSedimenter
 
         if not should_promote_skill(
             state=state,
@@ -392,7 +392,21 @@ def try_sediment_skill(
             return None
 
         sedimenter = SkillSedimenter()
-        result_path = sedimenter.sediment_from_pipeline_result(payload)
+        candidate = sedimenter.build_candidate_from_payload(
+            payload,
+            source="single_run",
+        )
+        if candidate is None:
+            return None
+        result_path = sedimenter.promote_candidates(
+            SkillPromotionPayload(
+                list_url=payload.list_url,
+                task_description=payload.task_description,
+                fields=payload.fields,
+                candidates=[candidate],
+                plan_knowledge=payload.plan_knowledge,
+            )
+        )
         if result_path:
             logger.info("[Pipeline] 经验已沉淀为 Skill: %s", result_path)
         return result_path
@@ -424,6 +438,8 @@ class PipelineFinalizationContext:
     plan_knowledge: str
     task_plan: dict[str, Any]
     plan_journal: list[dict[str, Any]]
+    promote_skill: bool
+    promotion_context: dict[str, str]
     tracker: "TaskProgressTracker"
     sessions: "PipelineSessionBundle"
 
@@ -445,7 +461,10 @@ class PipelineFinalizer:
 
     async def finalize(self, context: PipelineFinalizationContext) -> None:
         try:
-            from ..common.experience.skill_sedimenter import SkillSedimentationPayload
+            from ..common.experience.skill_sedimenter import (
+                SkillPromotionContext,
+                SkillSedimentationPayload,
+            )
 
             if context.state.get("error"):
                 context.summary["error"] = context.state.get("error")
@@ -469,20 +488,29 @@ class PipelineFinalizer:
             final_status = str(context.summary.get("execution_state") or "completed")
             await context.tracker.mark_done(final_status)
 
-            sedimented_skill_path = self._deps.try_sediment_skill(
-                state=context.state,
-                payload=SkillSedimentationPayload(
-                    list_url=context.list_url,
-                    task_description=context.task_description,
-                    fields=[field.model_dump() for field in context.fields],
-                    collection_config=dict(context.collection_config or {}),
-                    extraction_config=dict(context.extraction_config or {}),
-                    summary=dict(context.summary or {}),
-                    validation_failures=list(context.validation_failures or []),
-                    plan_knowledge=str(context.plan_knowledge or ""),
-                    status="validated",
-                ),
-            )
+            sedimented_skill_path = None
+            if context.promote_skill:
+                sedimented_skill_path = self._deps.try_sediment_skill(
+                    state=context.state,
+                    payload=SkillSedimentationPayload(
+                        list_url=context.list_url,
+                        task_description=context.task_description,
+                        fields=[field.model_dump() for field in context.fields],
+                        promotion_context=SkillPromotionContext(
+                            anchor_url=str(context.anchor_url or ""),
+                            page_state_signature=str(context.page_state_signature or ""),
+                            variant_label=str(context.variant_label or ""),
+                            context=dict(context.promotion_context or {}),
+                        ),
+                        collection_config=dict(context.collection_config or {}),
+                        extraction_config=dict(context.extraction_config or {}),
+                        extraction_evidence=list(context.state.get("extraction_evidence") or []),
+                        summary=dict(context.summary or {}),
+                        validation_failures=list(context.validation_failures or []),
+                        plan_knowledge=str(context.plan_knowledge or ""),
+                        status="validated",
+                    ),
+                )
             if sedimented_skill_path:
                 self._deps.cleanup_output_draft_skill(
                     list_url=context.list_url,

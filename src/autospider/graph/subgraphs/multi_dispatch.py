@@ -176,6 +176,7 @@ def _build_subtask_result(
         },
         "collection_config": dict(run_result.get("collection_config") or {}),
         "extraction_config": dict(run_result.get("extraction_config") or {}),
+        "extraction_evidence": list(run_result.get("extraction_evidence") or []),
         "validation_failures": list(run_result.get("validation_failures") or []),
         "journal_entries": list(run_result.get("journal_entries") or []),
     }

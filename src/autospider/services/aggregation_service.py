@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from ..common.experience import SkillSedimenter
 from ..domain.planning import TaskPlan
 from ..pipeline.aggregator import ResultAggregator
 from .service_utils import build_artifact
@@ -33,20 +34,21 @@ class AggregationService:
         effective_results = [
             result
             for result in subtask_results
-            if int(result.get("summary", {}).get("success_count", 0) or 0) > 0
+            if str(result.get("summary", {}).get("promotion_state") or "").strip().lower() == "reusable"
         ]
         if not effective_results:
             return None
 
-        from ..common.experience import SkillSedimenter
-
         sedimenter = SkillSedimenter()
+        fields = list(getattr(task_plan, "shared_fields", []) or [])
         return sedimenter.sediment_from_subtask_results(
             list_url=str(params.get("list_url") or task_plan.site_url or ""),
             task_description=str(params.get("task_description") or task_plan.original_request or ""),
-            fields=list(getattr(task_plan, "shared_fields", []) or []),
+            fields=fields,
             subtask_results=effective_results,
             plan_knowledge=plan_knowledge,
+            overwrite_existing=False,
+            source="aggregated_run",
         )
 
     def execute(

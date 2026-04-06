@@ -187,9 +187,93 @@ def _try_sediment_skill(
     )
 
 
+def _merge_extraction_configs(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged_fields: dict[str, dict[str, Any]] = {}
+    ordered_names: list[str] = []
+
+    def _consume(config: dict[str, Any]) -> None:
+        for raw_field in list(dict(config or {}).get("fields") or []):
+            if not isinstance(raw_field, dict):
+                continue
+            name = str(raw_field.get("name") or "").strip()
+            if not name:
+                continue
+            if name not in ordered_names:
+                ordered_names.append(name)
+            normalized = dict(raw_field)
+            normalized["xpath_fallbacks"] = [
+                str(item).strip()
+                for item in list(raw_field.get("xpath_fallbacks") or [])
+                if str(item).strip()
+            ]
+            current = merged_fields.get(name)
+            if current is None:
+                merged_fields[name] = normalized
+                continue
+
+            current_xpath = str(current.get("xpath") or "").strip()
+            incoming_xpath = str(normalized.get("xpath") or "").strip()
+            current_validated = bool(current.get("xpath_validated"))
+            incoming_validated = bool(normalized.get("xpath_validated"))
+            if incoming_validated and (not current_validated or incoming_xpath):
+                candidate = dict(normalized)
+            elif incoming_xpath and not current_xpath:
+                candidate = dict(normalized)
+            else:
+                candidate = dict(current)
+
+            fallback_pool = [
+                *list(current.get("xpath_fallbacks") or []),
+                *list(normalized.get("xpath_fallbacks") or []),
+            ]
+            if current_xpath and current_xpath != str(candidate.get("xpath") or "").strip():
+                fallback_pool.append(current_xpath)
+            if incoming_xpath and incoming_xpath != str(candidate.get("xpath") or "").strip():
+                fallback_pool.append(incoming_xpath)
+            seen: set[str] = {str(candidate.get("xpath") or "").strip()} if str(candidate.get("xpath") or "").strip() else set()
+            fallback_xpaths: list[str] = []
+            for item in fallback_pool:
+                text = str(item or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                fallback_xpaths.append(text)
+            candidate["xpath_fallbacks"] = fallback_xpaths[:5]
+            candidate["xpath_validated"] = current_validated or incoming_validated
+            merged_fields[name] = candidate
+
+    _consume(existing)
+    _consume(incoming)
+    return {"fields": [merged_fields[name] for name in ordered_names if name in merged_fields]}
+
+
 def _set_state_error(state: dict[str, object], error: str) -> None:
     if not state.get("error"):
         state["error"] = error
+
+
+def _record_extraction_evidence(
+    state: dict[str, object] | None,
+    *,
+    url: str,
+    extraction_config: dict[str, Any],
+    success: bool,
+) -> None:
+    if state is None:
+        return
+    evidence = list(state.get("extraction_evidence") or [])
+    evidence.append(
+        {
+            "url": url,
+            "success": bool(success),
+            "extraction_config": dict(extraction_config or {}),
+        }
+    )
+    state["extraction_evidence"] = evidence
+    state["extraction_config"] = _merge_extraction_configs(
+        dict(state.get("extraction_config") or {}),
+        dict(extraction_config or {}),
+    )
 
 
 def _resolve_run_redis_key_prefix(
@@ -231,6 +315,7 @@ async def run_pipeline(
     anchor_url: str | None = None,
     page_state_signature: str = "",
     variant_label: str | None = None,
+    promote_skill: bool = True,
 ) -> dict:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -385,6 +470,12 @@ async def run_pipeline(
                     plan_knowledge=runtime_context.plan_knowledge,
                     task_plan=dict(runtime_context.task_plan_snapshot or {}),
                     plan_journal=list(runtime_context.plan_journal or []),
+                    promote_skill=promote_skill,
+                    promotion_context={
+                        "variant_label": str(variant_label or "").strip(),
+                        "anchor_url": str(anchor_url or "").strip(),
+                        "page_state_signature": str(page_state_signature or "").strip(),
+                    },
                     tracker=runtime_context.tracker,
                     sessions=sessions,
                 )
@@ -394,6 +485,7 @@ async def run_pipeline(
 
     summary["collection_config"] = dict(runtime_context.state.get("collection_config") or {})
     summary["extraction_config"] = dict(runtime_context.state.get("extraction_config") or {})
+    summary["extraction_evidence"] = list(runtime_context.state.get("extraction_evidence") or [])
     summary["validation_failures"] = list(runtime_context.state.get("validation_failures") or [])
     return summary
 
@@ -436,8 +528,12 @@ async def _process_task(
             failure_reason=f"extractor_exception: {exc}",
         )
     else:
-        if state is not None:
-            state["extraction_config"] = dict(worker_result.extraction_config or {})
+        _record_extraction_evidence(
+            state,
+            url=url,
+            extraction_config=dict(worker_result.extraction_config or {}),
+            success=bool(record.success),
+        )
         item = {"url": record.url}
         for field_result in record.fields:
             item[field_result.field_name] = field_result.value

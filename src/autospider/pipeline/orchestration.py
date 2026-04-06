@@ -63,6 +63,7 @@ class PipelineRuntimeContext:
             "collection_config": {},
             "extraction_config": {},
             "validation_failures": [],
+            "extraction_evidence": [],
             "error": None,
         }
     )

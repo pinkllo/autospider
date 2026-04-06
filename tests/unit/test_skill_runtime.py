@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from autospider.common.experience import SkillRuntime, SkillSedimenter, SkillStore
+from autospider.common.experience.skill_sedimenter import SkillPromotionContext, SkillSedimentationPayload
 from autospider.common.experience.skill_store import parse_skill_document
 
 
@@ -264,39 +265,58 @@ def test_skill_sedimenter_outputs_structured_document_via_store_renderer():
     try:
         sedimenter = SkillSedimenter(skills_dir=base)
         saved = sedimenter.sediment_from_pipeline_result(
-            list_url="https://example.com/list",
-            task_description="采集标题",
-            fields=[{"name": "标题", "description": "文章标题"}],
-            collection_config={
-                "common_detail_xpath": "//article/a",
-                "jump_widget_xpath": {
-                    "input": "input.page",
-                    "button": "button.jump",
+            SkillSedimentationPayload(
+                list_url="https://example.com/list",
+                task_description="采集标题",
+                fields=[{"name": "标题", "description": "文章标题"}],
+                collection_config={
+                    "common_detail_xpath": "//article/a",
+                    "jump_widget_xpath": {
+                        "input": "input.page",
+                        "button": "button.jump",
+                    },
+                    "nav_steps": [
+                        {
+                            "action": "click",
+                            "target_xpath": "//button[@id='tab-all']",
+                            "description": "切换到全部",
+                        }
+                    ],
                 },
-                "nav_steps": [
+                extraction_config={
+                    "fields": [
+                        {
+                            "name": "标题",
+                            "xpath": "//h1",
+                            "xpath_fallbacks": ["//main/h1"],
+                            "xpath_validated": True,
+                            "data_type": "text",
+                        }
+                    ]
+                },
+                extraction_evidence=[
                     {
-                        "action": "click",
-                        "target_xpath": "//button[@id='tab-all']",
-                        "description": "切换到全部",
+                        "url": "https://example.com/detail/1",
+                        "success": True,
+                        "extraction_config": {
+                            "fields": [
+                                {
+                                    "name": "标题",
+                                    "xpath": "//main/article/h1",
+                                    "xpath_fallbacks": ["//h1"],
+                                    "xpath_validated": True,
+                                    "data_type": "text",
+                                }
+                            ]
+                        },
                     }
                 ],
-            },
-            extraction_config={
-                "fields": [
-                    {
-                        "name": "标题",
-                        "xpath": "//h1",
-                        "xpath_fallbacks": ["//main/h1"],
-                        "xpath_validated": True,
-                        "data_type": "text",
-                    }
-                ]
-            },
-            summary={"success_count": 3, "total_urls": 3},
-            validation_failures=[],
-            subtask_names=["公告", "结果"],
-            plan_knowledge="",
-            status="validated",
+                summary={"success_count": 3, "total_urls": 3},
+                validation_failures=[],
+                subtask_names=["公告", "结果"],
+                plan_knowledge="",
+                status="validated",
+            )
         )
 
         assert saved is not None
@@ -309,11 +329,56 @@ def test_skill_sedimenter_outputs_structured_document_via_store_renderer():
         assert parsed.rules.jump_input_selector == "input.page"
         assert parsed.rules.jump_button_selector == "button.jump"
         assert parsed.rules.subtask_names == ["公告", "结果"]
-        assert parsed.rules.fields["标题"].primary_xpath == "//h1"
-        assert parsed.rules.fields["标题"].fallback_xpaths == ["//main/h1"]
+        assert parsed.rules.fields["标题"].primary_xpath == "//main/article/h1"
+        assert parsed.rules.fields["标题"].fallback_xpaths == ["//h1"]
         assert parsed.rules.fields["标题"].validated is True
         assert parsed.rules.success_rate_text == "100% (3/3)"
         assert "## 子任务" in loaded
         assert "## 站点特征与经验" in loaded
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_skill_sedimenter_uses_context_for_variant_sections():
+    base = _make_test_dir()
+    try:
+        sedimenter = SkillSedimenter(skills_dir=base)
+        candidate = sedimenter.build_candidate_from_payload(
+            SkillSedimentationPayload(
+                list_url="https://example.com/list",
+                task_description="采集标题",
+                fields=[{"name": "标题", "description": "文章标题"}],
+                promotion_context=SkillPromotionContext(
+                    anchor_url="https://example.com/category",
+                    page_state_signature="state-a",
+                    variant_label="",
+                    context={"category_name": "公告栏目"},
+                ),
+                collection_config={"common_detail_xpath": "//article/a"},
+                extraction_config={"fields": [{"name": "标题", "xpath": "//h1", "xpath_validated": True}]},
+                extraction_evidence=[
+                    {
+                        "url": "https://example.com/detail/1",
+                        "success": True,
+                        "extraction_config": {"fields": [{"name": "标题", "xpath": "//main/h1", "xpath_validated": True}]},
+                    }
+                ],
+                summary={"success_count": 1, "total_urls": 1, "success_rate": 1.0},
+                validation_failures=[],
+                status="validated",
+            )
+        )
+
+        assert candidate is not None
+        assert candidate.context == {"category_name": "公告栏目"}
+        document = sedimenter._compile_document(
+            domain="example.com",
+            list_url="https://example.com/list",
+            task_description="采集标题",
+            fields=[{"name": "标题", "description": "文章标题"}],
+            candidates=[candidate],
+        )
+        assert document.rules.variants[0].label == "公告栏目"
+        assert document.rules.variants[0].context == {"category_name": "公告栏目"}
     finally:
         shutil.rmtree(base, ignore_errors=True)
