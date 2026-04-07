@@ -39,6 +39,9 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+URL_RULE_MIN_PRECISION = 0.8
+URL_RULE_MIN_RECALL = 0.8
+URL_RULE_MIN_SAMPLE = 3
 
 
 class URLCollector(BaseCollector):
@@ -354,15 +357,24 @@ class URLCollector(BaseCollector):
         for page_index in range(validation_pages):
             llm_urls, _ = await self._collect_current_page_with_llm()
             xpath_urls = await self._preview_urls_with_xpath()
-
-            llm_set = {str(url or "").strip() for url in llm_urls if str(url or "").strip()}
-            xpath_set = {str(url or "").strip() for url in xpath_urls if str(url or "").strip()}
-            if not llm_set or llm_set != xpath_set:
+            llm_set = self._normalize_url_set(llm_urls)
+            xpath_set = self._normalize_url_set(xpath_urls)
+            if len(llm_set) < URL_RULE_MIN_SAMPLE:
                 logger.info(
-                    "[URLCollector] 验证失败: page=%s, llm=%s, xpath=%s",
+                    "[URLCollector] XPath 验证样本不足: page=%s, sample=%s, reason=insufficient_validation_sample",
+                    page_index + 1,
+                    len(llm_set),
+                )
+                return False
+            precision, recall = self._measure_url_rule_quality(llm_set=llm_set, xpath_set=xpath_set)
+            if precision < URL_RULE_MIN_PRECISION or recall < URL_RULE_MIN_RECALL:
+                logger.info(
+                    "[URLCollector] 验证失败: page=%s, llm=%s, xpath=%s, precision=%.3f, recall=%.3f",
                     page_index + 1,
                     len(llm_set),
                     len(xpath_set),
+                    precision,
+                    recall,
                 )
                 return False
 
@@ -373,6 +385,22 @@ class URLCollector(BaseCollector):
                 return False
 
         return True
+
+    def _normalize_url_set(self, urls: list[str]) -> set[str]:
+        normalized: set[str] = set()
+        for raw in urls:
+            value = str(raw or "").strip()
+            if value:
+                normalized.add(value)
+        return normalized
+
+    def _measure_url_rule_quality(self, *, llm_set: set[str], xpath_set: set[str]) -> tuple[float, float]:
+        if not llm_set or not xpath_set:
+            return 0.0, 0.0
+        overlap = len(llm_set & xpath_set)
+        precision = overlap / len(xpath_set) if xpath_set else 0.0
+        recall = overlap / len(llm_set) if llm_set else 0.0
+        return precision, recall
 
     async def _advance_to_next_page(self) -> bool:
         delay = self.rate_controller.get_delay()

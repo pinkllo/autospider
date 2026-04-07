@@ -21,7 +21,7 @@ from .skill_store import SkillMetadata, SkillStore
 logger = get_logger(__name__)
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("skill_selector.yaml")
-_MAX_SELECTED_SKILLS = 1
+_MAX_SELECTED_SKILLS = 3
 
 
 @dataclass(frozen=True)

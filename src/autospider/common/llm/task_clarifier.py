@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ..config import config
+from ..llm_contracts import validate_task_clarifier_payload
 from ..protocol import parse_json_dict_from_llm
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
@@ -95,7 +96,13 @@ class TaskClarifier:
             ]
         )
         # 解析 LLM 返回的 JSON 格式内容
-        payload = parse_json_dict_from_llm(str(response.content)) or {}
+        raw_payload = parse_json_dict_from_llm(str(response.content)) or {}
+        payload, validation_errors = validate_task_clarifier_payload(raw_payload)
+        if raw_payload and validation_errors:
+            logger.warning(
+                "[TaskClarifier] LLM payload validation failed: %s",
+                "; ".join(validation_errors),
+            )
         result = self._normalize_result(payload, history)
         append_llm_trace(
             component="task_clarifier",
@@ -116,7 +123,9 @@ class TaskClarifier:
                 },
                 "output": {
                     "raw_response": str(response.content),
-                    "parsed_payload": payload,
+                    "parsed_payload": raw_payload,
+                    "validated_payload": payload,
+                    "payload_validation_errors": validation_errors,
                     "normalized_result": {
                         "status": result.status,
                         "intent": result.intent,

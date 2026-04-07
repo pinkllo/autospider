@@ -42,6 +42,10 @@ from .xpath_helpers import xpath_stability_score
 logger = get_logger(__name__)
 from .field_decider import FieldDecider
 
+
+class FieldExtractionSystemError(RuntimeError):
+    """Raised when detail-page extraction fails due to system/runtime issues."""
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
@@ -209,6 +213,7 @@ class FieldExtractor:
             import traceback
 
             traceback.print_exc()
+            raise FieldExtractionSystemError(str(e)) from e
 
         return record
 

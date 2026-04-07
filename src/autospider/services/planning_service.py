@@ -32,6 +32,8 @@ class PlanningService:
                 "headless": request.headless,
                 "guard_intervention_mode": request.guard_intervention_mode,
                 "guard_thread_id": request.guard_thread_id,
+                "budget_key": request.execution_id or request.guard_thread_id,
+                "global_browser_budget": request.global_browser_budget,
             }
         else:
             session_options = self._session_options_builder(
@@ -88,6 +90,8 @@ class PlanningService:
             "task_plan": plan,
             "plan_knowledge": plan_knowledge,
             "summary": {"total_subtasks": len(plan.subtasks)},
+            "planner_status": str(getattr(planner, "planner_status", "success") or "success"),
+            "terminal_reason": str(getattr(planner, "terminal_reason", "") or ""),
             "selected_skills": list(planner.selected_skills or []),
             "result": {"task_plan": plan},
         }

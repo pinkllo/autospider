@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from ..contracts import ExecutionRequest, PipelineRunSummary
+from ..contracts import ExecutionContext, ExecutionRequest, PipelineRunSummary
 from ..pipeline import run_pipeline as default_run_pipeline
-from .service_utils import build_artifact, build_field_definitions
+from .service_utils import build_artifact, build_execution_context, build_field_definitions
 
 
 class PipelineExecutionService:
@@ -16,38 +16,20 @@ class PipelineExecutionService:
     def __init__(
         self,
         *,
-        run_pipeline: Callable[..., Awaitable[dict[str, Any]]] = default_run_pipeline,
+        run_pipeline: Callable[[ExecutionContext], Awaitable[dict[str, Any]]] = default_run_pipeline,
         field_factory: Callable[[list[dict[str, Any]]], list[Any]] = build_field_definitions,
         artifact_builder: Callable[[str, str | Path], dict[str, str]] = build_artifact,
+        context_builder: Callable[..., ExecutionContext] = build_execution_context,
     ) -> None:
         self._run_pipeline = run_pipeline
         self._field_factory = field_factory
         self._artifact_builder = artifact_builder
+        self._context_builder = context_builder
 
     async def execute(self, *, request: ExecutionRequest) -> dict[str, Any]:
-        result = await self._run_pipeline(
-            list_url=request.list_url,
-            task_description=request.task_description,
-            fields=self._field_factory(list(request.fields or [])),
-            output_dir=request.output_dir,
-            headless=request.headless,
-            explore_count=request.field_explore_count,
-            validate_count=request.field_validate_count,
-            consumer_concurrency=request.consumer_concurrency,
-            max_pages=request.max_pages,
-            target_url_count=request.target_url_count,
-            pipeline_mode=request.pipeline_mode,
-            guard_intervention_mode=request.guard_intervention_mode,
-            guard_thread_id=request.guard_thread_id,
-            selected_skills=list(request.selected_skills or []),
-            plan_knowledge=request.plan_knowledge,
-            task_plan_snapshot=dict(request.task_plan_snapshot or {}),
-            plan_journal=list(request.plan_journal or []),
-            initial_nav_steps=list(request.initial_nav_steps or []),
-            anchor_url=request.anchor_url,
-            page_state_signature=request.page_state_signature,
-            variant_label=request.variant_label,
-        )
+        field_definitions = self._field_factory(list(request.fields or []))
+        context = self._context_builder(request, fields=field_definitions)
+        result = await self._run_pipeline(context)
 
         summary_file = Path(request.output_dir) / "pipeline_summary.json"
         pipeline_result = PipelineRunSummary.from_raw(result, summary_file=str(summary_file))
@@ -67,9 +49,11 @@ class PipelineExecutionService:
                 "validation_failure_count": pipeline_result.validation_failure_count,
                 "execution_state": pipeline_result.execution_state,
                 "outcome_state": pipeline_result.outcome_state,
+                "terminal_reason": pipeline_result.terminal_reason,
                 "promotion_state": pipeline_result.promotion_state.value,
                 "execution_id": pipeline_result.execution_id,
                 "items_file": pipeline_result.items_file,
+                "durability_state": pipeline_result.durability_state.value,
                 "durably_persisted": pipeline_result.durably_persisted,
             },
             "artifacts": artifacts,

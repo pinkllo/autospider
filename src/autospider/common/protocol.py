@@ -6,6 +6,10 @@ import json
 import re
 from typing import Any
 
+from .llm_contracts import validate_protocol_message_payload
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # 文本清理工具
@@ -97,6 +101,19 @@ def _coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
 def coerce_bool(value: Any | None, default: bool | None = None) -> bool | None:
     """对外暴露的布尔值规范化工具。"""
     return _coerce_bool(value, default)
+
+
+def _infer_action_from_args(args: dict[str, Any]) -> str:
+    """Infer action from args for compatibility with legacy prompt outputs."""
+    if args.get("text") and args.get("target_text"):
+        return "type"
+    if args.get("scroll_delta") is not None:
+        return "scroll"
+    if args.get("url"):
+        return "navigate"
+    if args.get("target_text"):
+        return "click"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -303,15 +320,19 @@ def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
                 break
 
     if not action:
-        return None
+        action = _infer_action_from_args(args)
 
     action = _ACTION_ALIASES.get(action, action)
     if not action:
         return None
 
-    message: dict[str, Any] = {"action": action, "args": args}
+    validated, errors = validate_protocol_message_payload(
+        action=action,
+        args=args,
+        thinking=_extract_response_thinking(payload),
+    )
+    if validated is not None:
+        return validated
 
-    if extracted := _extract_response_thinking(payload):
-        message["thinking"] = extracted
-
-    return message
+    logger.debug("[Protocol] invalid message action=%s errors=%s payload=%s", action, errors, data)
+    return None

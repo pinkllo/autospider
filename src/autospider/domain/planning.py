@@ -14,7 +14,9 @@ class SubTaskStatus(str, Enum):
     RUNNING = "running"
     EXPANDED = "expanded"
     COMPLETED = "completed"
-    FAILED = "failed"
+    NO_DATA = "no_data"
+    BUSINESS_FAILURE = "business_failure"
+    SYSTEM_FAILURE = "system_failure"
     SKIPPED = "skipped"
 
 

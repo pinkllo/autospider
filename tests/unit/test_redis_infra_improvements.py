@@ -4,7 +4,9 @@ import pytest
 
 from autospider.common.config import config
 from autospider.common.storage import redis_pool
+from autospider.contracts import ExecutionRequest, PipelineMode
 from autospider.pipeline import runner as pipeline_runner
+from autospider.services.service_utils import build_execution_context
 
 
 class _FakePage:
@@ -63,14 +65,19 @@ async def test_run_pipeline_uses_run_scoped_redis_prefix(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
     monkeypatch.setattr(config.pipeline, "mode", "redis", raising=False)
     monkeypatch.setattr(config.redis, "key_prefix", "autospider:urls", raising=False)
-
-    result = await pipeline_runner.run_pipeline(
-        list_url="https://example.com/list",
-        task_description="采集公告",
+    context = build_execution_context(
+        ExecutionRequest(
+            list_url="https://example.com/list",
+            task_description="采集公告",
+            request="采集公告",
+            fields=[],
+            output_dir=str(tmp_path),
+            pipeline_mode=PipelineMode.REDIS,
+        ),
         fields=[],
-        output_dir=str(tmp_path),
-        pipeline_mode="redis",
     )
+
+    result = await pipeline_runner.run_pipeline(context)
 
     execution_id = result["execution_id"]
     kwargs = captured["create_url_channel_kwargs"]

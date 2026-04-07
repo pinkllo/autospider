@@ -97,9 +97,10 @@ class GraphRunner:
         snapshot_values = dict(getattr(snapshot, "values", {}) or {})
         snapshot_config = dict(getattr(snapshot, "config", {}) or {})
 
-        error_code = str(final_state.get("error_code") or snapshot_values.get("error_code") or "")
+        typed_error = dict(final_state.get("error") or snapshot_values.get("error") or {})
+        error_code = str(typed_error.get("code") or final_state.get("error_code") or snapshot_values.get("error_code") or "")
         error_message = str(
-            final_state.get("error_message") or snapshot_values.get("error_message") or ""
+            typed_error.get("message") or final_state.get("error_message") or snapshot_values.get("error_message") or ""
         )
         error = GraphError(code=error_code, message=error_message) if error_code else None
 
@@ -112,7 +113,8 @@ class GraphRunner:
         elif status not in {"success", "partial_success", "failed"}:
             status = "failed" if error else "success"
 
-        summary = dict(final_state.get("summary") or snapshot_values.get("summary") or {})
+        result_state = dict(final_state.get("result") or snapshot_values.get("result") or {})
+        summary = dict(result_state.get("summary") or final_state.get("summary") or snapshot_values.get("summary") or {})
         if thread_id:
             summary.setdefault("thread_id", thread_id)
 
@@ -131,9 +133,9 @@ class GraphRunner:
             status=status,  # type: ignore[arg-type]
             entry_mode=entry_mode,  # type: ignore[arg-type]
             summary=summary,
-            artifacts=list(final_state.get("artifacts") or snapshot_values.get("artifacts") or []),
+            artifacts=list(result_state.get("artifacts") or final_state.get("artifacts") or snapshot_values.get("artifacts") or []),
             error=error,
-            data=dict(final_state.get("result_context") or snapshot_values.get("result_context") or {}),
+            data=dict(result_state.get("data") or final_state.get("result_context") or snapshot_values.get("result_context") or {}),
             thread_id=thread_id,
             checkpoint_id=checkpoint_id,
             next_nodes=[str(node) for node in list(getattr(snapshot, "next", ()) or [])],
@@ -176,21 +178,28 @@ class GraphRunner:
     async def invoke(self, graph_input: GraphInput) -> GraphResult:
         """异步执行主图。"""
         initial_state = {
-            "request_context": {
-                "entry_mode": graph_input.entry_mode,
-                "thread_id": graph_input.thread_id,
-                "request_id": graph_input.request_id,
-                "cli_args": dict(graph_input.cli_args),
-            },
-            "chat_context": {},
-            "plan_context": {},
-            "dispatch_context": {},
-            "result_context": {},
             "entry_mode": graph_input.entry_mode,
             "thread_id": graph_input.thread_id,
             "request_id": graph_input.request_id,
             "invoked_at": graph_input.invoked_at,
             "cli_args": dict(graph_input.cli_args),
+            "conversation": {
+                "status": "",
+                "flow_state": "",
+                "review_state": "",
+                "normalized_params": {},
+                "clarified_task": None,
+                "chat_history": [],
+                "chat_turn_count": 0,
+                "chat_max_turns": 0,
+                "pending_question": "",
+                "matched_skills": [],
+                "selected_skills": [],
+            },
+            "planning": {"status": "", "task_plan": None, "plan_knowledge": "", "summary": {}},
+            "dispatch": {"status": "", "task_plan": None, "plan_knowledge": "", "dispatch_result": {}, "summary": {}},
+            "result": {"status": "", "summary": {}, "data": {}, "artifacts": []},
+            "error": None,
             "normalized_params": {},
             "clarified_task": None,
             "chat_history": [],
@@ -199,17 +208,6 @@ class GraphRunner:
             "chat_pending_question": "",
             "chat_flow_state": "",
             "chat_review_state": "",
-            "collection_config": {},
-            "collection_progress": {},
-            "collected_urls": [],
-            "fields_config": [],
-            "xpath_result": None,
-            "pipeline_result": {},
-            "dispatch_queue": [],
-            "current_batch": [],
-            "spawned_subtasks": [],
-            "subtask_results": [],
-            "aggregate_result": {},
             "artifacts": [],
             "summary": {},
             "status": "",

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from ..common.browser.intervention import BrowserInterventionRequired
-from ..common.channel.base import URLChannel
+from ..common.channel.base import URLChannel, URLTask
 from ..common.config import config
 from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
@@ -57,7 +57,9 @@ class PipelineRuntimeContext:
     plan_journal: list[dict[str, Any]] = field(default_factory=list)
     initial_nav_steps: list[dict[str, Any]] = field(default_factory=list)
     url_only_mode: bool = False
-    producer_done: asyncio.Event = field(default_factory=asyncio.Event)
+    execution_id: str = ""
+    resume_mode: str = "fresh"
+    global_browser_budget: int | None = None
     state: dict[str, object] = field(
         default_factory=lambda: {
             "collection_config": {},
@@ -65,6 +67,7 @@ class PipelineRuntimeContext:
             "validation_failures": [],
             "extraction_evidence": [],
             "error": None,
+            "terminal_reason": "",
         }
     )
 
@@ -124,13 +127,14 @@ class ProducerService:
                 "task_description": self.context.task_description,
             }
             await self.context.tracker.set_total(len(result.collected_urls))
+            await self.context.channel.seal()
         except BrowserInterventionRequired:
             raise
         except Exception as exc:  # noqa: BLE001
             self.deps.set_state_error(self.context.state, f"producer_error: {exc}")
+            self.context.state["terminal_reason"] = "producer_error"
+            await self.context.channel.close_with_error(f"producer_error: {exc}")
             logger.info("[Pipeline] Producer failed: %s", exc)
-        finally:
-            self.context.producer_done.set()
 
 
 class ConsumerPool:
@@ -159,7 +163,7 @@ class ConsumerPool:
                 timeout_s=config.pipeline.fetch_timeout_s,
             )
             if not batch:
-                if self.context.producer_done.is_set():
+                if await self.context.channel.is_drained():
                     break
                 continue
             for task in batch:
@@ -177,6 +181,8 @@ class ConsumerPool:
             headless=self.context.headless,
             guard_intervention_mode=self.context.guard_intervention_mode,
             guard_thread_id=self.context.guard_thread_id,
+            budget_key=self.context.execution_id,
+            global_browser_budget=self.context.global_browser_budget,
         )
         await session.start()
         extractor = self.deps.detail_page_worker_cls(
@@ -193,6 +199,7 @@ class ConsumerPool:
                 await self.deps.process_task(
                     extractor=extractor,
                     task=task,
+                    execution_id=self.context.execution_id,
                     run_records=self.context.run_records,
                     summary_lock=summary_lock,
                     state=self.context.state,

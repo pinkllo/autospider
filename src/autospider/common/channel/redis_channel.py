@@ -50,6 +50,8 @@ class RedisURLChannel(URLChannel):
         self._recover_task: asyncio.Task | None = None # 用于自动检查并接管 stale/超时未处理的遗留信息的后台定时任务
         self._retry_buffer: deque[tuple[str, str, dict]] = deque()
         self._background_error: RuntimeError | None = None
+        self._sealed = False
+        self._error_reason = ""
 
     def _raise_background_error(self) -> None:
         if self._background_error is not None:
@@ -119,6 +121,8 @@ class RedisURLChannel(URLChannel):
             url: 被处理的目标 URL 字符串
         """
         self._raise_background_error()
+        if self._sealed:
+            raise RuntimeError("channel_sealed")
         await self._ensure_connected()
         # 使用 manager 投递任务到流的队尾
         await self.manager.push_task(url)
@@ -199,3 +203,18 @@ class RedisURLChannel(URLChannel):
                 pass
         # 关闭底层 Redis 连接
         await self.manager.close()
+
+    async def seal(self) -> None:
+        self._sealed = True
+
+    async def is_drained(self) -> bool:
+        if not self._sealed:
+            return False
+        self._raise_background_error()
+        await self._ensure_connected()
+        pending_count = await self.manager.get_pending_count(self.consumer_name)
+        return pending_count <= 0 and not self._retry_buffer
+
+    async def close_with_error(self, reason: str) -> None:
+        self._error_reason = str(reason or "")
+        self._sealed = True

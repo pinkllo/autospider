@@ -20,6 +20,16 @@ if TYPE_CHECKING:
     from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
+EXECUTION_STATE_COMPLETED = "completed"
+EXECUTION_STATE_FAILED = "failed"
+EXECUTION_STATE_INTERRUPTED = "interrupted"
+OUTCOME_STATE_SUCCESS = "success"
+OUTCOME_STATE_PARTIAL_SUCCESS = "partial_success"
+OUTCOME_STATE_NO_DATA = "no_data"
+OUTCOME_STATE_SYSTEM_FAILURE = "system_failure"
+DURABILITY_STATE_STAGED = "staged"
+DURABILITY_STATE_DURABLE = "durable"
+DURABILITY_STATE_FAILED_COMMIT = "failed_commit"
 
 
 def _is_valid_xpath(xpath: object) -> bool:
@@ -110,26 +120,30 @@ def classify_pipeline_result(
     success_count: int,
     state_error: object,
     validation_failures: list[dict],
+    terminal_reason: str = "",
 ) -> dict[str, object]:
     failed_count = max(total_urls - success_count, 0)
     success_rate = (success_count / total_urls) if total_urls > 0 else 0.0
     validation_failure_count = len(validation_failures)
-    execution_state = "failed" if state_error else "completed"
+    normalized_reason = str(terminal_reason or "").strip()
 
-    if success_count <= 0 or total_urls <= 0:
-        outcome_state = "failed"
-    elif not state_error and success_rate > 0.7 and validation_failure_count == 0:
-        outcome_state = "success"
+    if state_error:
+        execution_state = EXECUTION_STATE_FAILED
+        outcome_state = OUTCOME_STATE_SYSTEM_FAILURE
+        normalized_reason = normalized_reason or str(state_error)
+    elif total_urls <= 0:
+        execution_state = EXECUTION_STATE_COMPLETED
+        outcome_state = OUTCOME_STATE_NO_DATA
+        normalized_reason = normalized_reason or "no_data_collected"
+    elif failed_count <= 0 and validation_failure_count == 0:
+        execution_state = EXECUTION_STATE_COMPLETED
+        outcome_state = OUTCOME_STATE_SUCCESS
     else:
-        outcome_state = "partial_success"
+        execution_state = EXECUTION_STATE_COMPLETED
+        outcome_state = OUTCOME_STATE_PARTIAL_SUCCESS
+        normalized_reason = normalized_reason or "partial_data_available"
 
-    if (
-        total_urls > 0
-        and success_count > 0
-        and not state_error
-        and success_rate > 0.7
-        and validation_failure_count == 0
-    ):
+    if outcome_state == OUTCOME_STATE_SUCCESS:
         promotion_state = "reusable"
     elif success_count > 0:
         promotion_state = "diagnostic_only"
@@ -139,6 +153,7 @@ def classify_pipeline_result(
     return {
         "execution_state": execution_state,
         "outcome_state": outcome_state,
+        "terminal_reason": normalized_reason,
         "promotion_state": promotion_state,
         "success_rate": round(success_rate, 4),
         "failed_count": failed_count,
@@ -249,16 +264,21 @@ def build_run_record(
     item: dict,
     success: bool,
     failure_reason: str,
-    durably_persisted: bool = False,
+    terminal_reason: str = "",
+    durability_state: str = DURABILITY_STATE_STAGED,
     record_source: str = "runtime",
+    claim_state: str = "pending",
 ) -> dict:
     return {
         "url": url,
         "success": bool(success),
         "failure_reason": str(failure_reason or ""),
+        "terminal_reason": str(terminal_reason or failure_reason or ""),
         "item": dict(item),
-        "durably_persisted": bool(durably_persisted),
+        "durability_state": str(durability_state or DURABILITY_STATE_STAGED),
+        "durably_persisted": str(durability_state or DURABILITY_STATE_STAGED) == DURABILITY_STATE_DURABLE,
         "record_source": str(record_source or "runtime"),
+        "claim_state": str(claim_state or "pending"),
     }
 
 
@@ -282,8 +302,13 @@ def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
             item=payload,
             success=bool(item.get("success", False)),
             failure_reason=str(item.get("failure_reason") or ""),
-            durably_persisted=True,
+            terminal_reason=str(item.get("terminal_reason") or item.get("failure_reason") or ""),
+            durability_state=str(item.get("durability_state") or DURABILITY_STATE_DURABLE),
             record_source="db",
+            claim_state=str(
+                item.get("claim_state")
+                or ("committed" if bool(item.get("success", False)) else "failed")
+            ),
         )
     return records
 
@@ -291,9 +316,30 @@ def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
 def build_record_summary(records: dict[str, dict]) -> dict[str, int]:
     total_urls = len(records)
     success_count = sum(1 for record in records.values() if bool(record.get("success")))
+    failed_count = max(total_urls - success_count, 0)
     return {
         "total_urls": total_urls,
         "success_count": success_count,
+        "failed_count": failed_count,
+    }
+
+
+def _is_durable_record(record: dict[str, Any]) -> bool:
+    return str(record.get("durability_state") or "").strip().lower() == DURABILITY_STATE_DURABLE
+
+
+def _is_exportable_record(record: dict[str, Any]) -> bool:
+    return bool(record.get("success")) and _is_durable_record(record)
+
+
+def normalize_record_summary(summary: dict[str, Any]) -> dict[str, int]:
+    total_urls = int(summary.get("total_urls", 0) or 0)
+    success_count = int(summary.get("success_count", 0) or 0)
+    failed_count = int(summary.get("failed_count", max(total_urls - success_count, 0)) or 0)
+    return {
+        "total_urls": total_urls,
+        "success_count": success_count,
+        "failed_count": max(failed_count, 0),
     }
 
 
@@ -301,6 +347,7 @@ def commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
     payload_lines = [
         json.dumps(record["item"], ensure_ascii=False)
         for _, record in sorted(records.items(), key=lambda pair: pair[0])
+        if _is_exportable_record(record)
     ]
     payload = "\n".join(payload_lines)
     if payload:
@@ -309,11 +356,11 @@ def commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
 
 
 async def finalize_task_from_record(task: Any, record: dict) -> None:
-    if bool(record.get("success")) and bool(record.get("durably_persisted")):
+    if bool(record.get("success")) and str(record.get("durability_state") or "") == DURABILITY_STATE_DURABLE:
         await task.ack_task()
         return
     if bool(record.get("success")):
-        await task.fail_task("result_not_persisted")
+        await task.fail_task("result_not_durable")
         return
     reason = str(record.get("failure_reason") or "extraction_failed")
     await task.fail_task(reason)
@@ -326,6 +373,10 @@ def write_summary(path: Path, summary: dict) -> None:
         identity_keys=("run_id", "page_state_signature", "list_url", "task_description"),
         volatile_keys={"created_at", "updated_at", "timestamp", "last_updated"},
     )
+
+
+def promote_staged_output(staging_path: Path, final_path: Path) -> None:
+    staging_path.replace(final_path)
 
 
 def _coerce_field_names(fields: list["FieldDefinition"]) -> list[str]:
@@ -397,6 +448,8 @@ class PipelineFinalizationContext:
     output_path: Path
     items_path: Path
     summary_path: Path
+    staging_items_path: Path
+    staging_summary_path: Path
     committed_records: dict[str, dict[str, Any]]
     summary: dict[str, Any]
     state: dict[str, object]
@@ -417,6 +470,7 @@ class PipelineFinalizationDependencies:
     persist_pipeline_run: Callable[["PipelineFinalizationContext", dict[str, dict]], None]
     commit_items_file: Callable[[Path, dict[str, dict]], None]
     write_summary: Callable[[Path, dict], None]
+    promote_output: Callable[[Path, Path], None]
 
 
 class PipelineFinalizer:
@@ -429,24 +483,46 @@ class PipelineFinalizer:
                 context.summary["error"] = context.state.get("error")
 
             committed_records = dict(context.committed_records)
-            committed_summary = self._deps.build_record_summary(committed_records)
+            committed_summary = normalize_record_summary(
+                self._deps.build_record_summary(committed_records)
+            )
+            all_records_durable = all(
+                _is_durable_record(record)
+                for record in committed_records.values()
+            )
             context.summary["total_urls"] = committed_summary["total_urls"]
             context.summary["success_count"] = committed_summary["success_count"]
+            context.summary["failed_count"] = committed_summary["failed_count"]
+            context.summary["durability_state"] = (
+                DURABILITY_STATE_DURABLE if all_records_durable else DURABILITY_STATE_STAGED
+            )
+            context.summary["durably_persisted"] = all_records_durable
             context.summary.update(
                 self._deps.classify_pipeline_result(
                     total_urls=context.summary["total_urls"],
                     success_count=context.summary["success_count"],
                     state_error=context.state.get("error"),
                     validation_failures=context.validation_failures,
+                    terminal_reason=str(
+                        context.summary.get("terminal_reason")
+                        or context.state.get("terminal_reason")
+                        or ""
+                    ),
                 )
             )
+            try:
+                self._deps.commit_items_file(context.staging_items_path, committed_records)
+                self._deps.write_summary(context.staging_summary_path, context.summary)
+                self._deps.promote_output(context.staging_items_path, context.items_path)
+                self._deps.promote_output(context.staging_summary_path, context.summary_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[Pipeline] export failed after durable commit: %s", exc)
+                context.summary["error"] = str(exc)
+                context.summary["export_state"] = "failed"
+                context.summary["terminal_reason"] = str(
+                    context.summary.get("terminal_reason") or "export_failed"
+                )
             self._deps.persist_pipeline_run(context, committed_records)
-            for record in committed_records.values():
-                record["durably_persisted"] = True
-                record["record_source"] = "db"
-            context.summary["durably_persisted"] = True
-            self._deps.commit_items_file(context.items_path, committed_records)
-            self._deps.write_summary(context.summary_path, context.summary)
 
             final_status = str(context.summary.get("execution_state") or "completed")
             await context.tracker.mark_done(final_status)

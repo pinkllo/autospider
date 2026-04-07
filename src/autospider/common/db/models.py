@@ -165,7 +165,7 @@ class TaskRun(Base):
 
 
 class TaskRunItem(Base):
-    """单次运行中每个 URL 的最终结果。"""
+    """单次运行中每个 URL 的权威执行事实。"""
 
     __tablename__ = "task_run_items"
 
@@ -177,15 +177,30 @@ class TaskRunItem(Base):
         index=True,
     )
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    claim_state: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    durability_state: Mapped[str] = mapped_column(String(32), default="staged", nullable=False)
+    terminal_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    error_kind: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     failure_reason: Mapped[str] = mapped_column(Text, default="")
     item_data: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    durably_committed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        onupdate=datetime.now,
+    )
 
     task_run: Mapped[TaskRun] = relationship(back_populates="items")
 
     __table_args__ = (
         Index("ix_task_run_items_run_url", "task_run_id", "url", unique=True),
+        Index("ix_task_run_items_claim_state", "task_run_id", "claim_state"),
     )
 
 

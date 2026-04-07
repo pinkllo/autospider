@@ -117,6 +117,8 @@ class TaskPlanner(
             user_request=user_request,
             output_dir=output_dir,
         )
+        self.planner_status = "success"
+        self.terminal_reason = ""
 
         if use_main_model:
             api_key = config.llm.api_key
@@ -170,6 +172,8 @@ class TaskPlanner(
         )
         if not analysis:
             logger.warning("[Planner] 入口页面分析失败")
+            self.planner_status = "error"
+            self.terminal_reason = "planner_error"
             return []
 
         page_type = str(analysis.get("page_type", "category")).strip().lower()
@@ -242,6 +246,8 @@ class TaskPlanner(
 
         raw_children = list(analysis.get("subtasks") or [])
         if not raw_children:
+            self.planner_status = "no_subtasks"
+            self.terminal_reason = "planner_no_subtasks"
             self._record_planning_dead_end(
                 entry_index=entry_index,
                 node_id=node_id,
@@ -258,6 +264,8 @@ class TaskPlanner(
             parent_context=current_context,
         )
         if not child_variants:
+            self.planner_status = "no_subtasks"
+            self.terminal_reason = "planner_no_subtasks"
             self._record_planning_dead_end(
                 entry_index=entry_index,
                 node_id=node_id,
@@ -274,6 +282,8 @@ class TaskPlanner(
             mode=SubTaskMode.EXPAND,
         )
         if not subtasks:
+            self.planner_status = "no_subtasks"
+            self.terminal_reason = "planner_no_subtasks"
             self._record_planning_dead_end(
                 entry_index=entry_index,
                 node_id=node_id,

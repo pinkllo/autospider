@@ -40,6 +40,8 @@ class CollectionService:
             "headless": params.get("headless"),
             "guard_intervention_mode": "interrupt",
             "guard_thread_id": thread_id,
+            "budget_key": str(params.get("execution_id") or thread_id or ""),
+            "global_browser_budget": params.get("global_browser_budget"),
         }
 
     @staticmethod

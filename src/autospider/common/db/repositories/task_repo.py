@@ -18,6 +18,12 @@ from autospider.common.db.models import (
 )
 
 
+FINAL_CLAIM_STATES = {"acked", "failed"}
+DURABLE_STATE = "durable"
+STAGED_STATE = "staged"
+ELIGIBLE_AGGREGATION_CLAIM_STATES = {"committed", "acked"}
+
+
 def _build_registry_id(
     normalized_url: str,
     task_description: str,
@@ -72,14 +78,12 @@ class TaskRepository:
         self._session = session
 
     def find_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
-        """按归一化 URL 查询可复用历史任务。"""
         if not normalized_url:
             return []
         records = self._query_tasks_by_url(normalized_url)
         return self._build_registry_rows(records)
 
     def save_run(self, payload: TaskRunPayload) -> TaskRun:
-        """保存单次运行快照及其明细。"""
         now = datetime.now()
         task = self._upsert_task(
             normalized_url=payload.normalized_url,
@@ -97,23 +101,17 @@ class TaskRepository:
             run = self._create_run(task=task, execution_id=execution_id, payload=payload, now=now)
         else:
             self._update_run(run=run, task=task, payload=payload, now=now)
-        self._replace_run_items(run_id=run.id, records=payload.committed_records, now=now)
-        self._replace_validation_failures(
-            run_id=run.id,
-            failures=payload.validation_failures,
-            now=now,
-        )
+        self._upsert_committed_records(run_id=run.id, records=payload.committed_records, now=now)
+        self._replace_validation_failures(run_id=run.id, failures=payload.validation_failures, now=now)
         self._session.flush()
         return run
 
     def find_by_execution_id(self, execution_id: str) -> TaskRun | None:
-        """按 execution_id 查找运行记录。"""
         if not execution_id:
             return None
         return self._session.query(TaskRun).filter(TaskRun.execution_id == execution_id).first()
 
     def list_runs(self, task_id: int, limit: int = 20) -> list[dict[str, Any]]:
-        """列出某个任务的运行历史。"""
         records = (
             self._session.query(TaskRun)
             .filter(TaskRun.task_id == task_id)
@@ -124,28 +122,42 @@ class TaskRepository:
         return [record.to_dict() for record in records]
 
     def get_run_detail(self, execution_id: str) -> dict[str, Any] | None:
-        """读取单次运行的完整详情。"""
         record = self._query_run_by_execution_id(execution_id)
         if record is None:
             return None
         return self._serialize_run_detail(record)
 
     def list_run_items(self, execution_id: str) -> list[dict[str, Any]]:
-        """列出某次运行的结果明细。"""
         record = self._query_run_by_execution_id(execution_id)
         if record is None:
             return []
         return self._serialize_run_items(record)
 
+    def list_items_by_execution(self, execution_id: str) -> list[dict[str, Any]]:
+        return self.list_run_items(execution_id)
+
+    def list_eligible_items_by_execution(self, execution_id: str) -> list[dict[str, Any]]:
+        record = self._query_run_by_execution_id(execution_id)
+        if record is None:
+            return []
+        items: list[dict[str, Any]] = []
+        for item in list(record.items or []):
+            if not bool(item.success):
+                continue
+            if str(item.durability_state or "").strip().lower() != DURABLE_STATE:
+                continue
+            if str(item.claim_state or "").strip().lower() not in ELIGIBLE_AGGREGATION_CLAIM_STATES:
+                continue
+            items.append(self._serialize_run_item(item))
+        return items
+
     def list_validation_failures(self, execution_id: str) -> list[dict[str, Any]]:
-        """列出某次运行的校验失败明细。"""
         record = self._query_run_by_execution_id(execution_id)
         if record is None:
             return []
         return self._serialize_validation_failures(record)
 
     def list_all_tasks(self, limit: int = 100) -> list[dict[str, Any]]:
-        """列出最近更新的任务定义。"""
         records = (
             self._session.query(TaskRecord)
             .options(selectinload(TaskRecord.runs))
@@ -154,6 +166,121 @@ class TaskRepository:
             .all()
         )
         return self._build_registry_rows(records)
+
+    def get_item(self, execution_id: str, url: str) -> dict[str, Any] | None:
+        item = self._query_run_item(execution_id=execution_id, url=url)
+        if item is None:
+            return None
+        return self._serialize_run_item(item)
+
+    def claim_item(
+        self,
+        *,
+        execution_id: str,
+        url: str,
+        worker_id: str,
+        item_data: dict[str, Any] | None = None,
+        terminal_reason: str = "claimed_for_processing",
+    ) -> dict[str, Any]:
+        row = self._require_run_item(execution_id=execution_id, url=url, now=datetime.now())
+        if row.claim_state == "claimed" and row.worker_id != worker_id:
+            raise RuntimeError("duplicate_inflight_claim")
+        if row.claim_state in FINAL_CLAIM_STATES or row.durability_state == DURABLE_STATE:
+            return self._serialize_run_item(row)
+        row.claim_state = "claimed"
+        row.durability_state = STAGED_STATE
+        row.terminal_reason = terminal_reason
+        row.worker_id = str(worker_id or "")
+        row.error_kind = ""
+        row.attempt_count = max(int(row.attempt_count or 0), 0) + 1
+        row.claimed_at = datetime.now()
+        row.item_data = dict(item_data or row.item_data or {"url": url})
+        self._session.flush()
+        return self._serialize_run_item(row)
+
+    def commit_item(
+        self,
+        *,
+        execution_id: str,
+        url: str,
+        item_data: dict[str, Any],
+        worker_id: str,
+        terminal_reason: str = "success",
+    ) -> dict[str, Any]:
+        now = datetime.now()
+        row = self._require_run_item(execution_id=execution_id, url=url, now=now)
+        row.success = True
+        row.failure_reason = ""
+        row.item_data = dict(item_data or {"url": url})
+        row.claim_state = "committed"
+        row.durability_state = DURABLE_STATE
+        row.terminal_reason = terminal_reason
+        row.error_kind = ""
+        row.worker_id = str(worker_id or row.worker_id or "")
+        row.durably_committed_at = now
+        self._session.flush()
+        return self._serialize_run_item(row)
+
+    def fail_item(
+        self,
+        *,
+        execution_id: str,
+        url: str,
+        failure_reason: str,
+        item_data: dict[str, Any] | None = None,
+        worker_id: str = "",
+        terminal_reason: str = "",
+        error_kind: str = "business_failure",
+    ) -> dict[str, Any]:
+        now = datetime.now()
+        row = self._require_run_item(execution_id=execution_id, url=url, now=now)
+        row.success = False
+        row.failure_reason = str(failure_reason or "")
+        row.item_data = dict(item_data or row.item_data or {"url": url})
+        row.claim_state = "failed"
+        row.durability_state = DURABLE_STATE
+        row.terminal_reason = str(terminal_reason or failure_reason or "")
+        row.error_kind = str(error_kind or "")
+        row.worker_id = str(worker_id or row.worker_id or "")
+        row.durably_committed_at = now
+        self._session.flush()
+        return self._serialize_run_item(row)
+
+    def ack_item(self, *, execution_id: str, url: str) -> dict[str, Any]:
+        now = datetime.now()
+        row = self._require_run_item(execution_id=execution_id, url=url, now=now)
+        if str(row.durability_state or "").strip().lower() != DURABLE_STATE:
+            raise RuntimeError("ack_before_durable")
+        row.claim_state = "acked"
+        row.acked_at = now
+        row.updated_at = now
+        self._session.flush()
+        return self._serialize_run_item(row)
+
+    def release_inflight_items_for_resume(self, execution_id: str) -> int:
+        if not execution_id:
+            return 0
+        released = 0
+        now = datetime.now()
+        rows = (
+            self._session.query(TaskRunItem)
+            .join(TaskRun, TaskRunItem.task_run_id == TaskRun.id)
+            .filter(
+                TaskRun.execution_id == execution_id,
+                TaskRunItem.claim_state == "claimed",
+                TaskRunItem.durability_state != DURABLE_STATE,
+            )
+            .all()
+        )
+        for row in rows:
+            row.claim_state = "pending"
+            row.terminal_reason = "resume_released_inflight_claim"
+            row.worker_id = ""
+            row.updated_at = now
+            released += 1
+        if released:
+            self._session.flush()
+        return released
 
     def _build_registry_rows(self, records: list[TaskRecord]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -192,16 +319,25 @@ class TaskRepository:
         }
 
     def _serialize_run_items(self, run: TaskRun) -> list[dict[str, Any]]:
-        return [
-            {
-                "url": item.url,
-                "success": item.success,
-                "failure_reason": item.failure_reason,
-                "item": dict(item.item_data or {}),
-                "created_at": item.created_at.isoformat() if item.created_at else "",
-            }
-            for item in list(run.items or [])
-        ]
+        return [self._serialize_run_item(item) for item in list(run.items or [])]
+
+    def _serialize_run_item(self, item: TaskRunItem) -> dict[str, Any]:
+        return {
+            "url": item.url,
+            "success": item.success,
+            "failure_reason": item.failure_reason,
+            "terminal_reason": item.terminal_reason,
+            "claim_state": item.claim_state,
+            "durability_state": item.durability_state,
+            "error_kind": item.error_kind,
+            "attempt_count": int(item.attempt_count or 0),
+            "worker_id": item.worker_id or "",
+            "item": dict(item.item_data or {}),
+            "created_at": item.created_at.isoformat() if item.created_at else "",
+            "claimed_at": item.claimed_at.isoformat() if item.claimed_at else "",
+            "durably_committed_at": item.durably_committed_at.isoformat() if item.durably_committed_at else "",
+            "acked_at": item.acked_at.isoformat() if item.acked_at else "",
+        }
 
     def _serialize_validation_failures(self, run: TaskRun) -> list[dict[str, Any]]:
         return [dict(item.failure_data or {}) for item in list(run.validation_failures or [])]
@@ -229,6 +365,40 @@ class TaskRepository:
             .first()
         )
 
+    def _query_run_item(self, *, execution_id: str, url: str) -> TaskRunItem | None:
+        if not execution_id or not url:
+            return None
+        return (
+            self._session.query(TaskRunItem)
+            .join(TaskRun, TaskRunItem.task_run_id == TaskRun.id)
+            .filter(TaskRun.execution_id == execution_id, TaskRunItem.url == url)
+            .first()
+        )
+
+    def _require_run_item(self, *, execution_id: str, url: str, now: datetime) -> TaskRunItem:
+        item = self._query_run_item(execution_id=execution_id, url=url)
+        if item is not None:
+            return item
+        run = self.find_by_execution_id(execution_id)
+        if run is None:
+            raise RuntimeError(f"missing_task_run:{execution_id}")
+        item = TaskRunItem(
+            task_run_id=run.id,
+            url=url,
+            item_data={"url": url},
+            claim_state="pending",
+            durability_state=STAGED_STATE,
+            terminal_reason="",
+            error_kind="",
+            attempt_count=0,
+            worker_id="",
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(item)
+        self._session.flush()
+        return item
+
     def _upsert_task(
         self,
         *,
@@ -245,14 +415,14 @@ class TaskRepository:
         if existing is not None:
             return self._update_task(existing, original_url, anchor_url, variant_label, field_names, now)
         return self._create_task(
-            normalized_url,
-            original_url,
-            page_state_signature,
-            anchor_url,
-            variant_label,
-            task_description,
-            field_names,
-            now,
+            normalized_url=normalized_url,
+            original_url=original_url,
+            page_state_signature=page_state_signature,
+            anchor_url=anchor_url,
+            variant_label=variant_label,
+            task_description=task_description,
+            field_names=field_names,
+            now=now,
         )
 
     def _find_task(
@@ -290,6 +460,7 @@ class TaskRepository:
 
     def _create_task(
         self,
+        *,
         normalized_url: str,
         original_url: str,
         page_state_signature: str,
@@ -402,28 +573,39 @@ class TaskRepository:
             return now
         return None
 
-    def _replace_run_items(
+    def _upsert_committed_records(
         self,
         *,
         run_id: int,
         records: list[dict[str, Any]],
         now: datetime,
     ) -> None:
-        self._session.query(TaskRunItem).filter(TaskRunItem.task_run_id == run_id).delete()
         for record in records:
             url = str(record.get("url") or "").strip()
             if not url:
                 continue
-            self._session.add(
-                TaskRunItem(
-                    task_run_id=run_id,
-                    url=url,
-                    success=bool(record.get("success", False)),
-                    failure_reason=str(record.get("failure_reason") or ""),
-                    item_data=dict(record.get("item") or {}),
-                    created_at=now,
-                )
-            )
+            row = self._session.query(TaskRunItem).filter(
+                TaskRunItem.task_run_id == run_id,
+                TaskRunItem.url == url,
+            ).first()
+            if row is None:
+                row = TaskRunItem(task_run_id=run_id, url=url, created_at=now, updated_at=now)
+                self._session.add(row)
+            row.success = bool(record.get("success", False))
+            row.failure_reason = str(record.get("failure_reason") or "")
+            row.terminal_reason = str(record.get("terminal_reason") or row.failure_reason or "")
+            row.claim_state = str(record.get("claim_state") or ("committed" if row.success else "failed"))
+            row.durability_state = str(record.get("durability_state") or DURABLE_STATE)
+            row.error_kind = str(record.get("error_kind") or "")
+            row.attempt_count = max(int(record.get("attempt_count", row.attempt_count or 1) or 1), 1)
+            row.worker_id = str(record.get("worker_id") or row.worker_id or "")
+            row.item_data = dict(record.get("item") or {})
+            row.claimed_at = row.claimed_at or now
+            if row.durability_state == DURABLE_STATE:
+                row.durably_committed_at = row.durably_committed_at or now
+            if row.claim_state == "acked":
+                row.acked_at = row.acked_at or now
+            row.updated_at = now
 
     def _replace_validation_failures(
         self,

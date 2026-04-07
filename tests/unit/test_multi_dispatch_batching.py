@@ -25,13 +25,13 @@ def test_prepare_dispatch_batch_respects_max_concurrent():
                 {"id": "sub_02"},
                 {"id": "sub_03"},
             ],
-            "spawned_subtasks": [{"id": "old_spawn"}],
+            "round_expand_requests": [{"parent_subtask_id": "old"}],
         }
     )
 
     assert result["current_batch"] == [{"id": "sub_01"}, {"id": "sub_02"}]
     assert result["dispatch_queue"] == [{"id": "sub_03"}]
-    assert result["spawned_subtasks"] == []
+    assert result["round_expand_requests"] == []
 
 
 def test_runtime_replan_limits_default_to_config():
@@ -88,7 +88,7 @@ def test_subtask_signature_prefers_page_state_signature():
         }
     )
 
-    assert sig == ("state", "state_a", "")
+    assert sig == ("state_a", "", "", "采集工程建设", "")
 
 
 def test_build_subtask_result_keeps_state_identity_fields():
@@ -214,7 +214,8 @@ def test_build_dispatch_summary_counts_expanded_tasks():
 
     assert summary["expanded"] == 1
     assert summary["completed"] == 1
-    assert summary["failed"] == 0
+    assert summary["business_failure"] == 0
+    assert summary["system_failure"] == 0
     assert summary["total_collected"] == 3
 
 
@@ -274,9 +275,23 @@ def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_childr
         },
     )
 
+    class _FakeMutationResult:
+        def __init__(self, task_plan, dispatch_queue):
+            self.task_plan = task_plan
+            self.dispatch_queue = tuple(dispatch_queue)
+            self.plan_knowledge = "knowledge"
+
     monkeypatch.setattr(
-        "autospider.graph.subgraphs.multi_dispatch._refresh_plan_artifacts",
-        lambda plan, params: (plan, "knowledge"),
+        "autospider.graph.subgraphs.multi_dispatch.PlanMutationService.merge_expand_requests",
+        lambda self, *, plan, expand_requests, pending_queue, output_dir: _FakeMutationResult(
+            plan.model_copy(
+                update={
+                    "subtasks": [*plan.subtasks, child],
+                    "journal": [*plan.journal, *result_item["journal_entries"]],
+                }
+            ),
+            [pending.model_dump(mode="python"), child.model_dump(mode="python")],
+        ),
     )
 
     merged = merge_dispatch_round(
@@ -284,12 +299,20 @@ def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_childr
             "task_plan": plan,
             "normalized_params": {},
             "dispatch_queue": [pending.model_dump(mode="python")],
-            "spawned_subtasks": [child.model_dump(mode="python")],
-            "subtask_results": [result_item],
+            "round_expand_requests": [
+                {
+                    "parent_subtask_id": parent.id,
+                    "spawned_subtasks": [child.model_dump(mode="python")],
+                    "journal_entries": list(result_item["journal_entries"]),
+                    "reason": "runtime_expand",
+                }
+            ],
+            "round_subtask_results": [result_item],
+            "subtask_results": [],
         }
     )
 
     assert [item["id"] for item in merged["dispatch_queue"]] == [pending.id, child.id]
     assert [subtask.id for subtask in merged["task_plan"].subtasks] == [parent.id, pending.id, child.id]
     assert merged["summary"]["expanded"] == 1
-    assert merged["task_plan"].journal[0].action == "runtime_expand"
+    assert merged["task_plan"].journal[0]["action"] == "runtime_expand"

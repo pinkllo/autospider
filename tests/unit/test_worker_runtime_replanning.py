@@ -6,34 +6,21 @@ import pytest
 
 from autospider.common.config import config
 from autospider.crawler.collector.llm_decision import LLMDecisionMaker
+from autospider.contracts import ExpandRequest
 from autospider.domain.planning import ExecutionBrief, SubTask, SubTaskMode
 from autospider.pipeline import runner as runner_module
 from autospider.pipeline import worker as worker_module
 from autospider.pipeline.worker import SubTaskWorker
-from autospider.crawler.planner.task_planner import RuntimeSubtaskPlanResult
-
-
-class _FakeSession:
-    def __init__(self, **kwargs):
-        self.page = SimpleNamespace(url="https://example.com/list")
-
-    async def start(self):
-        return None
-
-    async def stop(self):
-        return None
+from autospider.services.runtime_expansion_service import RuntimeExpansionResult
 
 
 @pytest.mark.asyncio
 async def test_subtask_worker_expand_mode_spawns_runtime_children_without_collect(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
-    class _FakePlanner:
-        def __init__(self, **kwargs):
-            captured["planner_init"] = dict(kwargs)
-
-        async def plan_runtime_subtasks(self, *, parent_subtask, max_children):
-            captured["max_children"] = max_children
+    class _FakeRuntimeExpansionService:
+        async def expand(self, **kwargs):
+            captured["max_children"] = kwargs["max_children"]
             child = SubTask(
                 id="expand_child",
                 name="交通运输工程",
@@ -41,7 +28,7 @@ async def test_subtask_worker_expand_mode_spawns_runtime_children_without_collec
                 anchor_url="https://example.com/list",
                 page_state_signature="state_child",
                 task_description="爬取交通运输工程下各个相关分类的项目各10条。",
-                parent_id=parent_subtask.id,
+                parent_id=kwargs["subtask"].id,
                 depth=2,
                 mode=SubTaskMode.EXPAND,
                 execution_brief=ExecutionBrief(
@@ -49,13 +36,21 @@ async def test_subtask_worker_expand_mode_spawns_runtime_children_without_collec
                     current_scope="交通运输工程",
                 ),
             )
-            return RuntimeSubtaskPlanResult(page_type="category", analysis={}, children=[child])
+            return RuntimeExpansionResult(
+                execution_state="expanded",
+                effective_subtask=kwargs["subtask"],
+                journal_entries=(),
+                expand_request=ExpandRequest(
+                    parent_subtask_id=kwargs["subtask"].id,
+                    spawned_subtasks=(child.model_dump(mode="python"),),
+                    journal_entries=(),
+                    reason="runtime_expand",
+                ),
+            )
 
-    async def _unexpected_run_pipeline(**kwargs):
+    async def _unexpected_run_pipeline(_context):
         raise AssertionError("expand 成功派生子任务后不应进入采集 pipeline")
 
-    monkeypatch.setattr(worker_module, "BrowserSession", _FakeSession)
-    monkeypatch.setattr(worker_module, "TaskPlanner", _FakePlanner)
     monkeypatch.setattr(runner_module, "run_pipeline", _unexpected_run_pipeline)
     monkeypatch.setattr(config.planner, "runtime_subtasks_max_children", 0, raising=False)
 
@@ -74,50 +69,76 @@ async def test_subtask_worker_expand_mode_spawns_runtime_children_without_collec
         fields=[],
         output_dir=str(tmp_path),
         headless=True,
+        runtime_expansion_service_cls=_FakeRuntimeExpansionService,
     )
 
     result = await worker.execute()
 
     assert captured["max_children"] == 0
     assert result["execution_state"] == "expanded"
+    assert result["outcome_type"] == "expanded"
     assert result["total_urls"] == 0
-    assert result["spawned_subtasks"][0]["parent_id"] == "expand_parent"
-    assert result["spawned_subtasks"][0]["execution_brief"]["parent_chain"] == ["工程建设"]
+    assert result["expand_request"]["spawned_subtasks"][0]["parent_id"] == "expand_parent"
+    assert result["expand_request"]["spawned_subtasks"][0]["execution_brief"]["parent_chain"] == ["工程建设"]
 
 
 @pytest.mark.asyncio
 async def test_subtask_worker_expand_mode_converts_to_collect_and_runs_pipeline(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
-    class _FakePlanner:
-        def __init__(self, **kwargs):
-            return None
-
-        async def plan_runtime_subtasks(self, *, parent_subtask, max_children):
-            return RuntimeSubtaskPlanResult(
-                page_type="list_page",
-                analysis={"observations": "只剩兄弟切换"},
-                collect_task_description="采集当前“房屋建筑和市政基础设施工程”范围下前10条项目记录，提取项目名称与所属分类名称。",
-                collect_execution_brief=ExecutionBrief(
-                    parent_chain=["工程建设"],
-                    current_scope="房屋建筑和市政基础设施工程",
-                    objective="采集当前房屋建筑和市政基础设施工程列表",
-                    next_action="直接在当前页面收集详情链接并翻页，不再继续拆分分类。",
-                    stop_rule="当无新详情链接、达到目标数量，或无法继续翻页时结束当前采集任务。",
-                    do_not=["不要再把兄弟分类切换当作新的分类任务"],
+    class _FakeRuntimeExpansionService:
+        async def expand(self, **kwargs):
+            collect_subtask = kwargs["subtask"].model_copy(
+                update={
+                    "mode": SubTaskMode.COLLECT,
+                    "task_description": "采集当前“房屋建筑和市政基础设施工程”范围下前10条项目记录，提取项目名称与所属分类名称。",
+                    "execution_brief": ExecutionBrief(
+                        parent_chain=["工程建设"],
+                        current_scope="房屋建筑和市政基础设施工程",
+                        objective="采集当前房屋建筑和市政基础设施工程列表",
+                        next_action="直接在当前页面收集详情链接并翻页，不再继续拆分分类。",
+                        stop_rule="当无新详情链接、达到目标数量，或无法继续翻页时结束当前采集任务。",
+                        do_not=["不要再把兄弟分类切换当作新的分类任务"],
+                    ),
+                }
+            )
+            return RuntimeExpansionResult(
+                execution_state="collect",
+                effective_subtask=collect_subtask,
+                journal_entries=(
+                    {
+                        "entry_id": "",
+                        "node_id": "",
+                        "phase": "pipeline",
+                        "action": "runtime_leaf_confirmed",
+                        "reason": "当前任务未识别到更深相关分类，确认为叶子采集任务",
+                        "evidence": "只剩兄弟切换",
+                        "metadata": {},
+                        "created_at": "",
+                    },
+                    {
+                        "entry_id": "",
+                        "node_id": "",
+                        "phase": "pipeline",
+                        "action": "runtime_expand_to_collect",
+                        "reason": "expand 任务就地转为 collect 执行",
+                        "evidence": "采集当前“房屋建筑和市政基础设施工程”范围下前10条项目记录，提取项目名称与所属分类名称。",
+                        "metadata": {"mode": SubTaskMode.COLLECT.value},
+                        "created_at": "",
+                    },
                 ),
             )
 
-    async def _fake_run_pipeline(**kwargs):
-        captured.update(kwargs)
+    async def _fake_run_pipeline(context):
+        captured.update(context.request.model_dump(mode="python"))
         return {
             "items_file": str(tmp_path / "items.jsonl"),
             "total_urls": 2,
             "success_count": 2,
+            "outcome_state": "success",
+            "durability_state": "durable",
         }
 
-    monkeypatch.setattr(worker_module, "BrowserSession", _FakeSession)
-    monkeypatch.setattr(worker_module, "TaskPlanner", _FakePlanner)
     monkeypatch.setattr(runner_module, "run_pipeline", _fake_run_pipeline)
 
     worker = SubTaskWorker(
@@ -145,6 +166,7 @@ async def test_subtask_worker_expand_mode_converts_to_collect_and_runs_pipeline(
         fields=[],
         output_dir=str(tmp_path),
         headless=True,
+        runtime_expansion_service_cls=_FakeRuntimeExpansionService,
     )
 
     result = await worker.execute()

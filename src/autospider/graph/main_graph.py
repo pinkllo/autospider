@@ -51,7 +51,19 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
 
 def resolve_node_outcome(state: dict[str, Any]) -> str:
     """根据 node_status 选择图后续流向。"""
-    if str(state.get("node_status") or "") == "ok":
+    if state.get("error"):
+        return "error"
+    planning = dict(state.get("planning") or {})
+    dispatch = dict(state.get("dispatch") or {})
+    result = dict(state.get("result") or {})
+    stage_status = str(
+        planning.get("status")
+        or dispatch.get("status")
+        or result.get("status")
+        or state.get("node_status")
+        or ""
+    )
+    if stage_status == "ok":
         return "ok"
     return "error"
 
@@ -59,10 +71,11 @@ def resolve_node_outcome(state: dict[str, Any]) -> str:
 
 def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
     """根据 chat 澄清阶段结果选择后续节点。"""
-    if str(state.get("node_status") or "") != "ok":
+    if state.get("error"):
         return "error"
 
-    flow_state = str(state.get("chat_flow_state") or "")
+    conversation = dict(state.get("conversation") or {})
+    flow_state = str(conversation.get("flow_state") or state.get("chat_flow_state") or "")
     if flow_state == "needs_input":
         return "chat_collect_user_input"
     if flow_state == "ready":
@@ -73,10 +86,11 @@ def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
 
 def resolve_chat_review_route(state: dict[str, Any]) -> str:
     """根据 chat review 阶段结果选择后续节点。"""
-    if str(state.get("node_status") or "") != "ok":
+    if state.get("error"):
         return "error"
 
-    review_state = str(state.get("chat_review_state") or "")
+    conversation = dict(state.get("conversation") or {})
+    review_state = str(conversation.get("review_state") or state.get("chat_review_state") or "")
     if review_state == "approved":
         return "chat_prepare_execution_handoff"
     if review_state == "reclarify":

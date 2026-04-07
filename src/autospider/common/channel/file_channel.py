@@ -48,6 +48,7 @@ class FileURLChannel(URLChannel):
         self._buffer = b""                           # 行读取时产生的残缺不全的数据缓存区
         self._pending: list[_FileTaskEntry] = []     # 已读取但尚未分发给消费者的任务
         self._inflight: deque[_FileTaskEntry] = deque() # 正在处理中（飞行中）的任务队列，按顺序存入以便顺序 ack
+        self._sealed = False
 
         # 初始化时从本地加载保存的游标
         self._load_cursor()
@@ -96,6 +97,9 @@ class FileURLChannel(URLChannel):
             if timeout_s <= 0:
                 return []
 
+            if self._sealed and not self._pending and not self._inflight:
+                return []
+
             now = asyncio.get_running_loop().time()
             if deadline is not None and now >= deadline:
                 return []
@@ -121,12 +125,13 @@ class FileURLChannel(URLChannel):
                 self._maybe_commit()
 
             async def _fail(_reason: str, e: _FileTaskEntry = entry) -> None:
-                """失败处理回调：文件通道目前不提供内部重试机制。
-                失败时同样推进游标以避免队列阻塞（跳过错误行）。
-                """
-                # File channel does not support retry; advance cursor on fail to avoid blocking.
-                e.acked = True
-                self._maybe_commit()
+                """失败处理回调：失败项重新回到 pending，等待上层重试。"""
+                e.acked = False
+                try:
+                    self._inflight.remove(e)
+                except ValueError:
+                    return
+                self._pending.insert(0, e)
 
             # 构建最终对外的任务对象
             tasks.append(URLTask(url=entry.url, ack=_ack, fail=_fail))
@@ -239,3 +244,15 @@ class FileURLChannel(URLChannel):
             )
         except OSError:
             return
+
+    async def seal(self) -> None:
+        self._sealed = True
+
+    async def is_drained(self) -> bool:
+        self._read_new_lines()
+        self._maybe_commit()
+        return bool(self._sealed and not self._pending and not self._inflight)
+
+    async def close_with_error(self, reason: str) -> None:
+        _ = reason
+        self._sealed = True

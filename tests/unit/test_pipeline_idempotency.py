@@ -6,6 +6,7 @@ import pytest
 
 from autospider.common.channel.base import URLTask
 from autospider.common.config import config
+from autospider.contracts import ExecutionRequest, PipelineMode
 from autospider.domain.fields import FieldDefinition
 from autospider.field.models import FieldExtractionResult, PageExtractionRecord
 from autospider.pipeline import runner as pipeline_runner
@@ -20,6 +21,7 @@ from autospider.pipeline.runner import (
     _should_promote_skill,
     _strip_draft_markers_from_skill_content,
 )
+from autospider.services.service_utils import build_execution_context
 
 
 class _DummyTask:
@@ -78,6 +80,15 @@ class _NoopTracker:
 
 
 class _ExplodingChannel:
+    async def seal(self):
+        return None
+
+    async def is_drained(self):
+        return True
+
+    async def close_with_error(self, reason: str):
+        return None
+
     async def close(self):
         return None
 
@@ -89,6 +100,7 @@ class _QueueBackedChannel:
     def __init__(self):
         self.pending: list[str] = []
         self.closed = False
+        self.sealed = False
         self.close_calls = 0
 
     async def publish(self, url: str):
@@ -107,6 +119,15 @@ class _QueueBackedChannel:
         self.close_calls += 1
         self.closed = True
         self.pending.clear()
+
+    async def seal(self):
+        self.sealed = True
+
+    async def is_drained(self):
+        return self.sealed and not self.pending
+
+    async def close_with_error(self, reason: str):
+        self.closed = True
 
     async def _ack(self):
         return None
@@ -135,7 +156,7 @@ def test_strip_draft_markers_from_skill_content_for_promoted_skills():
 
 
 def test_should_promote_skill_requires_clean_success():
-    assert _should_promote_skill(
+    assert not _should_promote_skill(
         state={},
         summary={"success_count": 3, "total_urls": 4},
         validation_failures=[],
@@ -165,13 +186,13 @@ def test_should_promote_skill_requires_clean_success():
 def test_classify_pipeline_result_uses_quality_threshold_and_validation_barrier():
     reusable = _classify_pipeline_result(
         total_urls=4,
-        success_count=3,
+        success_count=4,
         state_error=None,
         validation_failures=[],
     )
     assert reusable["outcome_state"] == "success"
     assert reusable["promotion_state"] == "reusable"
-    assert reusable["success_rate"] == 0.75
+    assert reusable["success_rate"] == 1.0
 
     diagnostic = _classify_pipeline_result(
         total_urls=10,
@@ -184,20 +205,26 @@ def test_classify_pipeline_result_uses_quality_threshold_and_validation_barrier(
     assert diagnostic["validation_failure_count"] == 1
 
 
-def test_prepare_pipeline_output_resets_export_files(tmp_path):
+def test_prepare_pipeline_output_only_resets_staging_files(tmp_path):
     items_path = tmp_path / "pipeline_extracted_items.jsonl"
     summary_path = tmp_path / "pipeline_summary.json"
+    staging_items_path = tmp_path / "pipeline_extracted_items.next.jsonl"
+    staging_summary_path = tmp_path / "pipeline_summary.next.json"
     items_path.write_text('{"url": "https://example.com/a"}\n', encoding="utf-8")
     summary_path.write_text('{"total_urls": 1}\n', encoding="utf-8")
+    staging_items_path.write_text('{"url": "https://example.com/b"}\n', encoding="utf-8")
+    staging_summary_path.write_text('{"total_urls": 2}\n', encoding="utf-8")
 
     _prepare_pipeline_output(
         output_path=tmp_path,
-        items_path=items_path,
-        summary_path=summary_path,
+        items_path=staging_items_path,
+        summary_path=staging_summary_path,
     )
 
-    assert not items_path.exists()
-    assert not summary_path.exists()
+    assert items_path.exists()
+    assert summary_path.exists()
+    assert not staging_items_path.exists()
+    assert not staging_summary_path.exists()
 
 
 def test_commit_items_file_writes_single_visible_snapshot(tmp_path):
@@ -220,9 +247,8 @@ def test_commit_items_file_writes_single_visible_snapshot(tmp_path):
     _commit_items_file(items_path, records)
 
     lines = items_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 2
-    assert json.loads(lines[0])["url"] == "https://example.com/a"
-    assert json.loads(lines[1])["url"] == "https://example.com/b"
+    assert len(lines) == 1
+    assert json.loads(lines[0])["url"] == "https://example.com/b"
 
 
 def test_build_run_record_defaults_to_runtime_not_durable():
@@ -234,6 +260,8 @@ def test_build_run_record_defaults_to_runtime_not_durable():
     )
 
     assert record["durably_persisted"] is False
+    assert record["durability_state"] == "staged"
+    assert record["claim_state"] == "pending"
     assert record["record_source"] == "runtime"
 
 
@@ -250,7 +278,9 @@ async def test_process_task_reuses_persisted_record_without_reextract():
                 failure_reason="",
             ),
             "durably_persisted": True,
+            "durability_state": "durable",
             "record_source": "db",
+            "claim_state": "committed",
         }
     }
 
@@ -283,7 +313,7 @@ async def test_finalize_task_from_runtime_success_requeues_until_persisted():
     await pipeline_runner._finalize_task_from_record(task, record)
 
     assert task.acked == 0
-    assert task.failed == ["result_not_persisted"]
+    assert task.failed == ["result_not_durable"]
 
 
 def test_build_record_summary_counts_success_and_failure():
@@ -304,7 +334,7 @@ def test_build_record_summary_counts_success_and_failure():
 
     summary = _build_record_summary(records)
 
-    assert summary == {"total_urls": 2, "success_count": 1}
+    assert summary == {"total_urls": 2, "success_count": 1, "failed_count": 1}
 
 
 @pytest.mark.asyncio
@@ -333,16 +363,21 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
-
-    with pytest.raises(RuntimeError, match="stop consumer"):
-        await pipeline_runner.run_pipeline(
+    context = build_execution_context(
+        ExecutionRequest(
             list_url="https://example.com/list",
             task_description="采集公告",
+            request="采集公告",
             fields=[],
             output_dir=str(tmp_path),
             max_pages=11,
             target_url_count=3,
-        )
+        ),
+        fields=[],
+    )
+
+    with pytest.raises(RuntimeError, match="stop consumer"):
+        await pipeline_runner.run_pipeline(context)
 
     assert captured["max_pages"] == 11
     assert config.url_collector.max_pages == original_max_pages
@@ -417,17 +452,23 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
     monkeypatch.setattr(pipeline_runner, "DetailPageWorker", _FakeDetailPageWorker)
     monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
-
-    result = await pipeline_runner.run_pipeline(
-        list_url="https://example.com/list",
-        task_description="采集项目名称",
+    context = build_execution_context(
+        ExecutionRequest(
+            list_url="https://example.com/list",
+            task_description="采集项目名称",
+            request="采集项目名称",
+            fields=[FieldDefinition(name="project_name", description="项目名称").model_dump(mode="python")],
+            output_dir=str(tmp_path),
+            field_explore_count=3,
+            field_validate_count=4,
+            consumer_concurrency=1,
+            target_url_count=10,
+            pipeline_mode=PipelineMode.MEMORY,
+        ),
         fields=[FieldDefinition(name="project_name", description="项目名称")],
-        output_dir=str(tmp_path),
-        explore_count=3,
-        validate_count=4,
-        consumer_concurrency=1,
-        target_url_count=10,
     )
+
+    result = await pipeline_runner.run_pipeline(context)
 
     assert result["total_urls"] == 10
     assert result["success_count"] == 10
@@ -458,10 +499,13 @@ def test_pipeline_finalizer_persists_summary_and_stops_sessions(tmp_path):
                 "success_rate": 1.0,
                 "validation_failure_count": 0,
                 "execution_state": "completed",
+                "terminal_reason": "success",
+                "durability_state": "durable",
             },
             persist_pipeline_run=lambda context, records: None,
             commit_items_file=lambda items_path, records: None,
             write_summary=lambda summary_path, summary: None,
+            promote_output=lambda staging_path, final_path: None,
         )
     )
 
@@ -492,6 +536,8 @@ def test_pipeline_finalizer_persists_summary_and_stops_sessions(tmp_path):
         output_path=tmp_path,
         items_path=tmp_path / "items.jsonl",
         summary_path=tmp_path / "summary.json",
+        staging_items_path=tmp_path / "items.next.jsonl",
+        staging_summary_path=tmp_path / "summary.next.json",
         committed_records={
             "https://example.com/detail/1": _build_run_record(
                 url="https://example.com/detail/1",
@@ -529,5 +575,6 @@ def test_pipeline_finalizer_persists_summary_and_stops_sessions(tmp_path):
     asyncio.run(finalizer.finalize(context))
 
     assert context.summary["durably_persisted"] is True
+    assert context.summary["durability_state"] == "durable"
     assert context.committed_records["https://example.com/detail/1"]["durably_persisted"] is True
     assert sessions.stopped is True

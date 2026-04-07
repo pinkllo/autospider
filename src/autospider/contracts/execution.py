@@ -28,8 +28,20 @@ class PromotionState(str, Enum):
 
 
 class DurabilityState(str, Enum):
+    STAGED = "staged"
     DURABLE = "durable"
-    NOT_DURABLE = "not_durable"
+    FAILED_COMMIT = "failed_commit"
+
+
+class PipelineMode(str, Enum):
+    MEMORY = "memory"
+    FILE = "file"
+    REDIS = "redis"
+
+
+class ResumeMode(str, Enum):
+    FRESH = "fresh"
+    RESUME = "resume"
 
 
 class AggregationEligibility(str, Enum):
@@ -46,6 +58,7 @@ class ExecutionRequest(BaseModel):
     request: str = ""
     task_description: str = ""
     fields: list[dict[str, Any]] = Field(default_factory=list)
+    execution_brief: dict[str, Any] = Field(default_factory=dict)
     output_dir: str = "output"
     headless: bool | None = None
     field_explore_count: int | None = None
@@ -53,7 +66,7 @@ class ExecutionRequest(BaseModel):
     consumer_concurrency: int | None = None
     max_pages: int | None = None
     target_url_count: int | None = None
-    pipeline_mode: str | None = None
+    pipeline_mode: PipelineMode | None = None
     guard_intervention_mode: str = "interrupt"
     guard_thread_id: str = ""
     selected_skills: list[dict[str, str]] = Field(default_factory=list)
@@ -68,7 +81,10 @@ class ExecutionRequest(BaseModel):
     max_concurrent: int | None = None
     runtime_subtask_max_children: int | None = None
     runtime_subtasks_use_main_model: bool | None = None
-    serial_mode: str | None = None
+    serial_mode: bool = False
+    execution_id: str = ""
+    resume_mode: ResumeMode = ResumeMode.FRESH
+    global_browser_budget: int | None = None
 
     @classmethod
     def from_params(
@@ -89,6 +105,7 @@ class ExecutionRequest(BaseModel):
             request=request,
             task_description=task_description,
             fields=list(payload.get("fields") or []),
+            execution_brief=dict(payload.get("execution_brief") or {}),
             output_dir=str(payload.get("output_dir") or "output"),
             headless=headless,
             field_explore_count=payload.get("field_explore_count"),
@@ -96,7 +113,11 @@ class ExecutionRequest(BaseModel):
             consumer_concurrency=payload.get("consumer_concurrency"),
             max_pages=payload.get("max_pages"),
             target_url_count=payload.get("target_url_count"),
-            pipeline_mode=payload.get("pipeline_mode"),
+            pipeline_mode=(
+                PipelineMode(str(payload.get("pipeline_mode") or "").strip().lower())
+                if str(payload.get("pipeline_mode") or "").strip()
+                else None
+            ),
             guard_intervention_mode=guard_intervention_mode,
             guard_thread_id=thread_id,
             selected_skills=list(payload.get("selected_skills") or []),
@@ -111,7 +132,10 @@ class ExecutionRequest(BaseModel):
             max_concurrent=payload.get("max_concurrent"),
             runtime_subtask_max_children=payload.get("runtime_subtask_max_children"),
             runtime_subtasks_use_main_model=payload.get("runtime_subtasks_use_main_model"),
-            serial_mode=payload.get("serial_mode"),
+            serial_mode=bool(payload.get("serial_mode")),
+            execution_id=str(payload.get("execution_id") or "").strip(),
+            resume_mode=ResumeMode(str(payload.get("resume_mode") or ResumeMode.FRESH.value).strip().lower()),
+            global_browser_budget=payload.get("global_browser_budget"),
         )
 
 
@@ -124,10 +148,12 @@ class PipelineRunSummary(BaseModel):
     validation_failure_count: int = 0
     execution_state: str = ""
     outcome_state: str = ""
+    terminal_reason: str = ""
     promotion_state: PromotionState = PromotionState.REJECTED
     items_file: str = ""
     summary_file: str = ""
     execution_id: str = ""
+    durability_state: DurabilityState = DurabilityState.STAGED
     durably_persisted: bool = False
 
     @classmethod
@@ -142,11 +168,24 @@ class PipelineRunSummary(BaseModel):
             validation_failure_count=int(raw.get("validation_failure_count", 0) or 0),
             execution_state=str(raw.get("execution_state") or ""),
             outcome_state=str(raw.get("outcome_state") or ""),
+            terminal_reason=str(raw.get("terminal_reason") or ""),
             promotion_state=PromotionState(promotion),
             items_file=str(raw.get("items_file") or ""),
             summary_file=str(summary_file or raw.get("summary_file") or ""),
             execution_id=str(raw.get("execution_id") or ""),
-            durably_persisted=bool(raw.get("durably_persisted")),
+            durability_state=DurabilityState(
+                str(
+                    raw.get("durability_state")
+                    or (DurabilityState.DURABLE.value if raw.get("durably_persisted") else DurabilityState.STAGED.value)
+                ).strip().lower()
+            ),
+            durably_persisted=(
+                str(
+                    raw.get("durability_state")
+                    or (DurabilityState.DURABLE.value if raw.get("durably_persisted") else DurabilityState.STAGED.value)
+                ).strip().lower()
+                == DurabilityState.DURABLE.value
+            ),
         )
 
 
@@ -167,8 +206,10 @@ class AggregationSubtaskDetail(BaseModel):
     status: str
     eligibility: AggregationEligibility
     reason: str = ""
+    excluded_reason: str = ""
     items: int = 0
     result_file: str = ""
+    conflict_count: int = 0
 
 
 class AggregationReport(BaseModel):
@@ -177,6 +218,7 @@ class AggregationReport(BaseModel):
     eligible_subtasks: int = 0
     excluded_subtasks: int = 0
     failed_subtasks: int = 0
+    conflict_count: int = 0
     failure_reasons: list[str] = Field(default_factory=list)
     subtask_details: list[AggregationSubtaskDetail] = Field(default_factory=list)
     merged_file: str = ""

@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..contracts import ExecutionRequest
+from ..contracts import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
+from ..common.config import config
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage.persistence import CollectionConfig
 from ..domain.fields import FieldDefinition
+from ..pipeline.runtime_controls import resolve_concurrency_settings
 
 
 def build_field_definitions(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
@@ -42,6 +44,65 @@ def build_execution_request(
         dict(params or {}),
         thread_id=thread_id,
         guard_intervention_mode=guard_intervention_mode,
+    )
+
+
+def build_infra_config() -> InfraConfig:
+    pipeline_mode = str(config.pipeline.mode or PipelineMode.REDIS.value).strip().lower()
+    return InfraConfig(
+        browser_headless_default=bool(config.browser.headless),
+        browser_timeout_ms=int(config.browser.timeout_ms or 30000),
+        pipeline_mode_default=PipelineMode(pipeline_mode),
+        pipeline_consumer_concurrency=int(config.pipeline.consumer_concurrency or 1),
+        planner_max_concurrent_subtasks=int(config.planner.max_concurrent_subtasks or 1),
+        redis_enabled=bool(config.redis.enabled),
+        checkpoint_enabled=bool(config.graph_checkpoint.enabled),
+    )
+
+
+def build_execution_context(
+    request: ExecutionRequest,
+    *,
+    fields: list[Any] | None = None,
+) -> ExecutionContext:
+    identity = TaskIdentity(
+        list_url=str(request.list_url or "").strip(),
+        anchor_url=str(request.anchor_url or "").strip(),
+        page_state_signature=str(request.page_state_signature or "").strip(),
+        variant_label=str(request.variant_label or "").strip(),
+        task_description=str(request.task_description or "").strip(),
+        field_names=tuple(
+            str(item.get("name") or "").strip()
+            for item in list(request.fields or [])
+            if str(item.get("name") or "").strip()
+        ),
+    )
+    resolved = resolve_concurrency_settings(
+        {
+            "serial_mode": request.serial_mode,
+            "consumer_concurrency": request.consumer_concurrency,
+            "max_concurrent": request.max_concurrent,
+            "global_browser_budget": request.global_browser_budget,
+        }
+    )
+    infra = build_infra_config()
+    pipeline_mode = request.pipeline_mode or infra.pipeline_mode_default
+    execution_id = str(request.execution_id or "").strip()
+    return ExecutionContext(
+        request=request,
+        identity=identity,
+        fields=tuple(list(fields or [])),
+        pipeline_mode=pipeline_mode,
+        consumer_concurrency=resolved.consumer_concurrency,
+        max_concurrent=resolved.max_concurrent,
+        global_browser_budget=resolved.global_browser_budget,
+        resume_mode=request.resume_mode,
+        execution_id=execution_id,
+        selected_skills=tuple(list(request.selected_skills or [])),
+        plan_knowledge=str(request.plan_knowledge or ""),
+        task_plan_snapshot=dict(request.task_plan_snapshot or {}),
+        plan_journal=tuple(list(request.plan_journal or [])),
+        initial_nav_steps=tuple(list(request.initial_nav_steps or [])),
     )
 
 

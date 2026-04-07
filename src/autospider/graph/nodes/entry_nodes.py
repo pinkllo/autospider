@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from typing import Any
 
@@ -19,6 +20,7 @@ from ...common.storage.task_registry import TaskRegistry
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ...common.validators import validate_task_description, validate_url
+from ...pipeline.runtime_controls import resolve_concurrency_settings
 
 logger = get_logger(__name__)
 
@@ -28,12 +30,15 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
 
 
 def _ok(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    resolved_payload = payload or {}
     return {
         "node_status": "ok",
-        "node_payload": payload or {},
-        "result_context": payload or {},
+        "node_payload": resolved_payload,
+        "result_context": resolved_payload,
         "node_artifacts": [],
         "node_error": None,
+        "conversation": {"status": "ok"},
+        "error": None,
     }
 
 
@@ -47,6 +52,7 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
         "node_error": {"code": code, "message": message},
         "error_code": code,
         "error_message": message,
+        "error": {"code": code, "message": message},
     }
 
 
@@ -246,7 +252,7 @@ def _build_review_payload(
     dispatch_mode: str,
 ) -> dict[str, Any]:
     cli_args = dict(state.get("cli_args") or {})
-    effective_options = _apply_serial_mode_overrides({
+    base_options = _apply_serial_mode_overrides({
         "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
         "target_url_count": _coalesce_cli_option(cli_args, "target_url_count", task.get("target_url_count")),
         "consumer_concurrency": _coalesce_cli_option(
@@ -269,16 +275,14 @@ def _build_review_payload(
         "headless": cli_args["headless"] if "headless" in cli_args else None,
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "serial_mode": cli_args.get("serial_mode"),
-        "max_concurrent": _coalesce_cli_option(
-            cli_args,
-            "max_concurrent",
-            _coalesce_cli_option(
-                cli_args,
-                "consumer_concurrency",
-                task.get("consumer_concurrency"),
-            ),
-        ),
+        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
+        "global_browser_budget": cli_args.get("global_browser_budget"),
     })
+    concurrency = resolve_concurrency_settings(base_options)
+    effective_options = dict(base_options)
+    effective_options["consumer_concurrency"] = concurrency.consumer_concurrency
+    effective_options["max_concurrent"] = concurrency.max_concurrent
+    effective_options["global_browser_budget"] = concurrency.global_browser_budget
     return {
         "type": "chat_review",
         "thread_id": str(state.get("thread_id") or ""),
@@ -305,9 +309,11 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
     """pipeline-run 参数归一化。"""
+    normalized = _apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
     return {
         **_ok({"normalized": True}),
-        "normalized_params": _apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
+        "normalized_params": normalized,
+        "conversation": {"status": "ok", "normalized_params": normalized},
     }
 
 
@@ -319,6 +325,7 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
             **_ok({"clarified": True, "source": "state"}),
             "clarified_task": clarified_task,
             "chat_flow_state": "ready",
+            "conversation": {"status": "ok", "flow_state": "ready", "clarified_task": clarified_task},
         }
 
     cli_args = dict(state.get("cli_args") or {})
@@ -368,6 +375,17 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
             "chat_flow_state": "ready",
             "matched_skills": matched_skills,
             "selected_skills": selected_skills,
+            "conversation": {
+                "status": "ok",
+                "flow_state": "ready",
+                "clarified_task": _clarified_task_to_dict(result.task),
+                "chat_history": _history_to_state(history),
+                "chat_turn_count": turn_count,
+                "chat_max_turns": max_turns,
+                "pending_question": "",
+                "matched_skills": matched_skills,
+                "selected_skills": selected_skills,
+            },
         }
 
     if turn_count >= max_turns:
@@ -383,6 +401,16 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
         "chat_flow_state": "needs_input",
         "matched_skills": matched_skills,
         "selected_skills": selected_skills,
+        "conversation": {
+            "status": "ok",
+            "flow_state": "needs_input",
+            "chat_history": _history_to_state(history),
+            "chat_turn_count": turn_count + 1,
+            "chat_max_turns": max_turns,
+            "pending_question": question,
+            "matched_skills": matched_skills,
+            "selected_skills": selected_skills,
+        },
     }
 
 
@@ -415,6 +443,12 @@ async def chat_collect_user_input(state: dict[str, Any]) -> dict[str, Any]:
         "chat_history": _history_to_state(history),
         "chat_pending_question": "",
         "chat_flow_state": "input_collected",
+        "conversation": {
+            "status": "ok",
+            "flow_state": "input_collected",
+            "chat_history": _history_to_state(history),
+            "pending_question": "",
+        },
     }
 
 
@@ -435,6 +469,7 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
         return {
             **_ok({"review_action": action}),
             "chat_review_state": "approved",
+            "conversation": {"status": "ok", "review_state": "approved"},
         }
 
     if action == "supplement":
@@ -447,6 +482,13 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
             "clarified_task": None,
             "chat_review_state": "reclarify",
             "chat_flow_state": "input_collected",
+            "conversation": {
+                "status": "ok",
+                "review_state": "reclarify",
+                "flow_state": "input_collected",
+                "chat_history": _history_to_state(history),
+                "clarified_task": None,
+            },
         }
 
     if action == "override_task":
@@ -458,6 +500,11 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
             **_ok({"review_action": action}),
             "clarified_task": override_task,
             "chat_review_state": "approved",
+            "conversation": {
+                "status": "ok",
+                "review_state": "approved",
+                "clarified_task": override_task,
+            },
         }
 
     if action == "cancel":
@@ -476,7 +523,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
 
     dispatch_mode = _resolve_chat_dispatch_mode()
     # `clarified_task` 是 chat 阶段产物，这里只做进入 planning 的参数交接。
-    normalized = _apply_serial_mode_overrides({
+    base_params = _apply_serial_mode_overrides({
         "list_url": task.get("list_url", ""),
         "task_description": task.get("task_description", ""),
         "fields": [_field_to_dict(item) for item in task.get("fields", [])],
@@ -506,24 +553,23 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "serial_mode": cli_args.get("serial_mode"),
         "request": str(cli_args.get("request") or task.get("task_description") or ""),
-        "max_concurrent": _coalesce_cli_option(
-            cli_args,
-            "max_concurrent",
-            _coalesce_cli_option(
-                cli_args,
-                "consumer_concurrency",
-                task.get("consumer_concurrency"),
-            ),
-        ),
+        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
         "execution_mode_resolved": dispatch_mode,
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
         "selected_skills": list(state.get("selected_skills") or []),
+        "global_browser_budget": cli_args.get("global_browser_budget"),
     })
+    concurrency = resolve_concurrency_settings(base_params)
+    normalized = dict(base_params)
+    normalized["consumer_concurrency"] = concurrency.consumer_concurrency
+    normalized["max_concurrent"] = concurrency.max_concurrent
+    normalized["global_browser_budget"] = concurrency.global_browser_budget
 
     return {
         **_ok({"execution_mode_resolved": "multi"}),
         "normalized_params": normalized,
+        "conversation": {"status": "ok", "normalized_params": normalized},
     }
 
 
@@ -627,11 +673,16 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     加上"创建新任务"组成最多 4 个选项，interrupt 让用户选择。
     如果用户已在本轮对话中完成过选择（补充需求重新生成场景），则直接跳过。
     """
-    # 已经选择过，跳过重复匹配
-    if state.get("history_match_done"):
-        return _ok({"history_reused": False, "skipped": True})
-
     task = dict(state.get("clarified_task") or {})
+    signature_payload = {
+        "list_url": str(task.get("list_url") or ""),
+        "task_description": str(task.get("task_description") or ""),
+        "fields": [_field_to_dict(item) for item in list(task.get("fields") or [])],
+    }
+    task_signature = hashlib.sha1(str(signature_payload).encode("utf-8")).hexdigest()
+    # 已经选择过且输入签名未变化，跳过重复匹配
+    if state.get("history_match_done") and str(state.get("history_match_signature") or "") == task_signature:
+        return _ok({"history_reused": False, "skipped": True})
     list_url = str(task.get("list_url") or "")
     current_desc = str(task.get("task_description") or "")
 
@@ -702,7 +753,12 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
             **_ok({"history_reused": True, "matched_registry_id": selected["registry_id"]}),
             "clarified_task": task,
             "history_match_done": True,
+            "history_match_signature": task_signature,
         }
 
     logger.info("[HistoryMatch] 用户选择创建新任务")
-    return {**_ok({"history_reused": False}), "history_match_done": True}
+    return {
+        **_ok({"history_reused": False}),
+        "history_match_done": True,
+        "history_match_signature": task_signature,
+    }

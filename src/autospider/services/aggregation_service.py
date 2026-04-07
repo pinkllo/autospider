@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from ..contracts import AggregationReport, ExecutionRequest
+from ..contracts import AggregationReport, ExecutionContext
 from ..domain.planning import TaskPlan
 from ..pipeline.aggregator import ResultAggregator
 from .service_utils import build_artifact
@@ -26,14 +26,14 @@ class AggregationService:
     def execute(
         self,
         *,
-        request: ExecutionRequest,
+        context: ExecutionContext,
         task_plan: TaskPlan,
     ) -> dict[str, Any]:
         aggregate_result = AggregationReport.model_validate(self._aggregator_cls().aggregate(
             plan=task_plan,
-            output_dir=request.output_dir,
+            output_dir=context.request.output_dir,
         ))
-        output_dir = Path(request.output_dir)
+        output_dir = Path(context.request.output_dir)
         report = aggregate_result.model_dump(mode="python")
         return {
             "aggregate_result": report,
@@ -43,6 +43,7 @@ class AggregationService:
                 "eligible_subtasks": aggregate_result.eligible_subtasks,
                 "excluded_subtasks": aggregate_result.excluded_subtasks,
                 "failed_subtasks": aggregate_result.failed_subtasks,
+                "conflict_count": aggregate_result.conflict_count,
             },
             "result": report,
             "artifacts": [

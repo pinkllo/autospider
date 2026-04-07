@@ -17,7 +17,7 @@ from ...services import (
     PipelineExecutionService,
     PlanningService,
 )
-from ...services.service_utils import build_execution_request
+from ...services.service_utils import build_execution_context, build_execution_request
 
 RETRY_DELAYS = (1.0, 2.0)
 
@@ -26,12 +26,19 @@ def _ok(
     payload: dict[str, Any] | None = None,
     artifacts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
+    resolved_payload = payload or {}
     return {
         "node_status": "ok",
-        "node_payload": payload or {},
-        "result_context": payload or {},
+        "node_payload": resolved_payload,
+        "result_context": resolved_payload,
         "node_artifacts": artifacts or [],
         "node_error": None,
+        "result": {
+            "status": "ok",
+            "data": resolved_payload,
+            "artifacts": artifacts or [],
+        },
+        "error": None,
     }
 
 
@@ -44,6 +51,7 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
         "node_error": {"code": code, "message": message},
         "error_code": code,
         "error_message": message,
+        "error": {"code": code, "message": message},
     }
 
 
@@ -76,10 +84,12 @@ def _extract_pipeline_result(service_result: dict[str, Any]) -> dict[str, Any]:
         "validation_failure_count",
         "execution_state",
         "outcome_state",
+        "terminal_reason",
         "promotion_state",
         "items_file",
         "summary_file",
         "execution_id",
+        "durability_state",
     }
     return {key: service_result[key] for key in keys if key in service_result}
 
@@ -98,9 +108,11 @@ def _extract_pipeline_summary(service_result: dict[str, Any], pipeline_result: d
         "validation_failure_count",
         "execution_state",
         "outcome_state",
+        "terminal_reason",
         "promotion_state",
         "execution_id",
         "items_file",
+        "durability_state",
     }
     return {key: pipeline_result[key] for key in keys if key in pipeline_result}
 
@@ -127,11 +139,15 @@ async def _retry_after_browser_interrupt(
     node_result: dict[str, Any],
     retry: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
-    payload = node_result.pop("__browser_intervention__", None)
-    if not isinstance(payload, dict):
-        return node_result
-    interrupt(payload)
-    return await retry(state)
+    current_state = dict(state)
+    current_result = dict(node_result)
+    while True:
+        payload = current_result.pop("__browser_intervention__", None)
+        if not isinstance(payload, dict):
+            return current_result
+        resume_payload = interrupt(payload)
+        current_state["browser_resume"] = resume_payload
+        current_result = await retry(current_state)
 
 
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -149,6 +165,13 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
             **_ok(_node_payload(service_result, {"result": pipeline_result}), _node_artifacts(service_result)),
             "pipeline_result": pipeline_result,
             "summary": _extract_pipeline_summary(service_result, pipeline_result),
+            "result": {
+                "status": "ok",
+                "data": {"result": pipeline_result},
+                "summary": _extract_pipeline_summary(service_result, pipeline_result),
+                "pipeline_result": pipeline_result,
+                "artifacts": _node_artifacts(service_result),
+            },
         }
 
     node_result = await _run_with_retry(_runner, error_code="run_pipeline_failed")
@@ -259,6 +282,13 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
         task_plan = service_result.get("task_plan")
         subtasks = list(getattr(task_plan, "subtasks", []) or [])
+        planner_status = str(service_result.get("planner_status") or "success")
+        terminal_reason = str(service_result.get("terminal_reason") or "")
+        if planner_status == "error":
+            return _fatal(
+                "planner_error",
+                terminal_reason or "规划阶段发生内部错误",
+            )
         if not subtasks:
             return _fatal(
                 "planner_no_subtasks",
@@ -271,6 +301,13 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             "plan_knowledge": str(service_result.get("plan_knowledge") or ""),
             "summary": dict(service_result.get("summary") or {}),
             "selected_skills": list(service_result.get("selected_skills") or []),
+            "planning": {
+                "status": "ok",
+                "task_plan": task_plan,
+                "plan_knowledge": str(service_result.get("plan_knowledge") or ""),
+                "selected_skills": list(service_result.get("selected_skills") or []),
+                "summary": dict(service_result.get("summary") or {}),
+            },
         }
 
     node_result = await _run_with_retry(_runner, error_code="plan_failed")
@@ -283,10 +320,11 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(task_plan, TaskPlan):
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
     request = build_execution_request(params, thread_id=_thread_id(state))
+    context = build_execution_context(request)
 
     try:
         service_result = AggregationService().execute(
-            request=request,
+            context=context,
             task_plan=task_plan,
         )
     except AggregationFailure as exc:
@@ -298,10 +336,26 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
                 "merged_items": report.get("merged_items", 0),
                 "failed_subtasks": report.get("failed_subtasks", 0),
             },
+            "result": {
+                "status": "failed",
+                "data": {"aggregate_result": report},
+                "summary": {
+                    "merged_items": report.get("merged_items", 0),
+                    "failed_subtasks": report.get("failed_subtasks", 0),
+                },
+                "aggregate_result": report,
+            },
         }
 
     return {
         **_ok(_node_payload(service_result), _node_artifacts(service_result)),
         "aggregate_result": dict(service_result.get("aggregate_result") or {}),
         "summary": dict(service_result.get("summary") or {}),
+        "result": {
+            "status": "ok",
+            "data": dict(service_result.get("result") or {}),
+            "summary": dict(service_result.get("summary") or {}),
+            "aggregate_result": dict(service_result.get("aggregate_result") or {}),
+            "artifacts": _node_artifacts(service_result),
+        },
     }

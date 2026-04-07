@@ -44,6 +44,18 @@ class URLChannel(abc.ABC):
     async def fetch(self, max_items: int, timeout_s: float | None) -> list[URLTask]:
         """Fetch URL tasks."""
 
+    async def seal(self) -> None:
+        """Signal that no more items will be published."""
+        return None
+
+    async def is_drained(self) -> bool:
+        """Return whether the channel has been sealed and fully drained."""
+        return False
+
+    async def close_with_error(self, reason: str) -> None:
+        """Close channel with an explicit terminal error."""
+        await self.close()
+
     async def close(self) -> None:
         """Close channel (default: no-op)."""
         return None

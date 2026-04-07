@@ -22,13 +22,15 @@ class MemoryURLChannel(URLChannel):
         """
         self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=maxsize)
         self._closed = False  # 标志位：表明通道是否已收到关闭信号
+        self._sealed = False
+        self._error_reason = ""
 
     async def publish(self, url: str) -> None:
         """发布一个新的 URL 任务进入内存队列。
         如果超出 maxsize, 发生阻塞。
         一旦通道关闭，新的推送操作将被忽略。
         """
-        if self._closed:
+        if self._closed or self._sealed:
             return
         await self._queue.put(url)
 
@@ -91,3 +93,13 @@ class MemoryURLChannel(URLChannel):
             return
         self._closed = True
         await self._queue.put(None)
+
+    async def seal(self) -> None:
+        self._sealed = True
+
+    async def is_drained(self) -> bool:
+        return bool(self._sealed and self._queue.empty())
+
+    async def close_with_error(self, reason: str) -> None:
+        self._error_reason = str(reason or "")
+        self._sealed = True

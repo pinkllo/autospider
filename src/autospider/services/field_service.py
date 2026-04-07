@@ -41,6 +41,8 @@ class FieldService:
             headless=request.headless,
             guard_intervention_mode="interrupt",
             guard_thread_id=request.guard_thread_id,
+            budget_key=request.execution_id or request.guard_thread_id,
+            global_browser_budget=request.global_browser_budget,
         ) as session:
             result = await self._run_field_pipeline(
                 page=session.page,
