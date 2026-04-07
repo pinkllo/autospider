@@ -10,7 +10,6 @@ from autospider.common.db.engine import close_db, get_engine, init_db, session_s
 from autospider.common.db.models import TaskRecord, TaskRunItem, TaskRunValidationFailure
 from autospider.common.db.repositories import TaskRepository, TaskRunPayload
 from autospider.common.storage.task_registry import TaskRegistry
-from autospider.services import TaskRunQueryService
 
 
 def _sqlite_url(db_path: Path) -> str:
@@ -201,7 +200,7 @@ def test_repository_allows_same_url_different_page_states(monkeypatch, tmp_path)
     close_db()
 
 
-def test_task_run_query_service_reads_detail(monkeypatch, tmp_path):
+def test_repository_reads_run_detail(monkeypatch, tmp_path):
     _configure_database(monkeypatch, tmp_path)
     init_db(reset=True)
 
@@ -237,8 +236,8 @@ def test_task_run_query_service_reads_detail(monkeypatch, tmp_path):
             )
         )
 
-    service = TaskRunQueryService()
-    detail = service.get_run_detail(execution_id="exec_detail")
+    with session_scope() as session:
+        detail = TaskRepository(session).get_run_detail("exec_detail")
 
     assert detail is not None
     assert detail["task"]["task_description"] == "采集公告"

@@ -88,6 +88,44 @@ def test_legacy_async_file_utils_is_a_shim_to_canonical_module():
     assert not (PROJECT_ROOT / "src" / "common" / "utils" / "file_utils_async.py").exists()
 
 
+def test_services_exports_and_aliases_are_trimmed_to_canonical_entries():
+    source = (PROJECT_ROOT / "src" / "autospider" / "services" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "TaskRunQueryService" not in source
+
+
+def test_service_modules_no_longer_expose_run_aliases():
+    planning_source = (
+        PROJECT_ROOT / "src" / "autospider" / "services" / "planning_service.py"
+    ).read_text(encoding="utf-8")
+    pipeline_source = (
+        PROJECT_ROOT / "src" / "autospider" / "services" / "pipeline_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "async def run(" not in planning_source
+    assert "async def run(" not in pipeline_source
+
+
+def test_capability_nodes_no_longer_define_execute_facades():
+    source = (
+        PROJECT_ROOT / "src" / "autospider" / "graph" / "nodes" / "capability_nodes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "async def execute_pipeline(" not in source
+    assert "async def execute_url_collection(" not in source
+    assert "async def execute_config_generation(" not in source
+    assert "async def execute_batch_collection(" not in source
+    assert "async def execute_field_extraction(" not in source
+    assert "async def execute_planning(" not in source
+    assert "async def execute_aggregation(" not in source
+
+
+def test_task_run_query_service_module_is_removed():
+    assert not (PROJECT_ROOT / "src" / "autospider" / "services" / "task_run_service.py").exists()
+
+
 def test_external_common_python_sources_are_removed():
     common_root = PROJECT_ROOT / "src" / "common"
     assert list(common_root.rglob("*.py")) == []

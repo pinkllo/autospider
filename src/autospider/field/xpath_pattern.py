@@ -20,7 +20,7 @@ from ..common.logger import get_logger
 from ..common.llm.trace_logger import append_llm_trace
 from ..common.utils.paths import get_prompt_path
 from ..common.utils.prompt_template import render_template
-from .value_helpers import is_semantically_valid, looks_like_date, looks_like_number, looks_like_url
+from .value_helpers import is_semantically_valid
 from .xpath_helpers import (
     build_xpath_fallback_chain,
     clean_xpath,
@@ -51,22 +51,6 @@ class FieldXPathExtractor:
     从多个页面的提取记录中分析每个字段的 XPath，
     提取出公共模式，用于批量爬取。
     """
-
-    def __init__(self):
-        api_key = config.llm.planner_api_key or config.llm.api_key
-        api_base = config.llm.planner_api_base or config.llm.api_base
-        model = config.llm.planner_model or config.llm.model
-        self.llm = None
-        if api_key:
-            self.llm = ChatOpenAI(
-                api_key=api_key,
-                base_url=api_base,
-                model=model,
-                temperature=0.0,
-                max_tokens=1024,
-                model_kwargs={"response_format": {"type": "json_object"}},
-                extra_body={"enable_thinking": config.llm.enable_thinking},
-            )
 
     async def extract_common_pattern(
         self,
@@ -193,71 +177,10 @@ class FieldXPathExtractor:
             counter.keys(),
             key=lambda xpath: (
                 -counter[xpath],
-                -self._xpath_stability_score(xpath),
+                -xpath_stability_score(xpath),
                 order_map.get(xpath, 10**9),
             ),
         )
-
-    async def _generate_common_pattern_with_llm(
-        self,
-        field_name: str,
-        source_xpaths: list[str],
-    ) -> str | None:
-        if self.llm is None:
-            return None
-        if not source_xpaths:
-            return None
-
-        system_prompt = render_template(
-            PROMPT_TEMPLATE_PATH,
-            section="common_xpath_system_prompt",
-        )
-        user_prompt = render_template(
-            PROMPT_TEMPLATE_PATH,
-            section="common_xpath_user_prompt",
-            variables={
-                "field_name": field_name,
-                "source_xpaths": "\n".join(
-                    [f"{idx + 1}. {xpath}" for idx, xpath in enumerate(source_xpaths)]
-                ),
-            },
-        )
-
-        try:
-            response = await self.llm.ainvoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=user_prompt),
-                ]
-            )
-            payload = parse_json_dict_from_llm(str(response.content)) or {}
-            raw_xpath = str(payload.get("xpath_pattern") or "").strip()
-            xpath = self._clean_xpath(raw_xpath)
-
-            append_llm_trace(
-                component="field_xpath_pattern",
-                payload={
-                    "model": config.llm.planner_model or config.llm.model,
-                    "input": {
-                        "system_prompt": system_prompt,
-                        "user_prompt": user_prompt,
-                        "field_name": field_name,
-                        "source_xpaths": source_xpaths,
-                    },
-                    "output": {
-                        "raw_response": str(response.content),
-                        "parsed_payload": payload,
-                        "xpath_pattern": xpath,
-                    },
-                },
-            )
-            return xpath
-        except Exception as e:
-            logger.info(f"[FieldXPathExtractor] LLM 生成公共 XPath 失败: {e}")
-            return None
-
-    def _clean_xpath(self, value: str) -> str:
-        return clean_xpath(value)
 
     def _build_union_pattern(self, xpaths: list[str]) -> str | None:
         """
@@ -288,7 +211,7 @@ class FieldXPathExtractor:
             return None
 
         candidates = [xpath for xpath, count in counter.items() if count == top_count]
-        candidates.sort(key=self._xpath_stability_score, reverse=True)
+        candidates.sort(key=xpath_stability_score, reverse=True)
         return candidates[0] if candidates else None
 
     def _build_priority_fallback_xpaths(
@@ -321,7 +244,7 @@ class FieldXPathExtractor:
             counter.keys(),
             key=lambda xpath: (
                 -counter[xpath],
-                -self._xpath_stability_score(xpath),
+                -xpath_stability_score(xpath),
                 order_map.get(xpath, 10**9),
             ),
         )
@@ -356,7 +279,7 @@ class FieldXPathExtractor:
             unique_parts,
             key=lambda xpath: (
                 -counter.get(xpath, 0),
-                -self._xpath_stability_score(xpath),
+                -xpath_stability_score(xpath),
                 order_map.get(xpath, 10**9),
             ),
         )
@@ -393,9 +316,6 @@ class FieldXPathExtractor:
 
         current_conf = self._calculate_pattern_confidence(source_xpaths, current_pattern)
         return union_conf >= (current_conf + 0.25)
-
-    def _xpath_stability_score(self, xpath: str) -> float:
-        return xpath_stability_score(xpath)
 
     def _is_over_broad_pattern(self, xpath: str) -> bool:
         """
@@ -1122,14 +1042,6 @@ def _get_default_xpath_value_validator() -> XPathValueLLMValidator | None:
     return _DEFAULT_XPATH_VALUE_VALIDATOR
 
 
-def _build_xpath_fallback_chain(
-    xpath_pattern: str,
-    fallback_xpaths: list[str] | None = None,
-) -> list[str]:
-    """构建 XPath 优先级链：主 XPath 在前，fallback 依次在后。"""
-    return build_xpath_fallback_chain(xpath_pattern, fallback_xpaths)
-
-
 async def validate_xpath_pattern(
     page: "Page",
     url: str,
@@ -1172,7 +1084,7 @@ async def validate_xpath_pattern(
         await page.goto(url, wait_until="domcontentloaded")
         # 对 SPA 页面增加一次“稳定化等待”，降低首屏异步渲染导致的误判。
         await _wait_for_page_settle(page)
-        xpath_chain = _build_xpath_fallback_chain(xpath_pattern, fallback_xpaths)
+        xpath_chain = build_xpath_fallback_chain(xpath_pattern, fallback_xpaths)
         trace["xpath_chain"] = xpath_chain
         if not xpath_chain:
             trace["failure_reason"] = "invalid_xpath_chain"
@@ -1241,7 +1153,7 @@ async def validate_xpath_pattern(
                         continue
 
             # 仅做通用类型校验（不通过则尝试下一条 fallback）
-            if not _is_semantically_valid(selected_value, data_type):
+            if not is_semantically_valid(selected_value, data_type):
                 logger.info(
                     "[validate_xpath_pattern] 值未通过类型语义校验: field=%s, value=%s",
                     field_name or "",
@@ -1283,25 +1195,6 @@ def _to_bool(value: object) -> bool:
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip().lower()
-
-
-def _looks_like_url(value: str) -> bool:
-    return looks_like_url(value)
-
-
-def _looks_like_number(value: str) -> bool:
-    return looks_like_number(value)
-
-
-def _looks_like_date(value: str) -> bool:
-    return looks_like_date(value)
-
-
-def _is_semantically_valid(
-    value: str,
-    data_type: str | None,
-) -> bool:
-    return is_semantically_valid(value, data_type)
 
 
 async def _wait_for_page_settle(

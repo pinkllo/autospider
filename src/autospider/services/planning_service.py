@@ -87,6 +87,3 @@ class PlanningService:
             "selected_skills": list(planner.selected_skills or []),
             "result": {"task_plan": plan},
         }
-
-    async def run(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        return await self.execute(params=params, thread_id=thread_id)

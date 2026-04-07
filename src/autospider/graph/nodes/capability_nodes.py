@@ -130,71 +130,15 @@ async def _retry_after_browser_interrupt(
     return await retry(state)
 
 
-async def execute_pipeline(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    return await PipelineExecutionService().execute(params=params, thread_id=thread_id)
-
-
-async def execute_url_collection(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    return await CollectionService().collect_urls(params=params, thread_id=thread_id)
-
-
-async def execute_config_generation(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    return await CollectionService().generate_config(params=params, thread_id=thread_id)
-
-
-async def execute_batch_collection(
-    *,
-    params: dict[str, Any],
-    thread_id: str,
-    collection_config: dict[str, Any],
-) -> dict[str, Any]:
-    return await CollectionService().batch_collect(
-        params=params,
-        state={"collection_config": collection_config},
-        thread_id=thread_id,
-    )
-
-
-async def execute_field_extraction(
-    *,
-    params: dict[str, Any],
-    thread_id: str,
-    collected_urls: list[str],
-) -> dict[str, Any]:
-    return await FieldService().execute(
-        params=params,
-        state={"collected_urls": collected_urls},
-        thread_id=thread_id,
-    )
-
-
-async def execute_planning(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    return await PlanningService().execute(params=params, thread_id=thread_id)
-
-
-async def execute_aggregation(
-    *,
-    params: dict[str, Any],
-    task_plan: TaskPlan,
-    dispatch_result: dict[str, Any] | None = None,
-    subtask_results: list[dict[str, Any]] | None = None,
-    plan_knowledge: str = "",
-) -> dict[str, Any]:
-    return AggregationService().execute(
-        params=params,
-        task_plan=task_plan,
-        dispatch_result=dispatch_result,
-        subtask_results=subtask_results,
-        plan_knowledge=plan_knowledge,
-    )
-
-
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_pipeline(params=params, thread_id=_thread_id(state))
+            service_result = await PipelineExecutionService().execute(
+                params=params,
+                thread_id=_thread_id(state),
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -214,7 +158,10 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_url_collection(params=params, thread_id=_thread_id(state))
+            service_result = await CollectionService().collect_urls(
+                params=params,
+                thread_id=_thread_id(state),
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -234,7 +181,10 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_config_generation(params=params, thread_id=_thread_id(state))
+            service_result = await CollectionService().generate_config(
+                params=params,
+                thread_id=_thread_id(state),
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -254,10 +204,10 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_batch_collection(
+            service_result = await CollectionService().batch_collect(
                 params=params,
+                state={"collection_config": collection_config},
                 thread_id=_thread_id(state),
-                collection_config=collection_config,
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -280,10 +230,10 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_field_extraction(
+            service_result = await FieldService().execute(
                 params=params,
+                state={"collected_urls": collected_urls},
                 thread_id=_thread_id(state),
-                collected_urls=collected_urls,
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -304,7 +254,10 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await execute_planning(params=params, thread_id=_thread_id(state))
+            service_result = await PlanningService().execute(
+                params=params,
+                thread_id=_thread_id(state),
+            )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -335,7 +288,7 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
 
     async def _runner() -> dict[str, Any]:
-        service_result = await execute_aggregation(
+        service_result = AggregationService().execute(
             params=params,
             task_plan=task_plan,
             dispatch_result=dict(state.get("dispatch_result") or {}),

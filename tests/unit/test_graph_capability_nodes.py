@@ -28,20 +28,21 @@ class _FakePlannerEmpty:
 
 
 def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
-    async def _fake_execute_planning(*, params, thread_id):
-        planner = _FakePlannerEmpty(
-            page=SimpleNamespace(url="https://example.com/list"),
-            site_url=str(params.get("list_url") or ""),
-            user_request=str(params.get("task_description") or ""),
-            output_dir=str(params.get("output_dir") or "output"),
-        )
-        return {
-            "task_plan": await planner.plan(),
-            "selected_skills": [],
-            "summary": {"total_subtasks": 0},
-        }
+    class _FakePlanningService:
+        async def execute(self, *, params, thread_id):
+            planner = _FakePlannerEmpty(
+                page=SimpleNamespace(url="https://example.com/list"),
+                site_url=str(params.get("list_url") or ""),
+                user_request=str(params.get("task_description") or ""),
+                output_dir=str(params.get("output_dir") or "output"),
+            )
+            return {
+                "task_plan": await planner.plan(),
+                "selected_skills": [],
+                "summary": {"total_subtasks": 0},
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_planning", _fake_execute_planning)
+    monkeypatch.setattr(capability_nodes, "PlanningService", _FakePlanningService)
 
     result = asyncio.run(
         capability_nodes.plan_node(
@@ -64,25 +65,26 @@ def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
 
 
 def test_generate_config_node_persists_collection_config_in_state(monkeypatch, tmp_path):
-    async def _fake_execute_config_generation(*, params, thread_id):
-        return {
-            "collection_config": {
-                "nav_steps": [{"action": "click", "target": "招标公告"}],
-                "common_detail_xpath": "//a[@class=\"detail\"]",
-                "pagination_xpath": "//a[@class=\"next\"]",
-                "jump_widget_xpath": {"input": "//input", "button": "//button"},
-                "list_url": params["list_url"],
-                "task_description": params["task"],
-            },
-            "summary": {
-                "nav_steps": 1,
-                "has_common_detail_xpath": True,
-                "has_pagination_xpath": True,
-                "has_jump_widget_xpath": True,
-            },
-        }
+    class _FakeCollectionService:
+        async def generate_config(self, *, params, thread_id):
+            return {
+                "collection_config": {
+                    "nav_steps": [{"action": "click", "target": "招标公告"}],
+                    "common_detail_xpath": "//a[@class=\"detail\"]",
+                    "pagination_xpath": "//a[@class=\"next\"]",
+                    "jump_widget_xpath": {"input": "//input", "button": "//button"},
+                    "list_url": params["list_url"],
+                    "task_description": params["task"],
+                },
+                "summary": {
+                    "nav_steps": 1,
+                    "has_common_detail_xpath": True,
+                    "has_pagination_xpath": True,
+                    "has_jump_widget_xpath": True,
+                },
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_config_generation", _fake_execute_config_generation)
+    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
 
     result = asyncio.run(
         capability_nodes.generate_config_node(
@@ -105,15 +107,17 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
 
 
 def test_batch_collect_node_can_use_collection_config_from_state(monkeypatch, tmp_path):
-    async def _fake_execute_batch_collection(*, params, thread_id, collection_config):
-        assert collection_config["list_url"] == "https://example.com/list"
-        return {
-            "collection_config": collection_config,
-            "collected_urls": ["https://example.com/a", "https://example.com/b"],
-            "collection_progress": {"collected_count": 2},
-        }
+    class _FakeCollectionService:
+        async def batch_collect(self, *, params, state, thread_id):
+            collection_config = state["collection_config"]
+            assert collection_config["list_url"] == "https://example.com/list"
+            return {
+                "collection_config": collection_config,
+                "collected_urls": ["https://example.com/a", "https://example.com/b"],
+                "collection_progress": {"collected_count": 2},
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_batch_collection", _fake_execute_batch_collection)
+    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -144,14 +148,15 @@ def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monke
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    async def _fake_execute_url_collection(*, params, thread_id):
-        captured.update(params)
-        return {
-            "collected_urls": ["https://example.com/a"],
-            "collection_progress": {"collected_count": 1},
-        }
+    class _FakeCollectionService:
+        async def collect_urls(self, *, params, thread_id):
+            captured.update(params)
+            return {
+                "collected_urls": ["https://example.com/a"],
+                "collection_progress": {"collected_count": 1},
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_url_collection", _fake_execute_url_collection)
+    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
 
     result = asyncio.run(
         capability_nodes.collect_urls_node(
@@ -177,15 +182,16 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    async def _fake_execute_batch_collection(*, params, thread_id, collection_config):
-        captured.update(params)
-        return {
-            "collection_config": collection_config,
-            "collected_urls": ["https://example.com/a"],
-            "collection_progress": {"collected_count": 1},
-        }
+    class _FakeCollectionService:
+        async def batch_collect(self, *, params, state, thread_id):
+            captured.update(params)
+            return {
+                "collection_config": state["collection_config"],
+                "collected_urls": ["https://example.com/a"],
+                "collection_progress": {"collected_count": 1},
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_batch_collection", _fake_execute_batch_collection)
+    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -213,20 +219,21 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
 
 
 def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
-    async def _fake_execute_field_extraction(*, params, thread_id, collected_urls):
-        assert collected_urls == ["https://example.com/a", "https://example.com/b"]
-        return {
-            "fields_config": [{"name": "title", "xpath": "//h1"}],
-            "xpath_result": {
-                "fields": [{"name": "title", "xpath": "//h1"}],
-                "records": [{"url": "https://example.com/a", "success": True}],
-                "total_urls": 2,
-                "success_count": 2,
-            },
-            "summary": {"url_count": 2, "field_count": 1},
-        }
+    class _FakeFieldService:
+        async def execute(self, *, params, state, thread_id):
+            assert state["collected_urls"] == ["https://example.com/a", "https://example.com/b"]
+            return {
+                "fields_config": [{"name": "title", "xpath": "//h1"}],
+                "xpath_result": {
+                    "fields": [{"name": "title", "xpath": "//h1"}],
+                    "records": [{"url": "https://example.com/a", "success": True}],
+                    "total_urls": 2,
+                    "success_count": 2,
+                },
+                "summary": {"url_count": 2, "field_count": 1},
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_field_extraction", _fake_execute_field_extraction)
+    monkeypatch.setattr(capability_nodes, "FieldService", _FakeFieldService)
 
     result = asyncio.run(
         capability_nodes.field_extract_node(
@@ -248,22 +255,23 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
 
 
 def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
-    async def _fake_execute_pipeline(*, params, thread_id):
-        return {
-            "total_urls": 4,
-            "success_count": 3,
-            "failed_count": 1,
-            "success_rate": 0.75,
-            "required_field_success_rate": 0.75,
-            "validation_failure_count": 0,
-            "execution_state": "completed",
-            "outcome_state": "success",
-            "promotion_state": "reusable",
-            "items_file": str(tmp_path / "pipeline_extracted_items.jsonl"),
-            "execution_id": "exec_123",
-        }
+    class _FakePipelineExecutionService:
+        async def execute(self, *, params, thread_id):
+            return {
+                "total_urls": 4,
+                "success_count": 3,
+                "failed_count": 1,
+                "success_rate": 0.75,
+                "required_field_success_rate": 0.75,
+                "validation_failure_count": 0,
+                "execution_state": "completed",
+                "outcome_state": "success",
+                "promotion_state": "reusable",
+                "items_file": str(tmp_path / "pipeline_extracted_items.jsonl"),
+                "execution_id": "exec_123",
+            }
 
-    monkeypatch.setattr(capability_nodes, "execute_pipeline", _fake_execute_pipeline)
+    monkeypatch.setattr(capability_nodes, "PipelineExecutionService", _FakePipelineExecutionService)
 
     result = asyncio.run(
         capability_nodes.run_pipeline_node(

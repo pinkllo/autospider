@@ -36,7 +36,8 @@ from .models import (
     PageExtractionRecord,
 )
 from .skill_context import apply_selected_skill_context, load_field_skill_context
-from .value_helpers import is_semantically_valid, looks_like_date, looks_like_number, looks_like_url
+from .value_helpers import is_semantically_valid
+from .xpath_helpers import xpath_stability_score
 
 logger = get_logger(__name__)
 from .field_decider import FieldDecider
@@ -881,51 +882,11 @@ class FieldExtractor:
             )
             if not verified:
                 continue
-            stability = self._xpath_stability_score(xpath)
+            stability = xpath_stability_score(xpath)
             if stability > best_score:
                 best_score = stability
                 best_xpath = xpath
         return best_xpath
-
-    def _xpath_stability_score(self, xpath: str) -> float:
-        """
-        对 XPath 做稳定性评分。
-        越依赖锚点属性（如 @id）分越高；越依赖深层数字索引分越低。
-        对吸顶/浮层/弹窗等易波动节点做额外惩罚。
-        """
-        value = (xpath or "").strip()
-        if not value:
-            return -10.0
-
-        lower = value.lower()
-        score = 0.0
-        if "@id=" in lower:
-            score += 4.0
-        if "@data-" in lower:
-            score += 1.5
-        if "@class" in lower:
-            score += 0.8
-        if lower.startswith("//*[@id="):
-            score += 0.8
-
-        numeric_index_count = len(re.findall(r"\[\d+\]", value))
-        score -= numeric_index_count * 0.25
-
-        depth = value.count("/")
-        if depth > 10:
-            score -= (depth - 10) * 0.08
-
-        if "//" in value[2:] and "@id=" not in lower and "@class" not in lower:
-            score -= 0.8
-
-        volatile_tokens = ("fixed", "sticky", "float", "popup", "modal", "dialog", "mask")
-        if any(token in lower for token in volatile_tokens):
-            score -= 2.0
-
-        if re.search(r'@id\s*=\s*["\'][^"\']*\d{6,}[^"\']*["\']', lower):
-            score -= 0.6
-
-        return score
 
     async def _highlight_candidates(self, candidates: list[dict]) -> None:
         """高亮候选元素"""
@@ -1080,7 +1041,7 @@ class FieldExtractor:
             return False, None
 
         selected_value = matched_values[0]
-        if not self._is_value_semantically_valid(selected_value, dtype):
+        if not is_semantically_valid(selected_value, dtype):
             return False, None
 
         if self._is_xpath_semantically_suspicious(xpath, field, matched_tags):
@@ -1180,15 +1141,3 @@ class FieldExtractor:
         if matched_tags and all(tag in interactive_tags for tag in matched_tags):
             return True
         return False
-
-    def _is_value_semantically_valid(self, value: str, data_type: str) -> bool:
-        return is_semantically_valid(value, data_type)
-
-    def _looks_like_url(self, value: str) -> bool:
-        return looks_like_url(value)
-
-    def _looks_like_number(self, value: str) -> bool:
-        return looks_like_number(value)
-
-    def _looks_like_date(self, value: str) -> bool:
-        return looks_like_date(value)

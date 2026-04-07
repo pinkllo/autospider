@@ -16,6 +16,29 @@ from .idempotent_io import write_json_idempotent, write_text_if_changed
 
 logger = get_logger(__name__)
 
+_CONFIG_PAYLOAD_FIELDS = (
+    "nav_steps",
+    "common_detail_xpath",
+    "pagination_xpath",
+    "jump_widget_xpath",
+    "list_url",
+    "task_description",
+)
+_PROGRESS_PAYLOAD_FIELDS = (
+    "status",
+    "pause_reason",
+    "list_url",
+    "task_description",
+    "current_page_num",
+    "collected_count",
+    "backoff_level",
+    "consecutive_success_pages",
+)
+
+
+class CollectionConfigLoadError(RuntimeError):
+    """Raised when a persisted collection config cannot be loaded safely."""
+
 
 
 @dataclass
@@ -54,6 +77,10 @@ class CollectionConfig:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    def to_payload(self) -> dict[str, Any]:
+        data = self.to_dict()
+        return {field: data[field] for field in _CONFIG_PAYLOAD_FIELDS}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CollectionConfig":
@@ -169,6 +196,10 @@ class CollectionProgress:
             "last_updated": self.last_updated,
         }
 
+    def to_payload(self) -> dict[str, Any]:
+        data = self.to_dict()
+        return {field: data[field] for field in _PROGRESS_PAYLOAD_FIELDS}
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CollectionProgress":
         """从字典创建"""
@@ -281,3 +312,20 @@ class ProgressPersistence:
             self.progress_file.unlink()
         if file_exists(self.urls_file):
             self.urls_file.unlink()
+
+
+def load_collection_config(config_path: str | Path, *, strict: bool = True) -> CollectionConfig | None:
+    path = Path(config_path)
+    if not path.exists():
+        return None
+    try:
+        data = load_json(path)
+    except Exception as exc:
+        if not strict:
+            return None
+        raise CollectionConfigLoadError(f"collection config load failed: {path}") from exc
+    if not isinstance(data, dict):
+        if not strict:
+            return None
+        raise CollectionConfigLoadError(f"collection config payload must be an object: {path}")
+    return CollectionConfig.from_dict(data)

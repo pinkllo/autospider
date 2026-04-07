@@ -87,6 +87,3 @@ class PipelineExecutionService:
             "artifacts": artifacts,
             "result": pipeline_result,
         }
-
-    async def run(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        return await self.execute(params=params, thread_id=thread_id)

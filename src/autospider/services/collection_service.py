@@ -6,14 +6,12 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..common.browser import create_browser_session as default_create_browser_session
+from ..common.storage.persistence import CollectionConfig, CollectionProgress, load_collection_config
 from ..crawler.batch.batch_collector import batch_collect_urls as default_batch_collect_urls
 from ..crawler.explore.config_generator import generate_collection_config as default_generate_collection_config
 from ..crawler.explore.url_collector import collect_detail_urls as default_collect_detail_urls
 from .service_utils import (
     build_artifact,
-    collection_config_payload,
-    collection_progress_payload,
-    load_collection_config_payload,
     materialize_collection_config,
 )
 
@@ -43,6 +41,20 @@ class CollectionService:
             "guard_thread_id": thread_id,
         }
 
+    @staticmethod
+    def _build_collection_progress(*, list_url: str, task_description: str, collected_count: int) -> dict[str, Any]:
+        progress = CollectionProgress(
+            status="COMPLETED",
+            pause_reason=None,
+            list_url=list_url,
+            task_description=task_description,
+            current_page_num=1,
+            collected_count=collected_count,
+            backoff_level=0,
+            consecutive_success_pages=0,
+        )
+        return progress.to_payload()
+
     async def collect_urls(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
         async with self._create_browser_session(**self._session_options(params=params, thread_id=thread_id)) as session:
             result = await self._collect_detail_urls(
@@ -61,7 +73,7 @@ class CollectionService:
         collected_urls = list(result.collected_urls)
         return {
             "collected_urls": collected_urls,
-            "collection_progress": collection_progress_payload(
+            "collection_progress": self._build_collection_progress(
                 list_url=str(params.get("list_url") or ""),
                 task_description=str(params.get("task") or ""),
                 collected_count=len(collected_urls),
@@ -88,7 +100,7 @@ class CollectionService:
             )
 
         output_dir = Path(str(params.get("output_dir") or "output"))
-        payload = collection_config_payload(config_result)
+        payload = CollectionConfig.from_dict(config_result.to_dict()).to_payload()
         return {
             "collection_config": payload,
             "summary": {
@@ -131,12 +143,15 @@ class CollectionService:
 
         output_dir = Path(str(params.get("output_dir") or "output"))
         if not collection_config:
-            collection_config = load_collection_config_payload(config_path, strict=True)
+            loaded_config = load_collection_config(config_path, strict=True)
+            if loaded_config is None:
+                raise ValueError("missing_collection_config")
+            collection_config = loaded_config.to_payload()
         collected_urls = list(result.collected_urls)
         return {
             "collection_config": collection_config,
             "collected_urls": collected_urls,
-            "collection_progress": collection_progress_payload(
+            "collection_progress": self._build_collection_progress(
                 list_url=str(collection_config.get("list_url") or params.get("list_url") or ""),
                 task_description=str(
                     collection_config.get("task_description") or params.get("task") or ""
