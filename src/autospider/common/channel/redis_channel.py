@@ -7,9 +7,13 @@ import socket
 import os
 from collections import deque
 
+from autospider.common.logger import get_logger
+
 from .base import URLChannel, URLTask
 from ..storage.redis_manager import RedisQueueManager
 from ..config import config
+
+logger = get_logger(__name__)
 
 
 class RedisURLChannel(URLChannel):
@@ -76,7 +80,8 @@ class RedisURLChannel(URLChannel):
                     await self._recover_pending_once()
                 except asyncio.CancelledError:
                     break   # 当关闭通道时，任务被主动取消退出循环
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[RedisURLChannel] 后台恢复失败: %s", exc)
                     continue  # 防止偶尔的断连异常终止整个循环
 
         # 创建后台常驻任务
@@ -89,7 +94,9 @@ class RedisURLChannel(URLChannel):
             
         # 建立底层 Redis 链接客户端
         client = await self.manager.connect()
-        self._connected = client is not None
+        if client is None:
+            raise RuntimeError("redis_channel_unavailable")
+        self._connected = True
         
         if self._connected and config.redis.auto_recover:
             # 刚连上时优先强行恢复一波之前可能遗留的超时数据
@@ -104,8 +111,6 @@ class RedisURLChannel(URLChannel):
             url: 被处理的目标 URL 字符串
         """
         await self._ensure_connected()
-        if not self._connected:
-            return
         # 使用 manager 投递任务到流的队尾
         await self.manager.push_task(url)
 
@@ -120,8 +125,6 @@ class RedisURLChannel(URLChannel):
             URLTask 对象序列
         """
         await self._ensure_connected()
-        if not self._connected:
-            return []
 
         # 获取超时参数换算适配为阻塞毫秒数
         block_ms = self.block_ms

@@ -10,6 +10,10 @@ from ..common.storage.idempotent_io import write_json_idempotent
 from ..domain.fields import FieldDefinition
 
 
+class CollectionConfigLoadError(RuntimeError):
+    """Raised when a persisted collection config exists but cannot be loaded safely."""
+
+
 def build_field_definitions(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
     fields: list[FieldDefinition] = []
     for raw in raw_fields:
@@ -42,16 +46,20 @@ def collection_config_payload(config_obj: Any) -> dict[str, Any]:
     }
 
 
-def load_collection_config_payload(config_path: str | Path) -> dict[str, Any]:
+def load_collection_config_payload(config_path: str | Path, *, strict: bool = True) -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    except Exception as exc:  # noqa: BLE001
+        if not strict:
+            return {}
+        raise CollectionConfigLoadError(f"collection config load failed: {path}") from exc
     if not isinstance(raw, dict):
-        return {}
+        if not strict:
+            return {}
+        raise CollectionConfigLoadError(f"collection config payload must be an object: {path}")
     return {
         "nav_steps": list(raw.get("nav_steps") or []),
         "common_detail_xpath": raw.get("common_detail_xpath"),

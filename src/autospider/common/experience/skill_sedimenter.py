@@ -13,6 +13,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Any
 
 from ..config import config
@@ -113,6 +114,7 @@ class SkillSedimenter:
             fields=payload.fields,
             extraction_config=dict(payload.extraction_config or {}),
             extraction_evidence=extraction_evidence,
+            validation_failures=list(payload.validation_failures or []),
         )
         if not self._candidate_has_usable_rules(effective_extraction_config):
             return None
@@ -336,6 +338,7 @@ class SkillSedimenter:
             summary=summary,
             subtask_names=self._merge_candidate_subtask_names(ordered_candidates),
             status=str(primary.status or "validated"),
+            variant_count=len(ordered_candidates),
         )
         variants = [
             self._build_variant_rule(candidate=candidate, fields=fields)
@@ -383,6 +386,7 @@ class SkillSedimenter:
                 data_type=str(ef.get("data_type") or "text"),
                 extraction_source=str(ef.get("extraction_source") or ""),
                 fixed_value=str(ef.get("fixed_value") or ""),
+                replace_primary=bool(ef.get("replace_primary")),
             )
         return field_rules
 
@@ -451,6 +455,7 @@ class SkillSedimenter:
         fields: list[dict[str, Any]],
         extraction_config: dict[str, Any],
         extraction_evidence: list[dict[str, Any]],
+        validation_failures: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         successful_records = [
             {"extraction_config": dict(item.get("extraction_config") or {})}
@@ -458,7 +463,12 @@ class SkillSedimenter:
             if isinstance(item, dict) and item.get("success")
         ]
         if successful_records:
-            merged = self._merge_subtask_xpaths(successful_records, fields)
+            merged = self._merge_subtask_xpaths(
+                successful_records,
+                fields,
+                base_fields=list(dict(extraction_config or {}).get("fields") or []),
+                validation_failures=list(validation_failures or []),
+            )
             if self._candidate_has_usable_rules(merged):
                 return self._merge_evidence_into_config(
                     base_config=extraction_config,
@@ -512,6 +522,7 @@ class SkillSedimenter:
         summary: dict[str, Any],
         subtask_names: list[str] | None = None,
         status: str = "validated",
+        variant_count: int = 0,
     ) -> SkillRuleData:
         """提取结构化规则层（纯代码逻辑，不用 LLM）。"""
         field_desc_map = {
@@ -531,10 +542,12 @@ class SkillSedimenter:
         return SkillRuleData(
             domain=domain,
             name=f"{domain} 站点采集",
-            description=(
-                f"{domain} 数据采集技能。"
-                f"包含列表页导航、分页处理和字段提取的操作指南。"
-                f"状态: {'已验证' if status == 'validated' else '草稿'}。"
+            description=self._build_skill_description(
+                domain=domain,
+                collection_config=collection_config,
+                extraction_config=extraction_config,
+                variant_count=variant_count,
+                status=status,
             ),
             list_url=list_url,
             task_description=task_description,
@@ -565,6 +578,34 @@ class SkillSedimenter:
             rules=rules,
             insights_markdown=insights.strip(),
         )
+
+    def _build_skill_description(
+        self,
+        *,
+        domain: str,
+        collection_config: dict[str, Any],
+        extraction_config: dict[str, Any],
+        variant_count: int,
+        status: str,
+    ) -> str:
+        tags: list[str] = []
+        if variant_count > 1:
+            tags.append(f"覆盖 {variant_count} 个分类变体")
+        if collection_config.get("nav_steps"):
+            tags.append("含页面导航规则")
+        if collection_config.get("pagination_xpath") or collection_config.get("jump_widget_xpath"):
+            tags.append("含分页处理")
+        validated_fields = sum(
+            1
+            for field in list(extraction_config.get("fields") or [])
+            if isinstance(field, dict) and field.get("xpath_validated")
+        )
+        if validated_fields > 0:
+            tags.append(f"{validated_fields} 个字段已验证")
+        if not tags:
+            tags.append("聚焦列表页采集经验")
+        state = "已验证" if status == "validated" else "草稿"
+        return f"{domain} 数据采集技能，{'，'.join(tags)}。状态: {state}。"
 
     def _generate_insights(
         self,
@@ -600,6 +641,134 @@ class SkillSedimenter:
 
         return rule_based
 
+    def _build_insight_context(
+        self,
+        *,
+        domain: str,
+        extraction_config: dict[str, Any],
+        validation_failures: list[dict[str, Any]],
+        summary: dict[str, Any],
+        plan_knowledge: str = "",
+    ) -> str:
+        context_parts: list[str] = [f"站点域名: {domain}"]
+
+        success_count = int(summary.get("success_count", 0) or 0)
+        total_urls = int(summary.get("total_urls", 0) or 0)
+        context_parts.append(f"成功率: {success_count}/{total_urls}")
+
+        if plan_knowledge:
+            context_parts.append(f"规划发现过程记录：\n{plan_knowledge[:3000]}")
+
+        field_summary = self._summarize_field_patterns(extraction_config)
+        if field_summary:
+            context_parts.append(field_summary)
+
+        variant_summary = self._summarize_variant_patterns(extraction_config)
+        if variant_summary:
+            context_parts.append(variant_summary)
+
+        failure_summary = self._summarize_failure_patterns(validation_failures)
+        if failure_summary:
+            context_parts.append(failure_summary)
+
+        return "\n\n".join(context_parts)
+
+    def _summarize_field_patterns(self, extraction_config: dict[str, Any]) -> str:
+        ext_fields = [
+            field for field in list(extraction_config.get("fields") or []) if isinstance(field, dict)
+        ]
+        if not ext_fields:
+            return ""
+
+        field_lines: list[str] = []
+        validated_count = 0
+        fallback_heavy_fields: list[str] = []
+        for ef in ext_fields:
+            name = str(ef.get("name") or "").strip()
+            if not name:
+                continue
+            xpath = str(ef.get("xpath") or "").strip()
+            validated = bool(ef.get("xpath_validated"))
+            if validated:
+                validated_count += 1
+            fallbacks = [
+                str(item).strip() for item in list(ef.get("xpath_fallbacks") or []) if str(item).strip()
+            ]
+            extraction_source = str(ef.get("extraction_source") or "").strip()
+            if len(fallbacks) >= 2:
+                fallback_heavy_fields.append(name)
+            field_lines.append(
+                f"- {name}: source={extraction_source or 'xpath'}, xpath={xpath or '无'}, "
+                f"validated={validated}, fallback_count={len(fallbacks)}"
+            )
+
+        summary_lines = [
+            f"字段规则概览: 共 {len(field_lines)} 个字段，{validated_count} 个已验证。",
+            *field_lines,
+        ]
+        if fallback_heavy_fields:
+            summary_lines.append(
+                f"字段稳定性提示: {', '.join(fallback_heavy_fields)} 存在较多 fallback，说明结构可能不稳定。"
+            )
+        return "\n".join(summary_lines)
+
+    def _summarize_variant_patterns(self, extraction_config: dict[str, Any]) -> str:
+        variants = [
+            variant for variant in list(extraction_config.get("variants") or []) if isinstance(variant, dict)
+        ]
+        if not variants:
+            return ""
+
+        labels = [str(variant.get("label") or "").strip() for variant in variants]
+        labels = [label for label in labels if label]
+        sample_labels = ", ".join(labels[:6]) if labels else "未命名"
+        return f"变体概览: 共 {len(variants)} 个变体，示例标签: {sample_labels}。"
+
+    def _summarize_failure_patterns(self, validation_failures: list[dict[str, Any]]) -> str:
+        if not validation_failures:
+            return ""
+
+        reason_counter: Counter[str] = Counter()
+        field_counter: Counter[str] = Counter()
+        for fail in validation_failures:
+            for field in list(fail.get("fields") or []):
+                if not isinstance(field, dict):
+                    continue
+                reason = self._normalize_failure_reason(field.get("error"))
+                if reason:
+                    reason_counter[reason] += 1
+                name = str(field.get("field_name") or "").strip()
+                if name:
+                    field_counter[name] += 1
+
+        if not reason_counter and not field_counter:
+            return ""
+
+        lines = ["失败模式概览:"]
+        for reason, count in reason_counter.most_common(5):
+            lines.append(f"- 根因: {reason}（{count} 次）")
+        if field_counter:
+            fields = ", ".join(f"{name}({count})" for name, count in field_counter.most_common(5))
+            lines.append(f"- 高频失败字段: {fields}")
+        return "\n".join(lines)
+
+    def _normalize_failure_reason(self, error: Any) -> str:
+        text = str(error or "").strip()
+        if not text:
+            return ""
+        lowered = text.lower()
+        normalized_patterns = [
+            (r"timeout|timed out|超时", "等待超时或页面未稳定"),
+            (r"not found|no such element|未找到|不存在", "元素定位失败"),
+            (r"empty|为空|blank", "提取结果为空"),
+            (r"stale", "DOM 刷新导致元素失效"),
+            (r"intercepted|click", "点击或交互失败"),
+        ]
+        for pattern, label in normalized_patterns:
+            if re.search(pattern, lowered):
+                return label
+        return text[:80]
+
     def _rule_based_insights(
         self,
         *,
@@ -614,28 +783,56 @@ class SkillSedimenter:
 
         success_count = int(summary.get("success_count", 0) or 0)
         total_urls = int(summary.get("total_urls", 0) or 0)
+        ext_fields = [
+            field for field in list(extraction_config.get("fields") or []) if isinstance(field, dict)
+        ]
 
-        # 站点特征
+        overview: list[str] = []
         if total_urls > 0:
             rate = success_count / total_urls * 100
-            parts.append(f"**站点特征**\n本站成功率 {rate:.0f}% ({success_count}/{total_urls})。")
+            overview.append(f"本次沉淀成功率 {rate:.0f}% ({success_count}/{total_urls})")
+        validated_count = sum(1 for field in ext_fields if field.get("xpath_validated"))
+        if ext_fields:
+            overview.append(f"{validated_count}/{len(ext_fields)} 个字段规则已验证")
+        if overview:
+            parts.append("- 总览：" + "；".join(overview) + "。")
 
-        # 已知问题
-        if validation_failures:
-            failure_reasons: Counter[str] = Counter()
-            for fail in validation_failures:
-                for f in fail.get("fields", []):
-                    if f.get("error"):
-                        failure_reasons[str(f["error"])] += 1
-            if failure_reasons:
-                problem_lines = [f"- {reason}（出现 {count} 次）" for reason, count in failure_reasons.most_common(5)]
-                parts.append("**避坑指南**\n" + "\n".join(problem_lines))
-            else:
-                parts.append("**避坑指南**\n暂无已知问题。")
-        else:
-            parts.append("**避坑指南**\n暂无已知问题。")
+        reusable_rules: list[str] = []
+        fallback_heavy_fields: list[str] = []
+        unvalidated_fields: list[str] = []
+        for field in ext_fields:
+            name = str(field.get("name") or "").strip()
+            if not name:
+                continue
+            fallbacks = [
+                str(item).strip() for item in list(field.get("xpath_fallbacks") or []) if str(item).strip()
+            ]
+            if len(fallbacks) >= 2:
+                fallback_heavy_fields.append(name)
+            if not field.get("xpath_validated"):
+                unvalidated_fields.append(name)
+        if validated_count == len(ext_fields) and ext_fields:
+            reusable_rules.append("主字段规则整体较稳定，可优先复用当前提取路径")
+        if fallback_heavy_fields:
+            reusable_rules.append(
+                f"字段 {', '.join(fallback_heavy_fields)} 需要依赖多个 fallback，页面结构可能随状态变化"
+            )
+        if unvalidated_fields:
+            reusable_rules.append(
+                f"字段 {', '.join(unvalidated_fields)} 尚未稳定验证，不宜当作强规则沉淀"
+            )
+        if reusable_rules:
+            parts.append("- 可复用经验：" + "；".join(reusable_rules) + "。")
 
-        return "\n\n".join(parts)
+        failure_summary = self._summarize_failure_patterns(validation_failures)
+        if failure_summary:
+            lines = [line.strip() for line in failure_summary.splitlines() if line.strip()]
+            if len(lines) > 1:
+                parts.append("- 风险提示：" + "；".join(lines[1:]) + "。")
+        elif not parts:
+            parts.append("- 暂无足够证据生成高价值经验，建议补充更多成功/失败样本后再沉淀。")
+
+        return "\n".join(parts)
 
     def _llm_insights(
         self,
@@ -650,57 +847,26 @@ class SkillSedimenter:
         if not config.llm.api_key:
             return None
 
-        context_parts: list[str] = []
-        context_parts.append(f"站点域名: {domain}")
-
-        success_count = int(summary.get("success_count", 0) or 0)
-        total_urls = int(summary.get("total_urls", 0) or 0)
-        context_parts.append(f"成功率: {success_count}/{total_urls}")
-
-        if plan_knowledge:
-            context_parts.append(f"规划发现过程记录：\n{plan_knowledge[:2000]}")
-
-        ext_fields = extraction_config.get("fields", [])
-        if ext_fields:
-            field_lines = []
-            for ef in ext_fields:
-                if not isinstance(ef, dict):
-                    continue
-                name = ef.get("name", "")
-                xpath = ef.get("xpath", "")
-                validated = ef.get("xpath_validated", False)
-                fallbacks = ef.get("xpath_fallbacks", [])
-                field_lines.append(
-                    f"  - {name}: xpath={xpath}, validated={validated}, "
-                    f"fallbacks={len(fallbacks)}个"
-                )
-            context_parts.append("字段提取结果:\n" + "\n".join(field_lines))
-
-        if validation_failures:
-            fail_summary: list[str] = []
-            for fail in validation_failures[:5]:
-                url = str(fail.get("url", ""))[:60]
-                failed_fields = [
-                    f.get("field_name", "")
-                    for f in fail.get("fields", [])
-                    if f.get("error")
-                ]
-                if failed_fields:
-                    fail_summary.append(f"  - {url}... 失败字段: {', '.join(failed_fields)}")
-            if fail_summary:
-                context_parts.append("校验失败记录:\n" + "\n".join(fail_summary))
-
-        context = "\n".join(context_parts)
+        context = self._build_insight_context(
+            domain=domain,
+            extraction_config=extraction_config,
+            validation_failures=validation_failures,
+            summary=summary,
+            plan_knowledge=plan_knowledge,
+        )
 
         prompt = (
-            f"你是一名首席爬虫工程师。你刚完成了对 {domain} 的数据采集。\n"
-            f"以下是本次运行的关键信息：\n\n{context}\n\n"
-            f"请基于以上信息，写出简短的站点采集经验，包含以下部分：\n"
-            f"1. **站点特征** — 2-3 句话总结站点的技术特征\n"
-            f"2. **避坑指南** — 如有失败记录，针对性给出建议；如无失败，写'暂无已知问题'\n"
-            f"3. **优化建议** — 并发度、延迟等策略性建议\n\n"
-            f"要求极其简洁，总共不超过 200 字。每部分用 **加粗** 标题开头。\n"
-            f"只输出纯文本内容，不要添加一级或二级标题，不要多余解释。"
+            f"你是一名资深爬虫工程师，正在沉淀 {domain} 的站点技能。\n"
+            f"以下是本次运行的关键证据：\n\n{context}\n\n"
+            "请基于证据提炼真正值得未来复用的经验，而不是复述模板。\n"
+            "输出要求：\n"
+            "1. 只写高价值经验，宁缺毋滥，不要为了凑结构硬写。\n"
+            "2. 优先总结跨页面/跨变体可复用的策略，其次再写少数特有差异。\n"
+            "3. 明确指出哪些规则稳定、哪些规则脆弱、哪些现象只是样本级命中。\n"
+            "4. 不要使用固定标题如“站点特征/避坑指南/优化建议”，改用 3-6 条 bullet。\n"
+            "5. 每条 bullet 都要尽量回答‘为什么这条经验值得未来复用’。\n"
+            "6. 不要编造未在证据中出现的信息。\n\n"
+            "请直接输出 markdown bullet 列表，控制在 3-6 条，每条 1 句话。"
         )
 
         try:
@@ -728,63 +894,142 @@ class SkillSedimenter:
         self,
         subtask_results: list[dict[str, Any]],
         fields: list[dict[str, Any]],
+        *,
+        base_fields: list[dict[str, Any]] | None = None,
+        validation_failures: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Map-Reduce: 合并多个子任务的 XPath（投票机制）。"""
-        field_xpaths: dict[str, list[str]] = {}
-        field_fallbacks: dict[str, list[str]] = {}
-        field_validated: dict[str, list[bool]] = {}
+        """Map-Reduce: 保守合并多个子任务的 XPath。"""
+        field_map = {str(f.get("name", "")): f for f in fields if isinstance(f, dict)}
+        base_field_map = {
+            str(f.get("name", "")): f
+            for f in list(base_fields or [])
+            if isinstance(f, dict) and str(f.get("name", "")).strip()
+        }
+        failure_field_names = self._extract_failure_field_names(validation_failures or [])
 
+        candidates_by_field: dict[str, list[dict[str, Any]]] = {}
+        fallbacks_by_field: dict[str, list[str]] = {}
         for result in subtask_results:
-            ext_config = result.get("extraction_config", {})
-            for ef in ext_config.get("fields", []):
+            ext_config = dict(result.get("extraction_config") or {})
+            for ef in list(ext_config.get("fields") or []):
                 if not isinstance(ef, dict):
                     continue
-                name = str(ef.get("name", ""))
-                xpath = ef.get("xpath")
-                if name and xpath:
-                    field_xpaths.setdefault(name, []).append(xpath)
-                    for fb in ef.get("xpath_fallbacks", []):
-                        field_fallbacks.setdefault(name, []).append(fb)
-                    field_validated.setdefault(name, []).append(
-                        bool(ef.get("xpath_validated"))
-                    )
+                name = str(ef.get("name") or "").strip()
+                xpath = str(ef.get("xpath") or "").strip()
+                if not name or not xpath:
+                    continue
+                candidates_by_field.setdefault(name, []).append(ef)
+                for fb in list(ef.get("xpath_fallbacks") or []):
+                    fb_text = str(fb or "").strip()
+                    if fb_text:
+                        fallbacks_by_field.setdefault(name, []).append(fb_text)
 
         merged_fields: list[dict[str, Any]] = []
-        field_map = {str(f.get("name", "")): f for f in fields if isinstance(f, dict)}
-
-        for name, xpaths in field_xpaths.items():
-            counter = Counter(xpaths)
-            top_xpath, top_count = counter.most_common(1)[0]
-
-            all_fallbacks = list(field_fallbacks.get(name, []))
-            unique_fallbacks = []
-            seen = {top_xpath}
-            for fb in all_fallbacks:
-                if fb not in seen:
-                    seen.add(fb)
-                    unique_fallbacks.append(fb)
-            for xpath, _ in counter.most_common():
-                if xpath not in seen:
-                    seen.add(xpath)
-                    unique_fallbacks.append(xpath)
-
-            validations = field_validated.get(name, [])
-            validated = sum(validations) > len(validations) / 2 if validations else False
-
+        for name, candidate_fields in candidates_by_field.items():
             orig_field = field_map.get(name, {})
+            base_field = base_field_map.get(name, {})
+            base_xpath = str(base_field.get("xpath") or "").strip()
+            base_validated = bool(base_field.get("xpath_validated"))
+
+            validated_candidates = [
+                field for field in candidate_fields if bool(field.get("xpath_validated")) and str(field.get("xpath") or "").strip()
+            ]
+            candidate_xpaths = [str(field.get("xpath") or "").strip() for field in candidate_fields if str(field.get("xpath") or "").strip()]
+            validated_xpaths = [str(field.get("xpath") or "").strip() for field in validated_candidates]
+            new_validated_xpath = next(
+                (xpath for xpath in validated_xpaths if xpath and xpath != base_xpath),
+                "",
+            )
+
+            replace_primary = False
+            primary_xpath = base_xpath
+            if not primary_xpath:
+                primary_xpath = new_validated_xpath or (candidate_xpaths[0] if candidate_xpaths else "")
+                replace_primary = bool(new_validated_xpath)
+            elif self._should_replace_primary_xpath(
+                field_name=name,
+                base_xpath=base_xpath,
+                candidate_xpaths=candidate_xpaths,
+                validated_xpaths=validated_xpaths,
+                failure_field_names=failure_field_names,
+            ):
+                primary_xpath = new_validated_xpath
+                replace_primary = True
+
+            if not primary_xpath:
+                continue
+
+            validated = base_validated if base_xpath and not replace_primary else False
+            if primary_xpath in validated_xpaths:
+                validated = True
+            elif base_xpath and primary_xpath == base_xpath:
+                validated = base_validated
+
+            all_fallbacks = [
+                *fallbacks_by_field.get(name, []),
+                *[xpath for xpath in candidate_xpaths if xpath and xpath != primary_xpath],
+            ]
+            if base_xpath and base_xpath != primary_xpath:
+                all_fallbacks.insert(0, base_xpath)
+            all_fallbacks.extend(
+                [
+                    str(item).strip()
+                    for item in list(base_field.get("xpath_fallbacks") or [])
+                    if str(item).strip()
+                ]
+            )
+            unique_fallbacks = []
+            seen = {primary_xpath}
+            for fallback in all_fallbacks:
+                if fallback and fallback not in seen:
+                    seen.add(fallback)
+                    unique_fallbacks.append(fallback)
+
             merged_fields.append({
                 "name": name,
                 "description": orig_field.get("description", ""),
-                "xpath": top_xpath,
+                "xpath": primary_xpath,
                 "xpath_fallbacks": unique_fallbacks[:5],
                 "xpath_validated": validated,
                 "required": orig_field.get("required", True),
                 "data_type": orig_field.get("data_type", "text"),
                 "extraction_source": orig_field.get("extraction_source"),
                 "fixed_value": orig_field.get("fixed_value"),
+                "replace_primary": replace_primary,
             })
 
         return {"fields": merged_fields}
+
+    def _extract_failure_field_names(self, validation_failures: list[dict[str, Any]]) -> set[str]:
+        names: set[str] = set()
+        for failure in validation_failures:
+            for field in list(failure.get("fields") or []):
+                if not isinstance(field, dict):
+                    continue
+                name = str(field.get("field_name") or "").strip()
+                if name:
+                    names.add(name)
+        return names
+
+    def _should_replace_primary_xpath(
+        self,
+        *,
+        field_name: str,
+        base_xpath: str,
+        candidate_xpaths: list[str],
+        validated_xpaths: list[str],
+        failure_field_names: set[str],
+    ) -> bool:
+        if not base_xpath:
+            return False
+        distinct_validated = [xpath for xpath in dict.fromkeys(validated_xpaths) if xpath and xpath != base_xpath]
+        if not distinct_validated:
+            return False
+        if base_xpath in candidate_xpaths:
+            return False
+        if field_name in failure_field_names:
+            return True
+        return len(distinct_validated) >= 2 or len(validated_xpaths) >= 2
 
     def _merge_subtask_configs(
         self, subtask_results: list[dict[str, Any]]

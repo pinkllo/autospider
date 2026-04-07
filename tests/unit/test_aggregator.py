@@ -149,7 +149,23 @@ class TestAggregator:
         assert len(lines) == 1
         assert json.loads(lines[0])["url"] == "https://example.com/current"
 
-    def test_summary_file_created(self, tmp_path):
+    def test_skip_unreliable_completed_subtask(self, tmp_path):
+        st = _make_subtask("01")
+        st.context = {"reliable_for_aggregation": False}
+        plan = _make_plan([st])
+
+        _write_jsonl(
+            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
+            [{"url": "https://example.com/a", "title": "A"}],
+        )
+
+        aggregator = ResultAggregator()
+        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+
+        assert result["total_items"] == 0
+        assert result["subtasks_completed"] == 0
+        assert result["subtasks_skipped_unreliable"] == 1
+
         """应生成汇总文件。"""
         st = _make_subtask("01")
         plan = _make_plan([st])

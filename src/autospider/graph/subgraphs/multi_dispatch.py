@@ -134,6 +134,15 @@ def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
 
 
 
+def _is_reliable_subtask_result(result: dict[str, Any] | None) -> bool:
+    summary = dict((result or {}).get("summary") or {})
+    execution_state = str(summary.get("execution_state") or "").strip().lower()
+    durably_persisted = bool(summary.get("durably_persisted"))
+    if execution_state and execution_state != "completed":
+        return False
+    return durably_persisted
+
+
 def _build_subtask_result(
     subtask: SubTask,
     *,
@@ -143,6 +152,7 @@ def _build_subtask_result(
 ) -> dict[str, Any]:
     """标准化构建包含运行状态及其结果文件等核心指标的子任务结果字典。"""
     run_result = dict(result or {})
+    reliable_for_aggregation = _is_reliable_subtask_result({"summary": run_result})
     return {
         "id": subtask.id,
         "name": subtask.name,
@@ -173,6 +183,8 @@ def _build_subtask_result(
             "promotion_state": str(run_result.get("promotion_state") or ""),
             "execution_id": str(run_result.get("execution_id") or ""),
             "items_file": str(run_result.get("items_file") or ""),
+            "durably_persisted": bool(run_result.get("durably_persisted")),
+            "reliable_for_aggregation": reliable_for_aggregation,
         },
         "collection_config": dict(run_result.get("collection_config") or {}),
         "extraction_config": dict(run_result.get("extraction_config") or {}),
@@ -204,6 +216,14 @@ def _apply_result_to_plan(plan: TaskPlan, result_item: dict[str, Any]) -> None:
             subtask.mode = SubTaskMode(str(result_item.get("mode") or SubTaskMode.COLLECT.value))
         if result_item.get("execution_brief"):
             subtask.execution_brief = ExecutionBrief.model_validate(result_item.get("execution_brief") or {})
+        summary = dict(result_item.get("summary") or {})
+        if summary:
+            merged_context = dict(subtask.context or {})
+            if "reliable_for_aggregation" in summary:
+                merged_context["reliable_for_aggregation"] = bool(summary.get("reliable_for_aggregation"))
+            if "durably_persisted" in summary:
+                merged_context["durably_persisted"] = bool(summary.get("durably_persisted"))
+            subtask.context = merged_context
         return
 
 
@@ -217,7 +237,11 @@ def _build_dispatch_summary(plan: TaskPlan, subtask_results: list[dict[str, Any]
     expanded = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.EXPANDED)
     failed = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.FAILED)
     skipped = sum(1 for subtask in plan.subtasks if subtask.status == SubTaskStatus.SKIPPED)
-    total_collected = sum(int(subtask.collected_count or 0) for subtask in plan.subtasks)
+    total_collected = sum(
+        int(subtask.collected_count or 0)
+        for subtask in plan.subtasks
+        if subtask.status == SubTaskStatus.COMPLETED
+    )
     plan.total_subtasks = total
     if not plan.updated_at:
         plan.updated_at = plan.created_at
@@ -397,6 +421,9 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     elif int(result.get("total_urls", 0) or 0) <= 0:
         status = SubTaskStatus.FAILED
         error = "no_data_collected"
+    elif not bool(result.get("durably_persisted")):
+        status = SubTaskStatus.FAILED
+        error = "subtask_result_not_durable"
     else:
         status = SubTaskStatus.COMPLETED
         error = ""

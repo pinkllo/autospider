@@ -38,6 +38,26 @@ def test_config_persistence_save_does_not_inject_timestamps(tmp_path):
     assert first["updated_at"] == ""
 
 
+def test_progress_persistence_load_raises_for_corrupt_file(tmp_path):
+    persistence = ProgressPersistence(output_dir=tmp_path)
+    (tmp_path / "progress.json").write_text("{invalid", encoding="utf-8")
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="failed_to_load_collection_progress"):
+        persistence.load_progress()
+
+
+def test_config_persistence_load_raises_for_corrupt_file(tmp_path):
+    persistence = ConfigPersistence(config_dir=tmp_path)
+    (tmp_path / "collection_config.json").write_text("[]", encoding="utf-8")
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="failed_to_load_collection_config"):
+        persistence.load()
+
+
 def test_build_dispatch_summary_keeps_plan_timestamp_stable():
     plan = TaskPlan(
         plan_id="plan_01",

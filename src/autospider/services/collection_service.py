@@ -131,7 +131,7 @@ class CollectionService:
 
         output_dir = Path(str(params.get("output_dir") or "output"))
         if not collection_config:
-            collection_config = load_collection_config_payload(config_path)
+            collection_config = load_collection_config_payload(config_path, strict=True)
         collected_urls = list(result.collected_urls)
         return {
             "collection_config": collection_config,

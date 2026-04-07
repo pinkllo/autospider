@@ -19,14 +19,26 @@ logger = get_logger(__name__)
 class ResultAggregator:
     """合并所有子任务的采集结果。"""
 
+    @staticmethod
+    def _is_subtask_aggregate_eligible(subtask: SubTask) -> bool:
+        if subtask.status != SubTaskStatus.COMPLETED:
+            return False
+        summary = dict(getattr(subtask, "context", {}) or {})
+        if summary:
+            return bool(summary.get("reliable_for_aggregation", False))
+        return True
+
     def aggregate(self, plan: TaskPlan, output_dir: str) -> dict:
         """合并结果并生成汇总。"""
         all_items: list[dict] = []
         seen_urls: set[str] = set()
         subtask_stats: list[dict] = []
 
+        skipped_unreliable = 0
         for subtask in plan.subtasks:
-            if subtask.status != SubTaskStatus.COMPLETED:
+            if not self._is_subtask_aggregate_eligible(subtask):
+                if subtask.status == SubTaskStatus.COMPLETED:
+                    skipped_unreliable += 1
                 continue
 
             items_count = 0
@@ -68,6 +80,7 @@ class ResultAggregator:
             "total_items": len(all_items),
             "unique_urls": len(seen_urls),
             "subtasks_completed": len(subtask_stats),
+            "subtasks_skipped_unreliable": skipped_unreliable,
             "subtasks_total": len(plan.subtasks),
             "subtask_details": subtask_stats,
             "merged_file": str(merged_file),

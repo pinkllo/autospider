@@ -353,13 +353,40 @@ async def run_pipeline(
 
     items_path = output_path / "pipeline_extracted_items.jsonl"
     summary_path = output_path / "pipeline_summary.json"
-    _prepare_pipeline_output(
-        output_path=output_path,
-        items_path=items_path,
-        summary_path=summary_path,
-    )
-    run_records = _load_persisted_run_records(execution_id)
     skill_runtime = SkillRuntime()
+
+    try:
+        _prepare_pipeline_output(
+            output_path=output_path,
+            items_path=items_path,
+            summary_path=summary_path,
+        )
+        run_records = _load_persisted_run_records(execution_id)
+    except Exception as exc:  # noqa: BLE001
+        output_path.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "run_id": execution_id,
+            "list_url": list_url,
+            "anchor_url": str(anchor_url or ""),
+            "page_state_signature": str(page_state_signature or ""),
+            "variant_label": str(variant_label or ""),
+            "task_description": task_description,
+            "mode": (pipeline_mode or config.pipeline.mode),
+            "total_urls": 0,
+            "success_count": 0,
+            "consumer_concurrency": consumer_workers,
+            "target_url_count": target_url_count,
+            "items_file": str(items_path),
+            "summary_file": str(summary_path),
+            "execution_id": execution_id,
+            "error": str(exc),
+            "execution_state": "failed",
+            "outcome_state": "failed",
+            "promotion_state": "rejected",
+            "durably_persisted": False,
+        }
+        _write_summary(summary_path, summary)
+        return summary
 
     summary = {
         "run_id": execution_id,
@@ -509,9 +536,9 @@ async def _process_task(
     if existing_record is not None:
         await _finalize_task_from_record(task, existing_record)
         if tracker:
-            if existing_record.get("success"):
+            if existing_record.get("success") and existing_record.get("durably_persisted"):
                 await tracker.record_success(url)
-            else:
+            elif not existing_record.get("success"):
                 await tracker.record_failure(url, str(existing_record.get("failure_reason") or ""))
         return
 
@@ -559,9 +586,9 @@ async def _process_task(
     await _finalize_task_from_record(task, run_record)
 
     if tracker:
-        if run_record.get("success"):
+        if run_record.get("success") and run_record.get("durably_persisted"):
             await tracker.record_success(url)
-        else:
+        elif not run_record.get("success"):
             await tracker.record_failure(url, run_record.get("failure_reason", ""))
 def _build_error_reason(record) -> str:
     errors = []

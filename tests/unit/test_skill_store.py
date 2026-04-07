@@ -54,10 +54,10 @@ def test_find_by_url_keeps_exact_host_lookup():
         store = SkillStore(skills_dir=base)
         exact_content = _skill_content("采购公告", "采购公告采集技能")
         other_content = _skill_content("交易公告", "交易公告采集技能")
-        store.save("ygp.gdzwfw.gov.cn", exact_content)
+        saved_path = store.save("ygp.gdzwfw.gov.cn", exact_content)
         store.save("ggzy.gdzwfw.gov.cn", other_content)
 
-        assert store.find_by_url("https://ygp.gdzwfw.gov.cn/#/44/jygg") == exact_content
+        assert store.find_by_url("https://ygp.gdzwfw.gov.cn/#/44/jygg") == saved_path.read_text(encoding="utf-8")
         assert store.find_by_url("https://foo.gdzwfw.gov.cn/list") is None
     finally:
         shutil.rmtree(base, ignore_errors=True)

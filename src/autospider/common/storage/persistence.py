@@ -109,13 +109,13 @@ class ConfigPersistence:
         try:
             data = load_json(self.config_file)
             if data is None:
-                return None
+                raise ValueError(f"配置文件内容无效: {self.config_file}")
             config = CollectionConfig.from_dict(data)
             logger.info(f"[持久化] 配置已加载: {self.config_file}")
             return config
         except Exception as e:
-            logger.info(f"[持久化] 加载配置失败: {e}")
-            return None
+            logger.error(f"[持久化] 加载配置失败: {e}")
+            raise RuntimeError(f"failed_to_load_collection_config: {self.config_file}") from e
 
     def exists(self) -> bool:
         """检查配置文件是否存在
@@ -225,11 +225,11 @@ class ProgressPersistence:
         try:
             data = load_json(self.progress_file)
             if data is None:
-                return None
+                raise ValueError(f"进度文件内容无效: {self.progress_file}")
             return CollectionProgress.from_dict(data)
         except Exception as e:
-            logger.info(f"[进度] 加载进度失败: {e}")
-            return None
+            logger.error(f"[进度] 加载进度失败: {e}")
+            raise RuntimeError(f"failed_to_load_collection_progress: {self.progress_file}") from e
 
     def append_urls(self, urls: list[str]) -> None:
         """追加URL到文件

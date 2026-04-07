@@ -86,25 +86,28 @@ class TestProgressPersistence:
             assert loaded.collected_count == 500
             assert loaded.last_updated != ""  # 应该有时间戳
     
+    def test_load_progress_raises_for_corrupt_payload(self):
+        """损坏的进度文件应显式报错。"""
     def test_append_and_load_urls(self):
         """测试 URL 追加和加载"""
         with tempfile.TemporaryDirectory() as tmpdir:
             persistence = ProgressPersistence(tmpdir)
-            
+
             # 追加 URL
             urls1 = ["http://example.com/1", "http://example.com/2"]
             persistence.append_urls(urls1)
-            
+
             urls2 = ["http://example.com/3"]
             persistence.append_urls(urls2)
-            
+
             # 加载
             collected = persistence.load_collected_urls()
-            
+
             assert len(collected) == 3
             assert "http://example.com/1" in collected
             assert "http://example.com/2" in collected
             assert "http://example.com/3" in collected
+
     
     def test_clear(self):
         """测试清除进度"""

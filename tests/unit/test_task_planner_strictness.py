@@ -120,7 +120,7 @@ def test_extract_category_path_expands_grouped_labels():
     assert path == ["工程建设", "房屋建筑和市政基础设施工程"]
 
 
-def test_same_page_category_cycle_detects_revisit_to_ancestor_category():
+def test_same_page_category_cycle_requires_exact_ancestor_match():
     planner = TaskPlanner.__new__(TaskPlanner)
 
     current_context = {
@@ -139,10 +139,32 @@ def test_same_page_category_cycle_detects_revisit_to_ancestor_category():
         child_context,
     )
 
+    assert result is False
+
+
+def test_same_page_category_cycle_detects_exact_revisit_to_ancestor_category():
+    planner = TaskPlanner.__new__(TaskPlanner)
+
+    current_context = {
+        "category_name": "招标公告及资格预审",
+        "category_path": "土地矿业 > 工程建设 > 招标公告及资格预审",
+    }
+    child_context = {
+        "category_name": "土地矿业",
+        "category_path": "土地矿业 > 工程建设 > 招标公告及资格预审 > 土地矿业",
+    }
+
+    result = planner._is_same_page_category_cycle(
+        "https://example.com/list",
+        "https://example.com/list",
+        current_context,
+        child_context,
+    )
+
     assert result is True
 
 
-def test_semantic_state_signature_uses_category_path_not_nav_steps():
+def test_semantic_state_signature_uses_exact_category_path_labels():
     planner = TaskPlanner.__new__(TaskPlanner)
 
     sig_a = planner._build_semantic_state_signature(
@@ -154,7 +176,7 @@ def test_semantic_state_signature_uses_category_path_not_nav_steps():
         {"category_path": "工程建设分类采集 > 招标公告及资格预审"},
     )
 
-    assert sig_a == sig_b
+    assert sig_a != sig_b
 
 
 def test_post_process_analysis_upgrades_multicategory_request_to_category():

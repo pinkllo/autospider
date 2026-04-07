@@ -53,6 +53,7 @@ class SkillFieldRule:
     fallback_xpaths: list[str] = field(default_factory=list)
     validated: bool = False
     confidence: float = 0.0
+    replace_primary: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,7 @@ def _parse_fields(section: str) -> dict[str, SkillFieldRule]:
             fallback_xpaths=fallback_xpaths,
             validated=validated,
             confidence=confidence,
+            replace_primary=False,
         )
     return fields
 
@@ -454,16 +456,24 @@ def _append_nav_section(
     jump_input_selector: str,
     jump_button_selector: str,
     nav_steps: list[dict[str, str]],
-) -> None:
+) -> bool:
+    filtered_nav_steps = [
+        step
+        for step in nav_steps
+        if any(
+            str(step.get(key) or "").strip()
+            for key in ("description", "xpath", "value")
+        )
+    ]
     has_nav = (
         detail_xpath
         or pagination_xpath
         or jump_input_selector
         or jump_button_selector
-        or nav_steps
+        or filtered_nav_steps
     )
     if not has_nav:
-        return
+        return False
 
     if detail_xpath:
         lines.append("### 详情链接定位")
@@ -489,13 +499,16 @@ def _append_nav_section(
         lines.append("")
         lines.append(f"分页控件 XPath: `{pagination_xpath}`")
         lines.append("")
-    if nav_steps:
+    if filtered_nav_steps:
         lines.append("### 导航步骤")
         lines.append("")
-        for index, step in enumerate(nav_steps, start=1):
+        for index, step in enumerate(filtered_nav_steps, start=1):
             action = str(step.get("action") or "").strip()
             description = str(step.get("description") or "").strip()
-            line = f"{index}. **{action}**"
+            if action:
+                line = f"{index}. **{action}**"
+            else:
+                line = f"{index}. 导航动作"
             if description:
                 line += f" — {description}"
             lines.append(line)
@@ -506,6 +519,8 @@ def _append_nav_section(
             if value:
                 lines.append(f"   - 值: `{value}`")
         lines.append("")
+
+    return True
 
 
 def render_skill_document(document: SkillDocument) -> str:
@@ -539,7 +554,10 @@ def render_skill_document(document: SkillDocument) -> str:
             rules.pagination_xpath,
             rules.jump_input_selector,
             rules.jump_button_selector,
-            rules.nav_steps,
+            any(
+                any(str(step.get(key) or "").strip() for key in ("description", "xpath", "value"))
+                for step in rules.nav_steps
+            ),
         ]
     )
     if has_nav:
@@ -588,8 +606,7 @@ def render_skill_document(document: SkillDocument) -> str:
                 lines.append(f"- **跳转输入框**: `{variant.jump_input_selector}`")
             if variant.jump_button_selector:
                 lines.append(f"- **跳转按钮**: `{variant.jump_button_selector}`")
-            lines.append("")
-            _append_nav_section(
+            variant_nav_rendered = _append_nav_section(
                 lines,
                 detail_xpath="",
                 pagination_xpath="",
@@ -597,6 +614,15 @@ def render_skill_document(document: SkillDocument) -> str:
                 jump_button_selector="",
                 nav_steps=variant.nav_steps,
             )
+            if not any([
+                variant.detail_xpath,
+                variant.pagination_xpath,
+                variant.jump_input_selector,
+                variant.jump_button_selector,
+                variant_nav_rendered,
+            ]):
+                lines.append("- 暂无可复用导航差异")
+                lines.append("")
             if variant.fields:
                 lines.append("#### 字段提取规则")
                 lines.append("")
@@ -621,28 +647,60 @@ def render_skill_document(document: SkillDocument) -> str:
 
 
 def _merge_field_rule(existing: SkillFieldRule, incoming: SkillFieldRule) -> SkillFieldRule:
-    if existing.validated and not incoming.validated:
-        return existing
-    if existing.validated and incoming.validated and incoming.confidence < existing.confidence:
-        return existing
-
     if not incoming.primary_xpath:
-        return incoming
+        return existing if existing.primary_xpath else incoming
+
+    if existing.validated and not incoming.validated:
+        fallback_xpaths = _dedupe_xpaths(
+            [incoming.primary_xpath, *incoming.fallback_xpaths, *existing.fallback_xpaths],
+            exclude={existing.primary_xpath},
+        )
+        return SkillFieldRule(
+            name=existing.name,
+            description=existing.description or incoming.description,
+            data_type=existing.data_type or incoming.data_type,
+            extraction_source=existing.extraction_source or incoming.extraction_source,
+            fixed_value=existing.fixed_value or incoming.fixed_value,
+            primary_xpath=existing.primary_xpath,
+            fallback_xpaths=fallback_xpaths,
+            validated=existing.validated,
+            confidence=existing.confidence,
+            replace_primary=False,
+        )
+
+    if existing.primary_xpath and not incoming.replace_primary:
+        fallback_xpaths = _dedupe_xpaths(
+            [incoming.primary_xpath, *incoming.fallback_xpaths, *existing.fallback_xpaths],
+            exclude={existing.primary_xpath},
+        )
+        return SkillFieldRule(
+            name=existing.name,
+            description=existing.description or incoming.description,
+            data_type=existing.data_type or incoming.data_type,
+            extraction_source=existing.extraction_source or incoming.extraction_source,
+            fixed_value=existing.fixed_value or incoming.fixed_value,
+            primary_xpath=existing.primary_xpath,
+            fallback_xpaths=fallback_xpaths,
+            validated=existing.validated or incoming.validated,
+            confidence=max(existing.confidence, incoming.confidence),
+            replace_primary=False,
+        )
 
     fallback_xpaths = _dedupe_xpaths(
-        [*incoming.fallback_xpaths, existing.primary_xpath, *existing.fallback_xpaths],
+        [existing.primary_xpath, *incoming.fallback_xpaths, *existing.fallback_xpaths],
         exclude={incoming.primary_xpath},
     )
     return SkillFieldRule(
         name=incoming.name,
-        description=incoming.description,
-        data_type=incoming.data_type,
-        extraction_source=incoming.extraction_source,
-        fixed_value=incoming.fixed_value,
+        description=incoming.description or existing.description,
+        data_type=incoming.data_type or existing.data_type,
+        extraction_source=incoming.extraction_source or existing.extraction_source,
+        fixed_value=incoming.fixed_value or existing.fixed_value,
         primary_xpath=incoming.primary_xpath,
         fallback_xpaths=fallback_xpaths,
         validated=incoming.validated,
         confidence=incoming.confidence,
+        replace_primary=False,
     )
 
 

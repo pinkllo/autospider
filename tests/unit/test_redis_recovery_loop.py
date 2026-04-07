@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from autospider.common.channel.redis_channel import RedisURLChannel
@@ -21,6 +23,9 @@ class _FakeManager:
     async def connect(self):
         self.connect_calls += 1
         return object()
+
+    async def push_task(self, url: str) -> None:
+        return None
 
     async def fetch_task(self, *, consumer_name: str, block_ms: int, count: int):
         self.fetch_calls.append(
@@ -55,6 +60,74 @@ class _FakeManager:
 
     async def close(self) -> None:
         return None
+
+
+class _UnavailableManager(_FakeManager):
+    async def connect(self):
+        self.connect_calls += 1
+        return None
+
+
+class _ExplodingRecoverManager(_FakeManager):
+    async def recover_stale_tasks(self, *, consumer_name: str, max_idle_ms: int, count: int):
+        self.recover_calls.append(
+            {"consumer_name": consumer_name, "max_idle_ms": max_idle_ms, "count": count}
+        )
+        raise RuntimeError("redis down")
+
+
+@pytest.mark.asyncio
+async def test_fetch_raises_when_redis_connection_unavailable():
+    manager = _UnavailableManager()
+    channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
+
+    with pytest.raises(RuntimeError, match="redis_channel_unavailable"):
+        await channel.fetch(max_items=1, timeout_s=0)
+
+
+@pytest.mark.asyncio
+async def test_publish_raises_when_redis_connection_unavailable():
+    manager = _UnavailableManager()
+    channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
+
+    with pytest.raises(RuntimeError, match="redis_channel_unavailable"):
+        await channel.publish("https://example.com/a")
+
+
+@pytest.mark.asyncio
+async def test_initial_recovery_failure_is_not_masked(monkeypatch):
+    manager = _ExplodingRecoverManager()
+
+    monkeypatch.setattr(redis_channel_module.config.redis, "auto_recover", True, raising=False)
+    monkeypatch.setattr(redis_channel_module.config.redis, "task_timeout_ms", 1000, raising=False)
+    monkeypatch.setattr(redis_channel_module.config.redis, "fetch_batch_size", 10, raising=False)
+
+    channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
+
+    with pytest.raises(RuntimeError, match="redis down"):
+        await channel.fetch(max_items=1, timeout_s=0)
+
+
+@pytest.mark.asyncio
+async def test_background_recovery_failure_is_logged(monkeypatch):
+    manager = _FakeManager()
+    channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
+
+    warnings: list[str] = []
+
+    async def _boom():
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(channel, "_recover_pending_once", _boom)
+    monkeypatch.setattr(redis_channel_module.config.redis, "auto_recover", True, raising=False)
+    monkeypatch.setattr(redis_channel_module.config.redis, "task_timeout_ms", 1, raising=False)
+    monkeypatch.setattr(redis_channel_module.logger, "warning", lambda msg, *args: warnings.append(msg % args))
+
+    channel._start_recover_loop()
+    await asyncio.sleep(1.1)
+    await channel.close()
+
+    assert any("后台恢复失败" in message for message in warnings)
 
 
 @pytest.mark.asyncio

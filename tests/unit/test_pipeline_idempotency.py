@@ -227,17 +227,33 @@ def test_commit_items_file_writes_single_visible_snapshot(tmp_path):
     assert json.loads(lines[1])["url"] == "https://example.com/b"
 
 
+def test_build_run_record_defaults_to_runtime_not_durable():
+    record = _build_run_record(
+        url="https://example.com/a",
+        item={"url": "https://example.com/a"},
+        success=True,
+        failure_reason="",
+    )
+
+    assert record["durably_persisted"] is False
+    assert record["record_source"] == "runtime"
+
+
 @pytest.mark.asyncio
 async def test_process_task_reuses_persisted_record_without_reextract():
     task = _DummyTask("https://example.com/a")
     extractor = _UnusedExtractor()
     run_records = {
-        "https://example.com/a": _build_run_record(
-            url="https://example.com/a",
-            item={"url": "https://example.com/a", "title": "A"},
-            success=True,
-            failure_reason="",
-        )
+        "https://example.com/a": {
+            **_build_run_record(
+                url="https://example.com/a",
+                item={"url": "https://example.com/a", "title": "A"},
+                success=True,
+                failure_reason="",
+            ),
+            "durably_persisted": True,
+            "record_source": "db",
+        }
     }
 
     import asyncio
@@ -252,6 +268,24 @@ async def test_process_task_reuses_persisted_record_without_reextract():
     assert extractor.called is False
     assert task.acked == 1
     assert task.failed == []
+
+
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_from_runtime_success_requeues_until_persisted():
+    task = _DummyTask("https://example.com/a")
+    record = _build_run_record(
+        url="https://example.com/a",
+        item={"url": "https://example.com/a"},
+        success=True,
+        failure_reason="",
+    )
+
+    await pipeline_runner._finalize_task_from_record(task, record)
+
+    assert task.acked == 0
+    assert task.failed == ["result_not_persisted"]
 
 
 def test_build_record_summary_counts_success_and_failure():
@@ -300,24 +334,21 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     monkeypatch.setattr(pipeline_runner, "URLCollector", _FakeCollector)
     monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
-    monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
+    monkeypatch.setattr(pipeline_runner, "_try_sediment_skill", lambda **kwargs: None)
 
-    result = await pipeline_runner.run_pipeline(
-        list_url="https://example.com/list",
-        task_description="采集公告",
-        fields=[],
-        output_dir=str(tmp_path),
-        max_pages=11,
-        target_url_count=3,
-    )
+    with pytest.raises(RuntimeError, match="stop consumer"):
+        await pipeline_runner.run_pipeline(
+            list_url="https://example.com/list",
+            task_description="采集公告",
+            fields=[],
+            output_dir=str(tmp_path),
+            max_pages=11,
+            target_url_count=3,
+        )
 
     assert captured["max_pages"] == 11
     assert config.url_collector.max_pages == original_max_pages
-    assert result["total_urls"] == 0
-    assert result["success_count"] == 0
-    assert "started_at" not in result
-    assert "finished_at" not in result
 
 
 @pytest.mark.asyncio
@@ -389,8 +420,6 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
     monkeypatch.setattr(pipeline_runner, "DetailPageWorker", _FakeDetailPageWorker)
     monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
-    monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
-    monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
     monkeypatch.setattr(pipeline_runner, "_try_sediment_skill", lambda **kwargs: None)
 
     result = await pipeline_runner.run_pipeline(
@@ -414,23 +443,13 @@ def test_load_persisted_run_records_returns_empty_for_blank_execution_id():
 
 
 def test_try_sediment_skill_skips_low_quality_run(tmp_path):
-    output_dir = tmp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "extraction_result.json").write_text(
-        json.dumps({"validation_failures": [{"url": "https://example.com/detail/1"}]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-    result = _try_sediment_skill(
-        list_url="https://example.com/list",
-        task_description="采集公告",
-        fields=[FieldDefinition(name="title", description="标题")],
+    result = _should_promote_skill(
         state={},
-        summary={"success_count": 2, "total_urls": 2},
-        output_dir=str(output_dir),
+        summary={"success_count": 2, "total_urls": 2, "promotion_state": "diagnostic_only"},
+        validation_failures=[{"url": "https://example.com/detail/1"}],
     )
 
-    assert result is None
+    assert result is False
 
 
 def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_path):

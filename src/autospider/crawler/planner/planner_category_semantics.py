@@ -3,13 +3,6 @@ from __future__ import annotations
 CATEGORY_PATH_KEY = "category_path"
 CATEGORY_PATH_SEPARATOR = " > "
 PLANNER_ACTION_HISTORY_LIMIT = 6
-SEMANTIC_CATEGORY_SUFFIXES = (
-    "分类采集",
-    "分类入口",
-    "分类导航",
-    "分类",
-    "采集",
-)
 
 
 class PlannerCategorySemanticsMixin:
@@ -50,18 +43,7 @@ class PlannerCategorySemanticsMixin:
         return [item.strip() for item in expanded_path if item.strip()]
 
     def _normalize_semantic_label(self, value: str) -> str:
-        normalized = "".join(str(value or "").split())
-        if not normalized:
-            return ""
-        changed = True
-        while changed:
-            changed = False
-            for suffix in SEMANTIC_CATEGORY_SUFFIXES:
-                if normalized.endswith(suffix) and len(normalized) > len(suffix):
-                    normalized = normalized[: -len(suffix)]
-                    changed = True
-                    break
-        return normalized
+        return "".join(str(value or "").split())
 
     def _format_context_path(self, context: dict[str, str] | None) -> str:
         category_path = self._extract_category_path(context)

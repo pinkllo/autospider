@@ -36,8 +36,24 @@ class GraphRunner:
         return GraphRunner._compiled_graph
 
     @staticmethod
-    def _invoke_config(thread_id: str) -> dict[str, Any]:
-        return {"configurable": {"thread_id": thread_id}}
+    def _invoke_config(thread_id: str, checkpoint_id: str | None = None) -> dict[str, Any]:
+        configurable = {"thread_id": thread_id}
+        if checkpoint_id:
+            configurable["checkpoint_id"] = checkpoint_id
+        return {"configurable": configurable}
+
+    @staticmethod
+    def _validate_snapshot_identity(snapshot: Any, *, thread_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        snapshot_values = dict(getattr(snapshot, "values", {}) or {})
+        snapshot_config = dict(getattr(snapshot, "config", {}) or {})
+        configurable = dict(snapshot_config.get("configurable") or {})
+        snapshot_thread_id = str(snapshot_values.get("thread_id") or configurable.get("thread_id") or "")
+        if snapshot_thread_id != thread_id:
+            raise RuntimeError(f"checkpoint_thread_mismatch: expected={thread_id}, actual={snapshot_thread_id or '<missing>'}")
+        entry_mode = str(snapshot_values.get("entry_mode") or "").strip()
+        if not entry_mode:
+            raise RuntimeError("无法从 checkpoint 状态中恢复 entry_mode")
+        return snapshot_values, configurable
 
     @staticmethod
     def _normalize_interrupts(raw_interrupts: Any) -> list[dict[str, Any]]:
@@ -206,7 +222,7 @@ class GraphRunner:
                 raise RuntimeError("Graph checkpointer 未启用")
             graph = build_main_graph(checkpointer=checkpointer)
             snapshot = await graph.aget_state(self._invoke_config(thread_id))
-            snapshot_values = dict(getattr(snapshot, "values", {}) or {})
+            snapshot_values, _ = self._validate_snapshot_identity(snapshot, thread_id=thread_id)
             if not snapshot_values and not getattr(snapshot, "interrupts", ()):
                 raise RuntimeError(f"未找到 thread_id={thread_id} 的图状态")
             return self._build_result(final_state={}, thread_id=thread_id, snapshot=snapshot)
@@ -223,4 +239,19 @@ class GraphRunner:
             raise RuntimeError("当前未启用 GRAPH_CHECKPOINT_ENABLED，无法 resume 图线程")
 
         graph_input: Command | None = Command(resume=resume) if use_command else None
-        return await self._invoke_with_graph(graph_input, thread_id=thread_id)
+        async with graph_checkpointer_session() as checkpointer:
+            if checkpointer is None:
+                raise RuntimeError("Graph checkpointer 未启用")
+            graph = build_main_graph(checkpointer=checkpointer)
+            invoke_config = self._invoke_config(thread_id)
+            snapshot = await graph.aget_state(invoke_config)
+            snapshot_values, _ = self._validate_snapshot_identity(snapshot, thread_id=thread_id)
+            if not snapshot_values and not getattr(snapshot, "interrupts", ()):
+                raise RuntimeError(f"未找到 thread_id={thread_id} 的图状态")
+            final_state = await graph.ainvoke(graph_input, config=invoke_config)
+            resumed_snapshot = await graph.aget_state(invoke_config)
+            return self._build_result(
+                final_state=dict(final_state or {}),
+                thread_id=thread_id,
+                snapshot=resumed_snapshot,
+            )

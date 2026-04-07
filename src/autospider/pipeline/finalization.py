@@ -250,12 +250,16 @@ def build_run_record(
     item: dict,
     success: bool,
     failure_reason: str,
+    durably_persisted: bool = False,
+    record_source: str = "runtime",
 ) -> dict:
     return {
         "url": url,
         "success": bool(success),
         "failure_reason": str(failure_reason or ""),
         "item": dict(item),
+        "durably_persisted": bool(durably_persisted),
+        "record_source": str(record_source or "runtime"),
     }
 
 
@@ -279,6 +283,8 @@ def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
             item=payload,
             success=bool(item.get("success", False)),
             failure_reason=str(item.get("failure_reason") or ""),
+            durably_persisted=True,
+            record_source="db",
         )
     return records
 
@@ -304,8 +310,11 @@ def commit_items_file(items_path: Path, records: dict[str, dict]) -> None:
 
 
 async def finalize_task_from_record(task: Any, record: dict) -> None:
-    if bool(record.get("success")):
+    if bool(record.get("success")) and bool(record.get("durably_persisted")):
         await task.ack_task()
+        return
+    if bool(record.get("success")):
+        await task.fail_task("result_not_persisted")
         return
     reason = str(record.get("failure_reason") or "extraction_failed")
     await task.fail_task(reason)
@@ -482,6 +491,10 @@ class PipelineFinalizer:
                 )
             )
             self._deps.persist_pipeline_run(context, committed_records)
+            for record in committed_records.values():
+                record["durably_persisted"] = True
+                record["record_source"] = "db"
+            context.summary["durably_persisted"] = True
             self._deps.commit_items_file(context.items_path, committed_records)
             self._deps.write_summary(context.summary_path, context.summary)
 
