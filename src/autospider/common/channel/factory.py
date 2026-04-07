@@ -40,7 +40,8 @@ def create_url_channel(
         ValueError: 当指定的模式不支持时抛出。
     """
     # 获取并标准化选择的模式名称
-    selected = (mode or config.pipeline.mode).lower().strip()
+    selected_mode = config.pipeline.mode if mode is None else mode
+    selected = str(selected_mode).lower().strip()
 
     if selected == "memory":
         # 内存模式：最基础的模式，适合简单的本地脚本运行

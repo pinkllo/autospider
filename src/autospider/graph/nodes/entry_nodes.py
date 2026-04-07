@@ -31,6 +31,7 @@ def _ok(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "node_status": "ok",
         "node_payload": payload or {},
+        "result_context": payload or {},
         "node_artifacts": [],
         "node_error": None,
     }
@@ -41,6 +42,7 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
     return {
         "node_status": "fatal",
         "node_payload": {},
+        "result_context": {},
         "node_artifacts": [],
         "node_error": {"code": code, "message": message},
         "error_code": code,
@@ -264,7 +266,7 @@ def _build_review_payload(
         ),
         "pipeline_mode": cli_args.get("pipeline_mode") or "默认",
         "execution_mode": dispatch_mode,
-        "headless": bool(cli_args.get("headless", False)),
+        "headless": cli_args["headless"] if "headless" in cli_args else None,
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "serial_mode": cli_args.get("serial_mode"),
         "max_concurrent": _coalesce_cli_option(
@@ -291,15 +293,7 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
     mode = state.get("entry_mode")
     if not mode:
         return _fatal("missing_entry_mode", "缺少 entry_mode")
-    valid_modes = {
-        "chat_pipeline",
-        "pipeline_run",
-        "collect_urls",
-        "generate_config",
-        "batch_collect",
-        "field_extract",
-        "multi_pipeline",
-    }
+    valid_modes = {"chat_pipeline", "pipeline_run"}
     if str(mode) not in valid_modes:
         return _fatal("invalid_entry_mode", f"不支持的 entry_mode: {mode}")
     return {
@@ -508,7 +502,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
             task.get("field_validate_count"),
         ),
         "pipeline_mode": cli_args.get("pipeline_mode"),
-        "headless": bool(cli_args.get("headless", False)),
+        "headless": cli_args["headless"] if "headless" in cli_args else None,
         "output_dir": str(cli_args.get("output_dir") or "output"),
         "serial_mode": cli_args.get("serial_mode"),
         "request": str(cli_args.get("request") or task.get("task_description") or ""),

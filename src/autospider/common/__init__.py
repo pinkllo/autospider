@@ -12,7 +12,7 @@
 - 输入验证
 """
 
-from .config import config, Config
+from .config import config, Config, get_config
 from .logger import get_logger, console
 from .exceptions import (
     AutoSpiderError,
@@ -34,6 +34,7 @@ __all__ = [
     # 配置
     "config",
     "Config",
+    "get_config",
     # 日志
     "get_logger",
     "console",

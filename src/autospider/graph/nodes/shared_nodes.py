@@ -30,7 +30,7 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
     """构建统一摘要。"""
     summary = dict(state.get("summary") or {})
     if not summary:
-        payload = dict(state.get("node_payload") or {})
+        payload = dict(state.get("result_context") or {})
         summary = dict(payload.get("result") or {})
     summary["thread_id"] = str(state.get("thread_id") or "")
     summary["request_id"] = str(state.get("request_id") or "")

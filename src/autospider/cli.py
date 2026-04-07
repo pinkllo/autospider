@@ -6,20 +6,18 @@ import asyncio
 import dataclasses
 import json
 import threading
-from pathlib import Path
 from typing import Any
 
 import typer
+from click.core import ParameterSource
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .common.db.engine import init_db
-from .common.validators import validate_url
-from .common.exceptions import ValidationError, URLValidationError
 from .common.logger import get_logger
 from .domain.fields import FieldDefinition
-from .graph import GraphInput, GraphRunner
+from .graph import EntryMode, GraphInput, GraphRunner
 from .common.config import config
 
 # 日志器
@@ -105,53 +103,6 @@ def run_async_safely(coro):
     return result_holder["result"]
 
 
-def _load_fields(fields_json: str, fields_file: str) -> list[FieldDefinition]:
-    payload = ""
-
-    if fields_file:
-        path = Path(fields_file)
-        if not path.exists():
-            raise ValueError(f"字段定义文件不存在: {fields_file}")
-        payload = path.read_text(encoding="utf-8")
-    elif fields_json:
-        payload = fields_json
-    else:
-        raise ValueError("请提供 --fields-json 或 --fields-file")
-
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"字段定义 JSON 解析失败: {exc}") from exc
-
-    if not isinstance(data, list):
-        raise ValueError("字段定义必须是 JSON 数组")
-
-    fields: list[FieldDefinition] = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise ValueError("字段定义必须是对象数组")
-
-        name = item.get("name")
-        description = item.get("description")
-        if not name or not description:
-            raise ValueError("字段定义必须包含 name 与 description")
-
-        fields.append(
-            FieldDefinition(
-                name=name,
-                description=description,
-                required=bool(item.get("required", True)),
-                data_type=item.get("data_type", "text"),
-                example=item.get("example"),
-            )
-        )
-
-    if not fields:
-        raise ValueError("字段定义不能为空")
-
-    return fields
-
-
 def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
     """构建字段预览表格。"""
     table = Table(title="AI 生成字段")
@@ -197,7 +148,7 @@ def _log_graph_runtime(result: dict) -> None:
             logger.info("[Graph] interrupt %s: %s", item.get("id", ""), item.get("value"))
 
 
-def _invoke_graph(entry_mode: str, cli_args: dict, *, thread_id: str = "") -> dict:
+def _invoke_graph(entry_mode: EntryMode, cli_args: dict, *, thread_id: str = "") -> dict:
     """统一调用 GraphRunner 并返回 dict 结构结果。"""
     _ensure_database_ready()
     runner = GraphRunner()
@@ -389,7 +340,7 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
             f"[bold]模式:[/bold] {mode_text}\n"
             f"[bold]执行引擎:[/bold] {effective.get('execution_mode') or 'multi'}\n"
             f"[bold]多任务并发:[/bold] {effective.get('max_concurrent') if effective.get('max_concurrent') is not None else '默认'}\n"
-            f"[bold]无头模式:[/bold] {bool(effective.get('headless', False))}\n"
+            f"[bold]无头模式:[/bold] {_format_optional_bool(effective.get('headless'))}\n"
             f"[bold]输出目录:[/bold] {effective.get('output_dir') or 'output'}",
             title="AI 生成任务配置",
             style="cyan",
@@ -418,6 +369,27 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
         if action == "4":
             return {"action": "cancel"}
         console.print("[yellow]无效选项，请输入 1 / 2 / 3 / 4。[/yellow]")
+
+
+def _option_was_explicit(ctx: typer.Context, option_name: str) -> bool:
+    source = ctx.get_parameter_source(option_name)
+    return source not in {None, ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP}
+
+
+def _optional_bool_from_cli(
+    ctx: typer.Context,
+    option_name: str,
+    value: bool,
+) -> bool | None:
+    if not _option_was_explicit(ctx, option_name):
+        return None
+    return value
+
+
+def _format_optional_bool(value: Any) -> str:
+    if value is None:
+        return "未指定"
+    return "True" if bool(value) else "False"
 
 
 
@@ -557,6 +529,7 @@ def _raise_if_graph_failed(result: dict) -> None:
 
 @app.command("chat-pipeline")
 def chat_pipeline_command(
+    ctx: typer.Context,
     request: str = typer.Option(
         "",
         "--request",
@@ -646,13 +619,15 @@ def chat_pipeline_command(
         )
         raise typer.Exit(1)
 
+    resolved_headless = _optional_bool_from_cli(ctx, "headless", headless)
+
     try:
         graph_result = _invoke_graph(
             "chat_pipeline",
             {
                 "request": initial_request,
                 "max_turns": max_turns,
-                "headless": headless,
+                "headless": resolved_headless,
                 "output_dir": output_dir,
                 "max_pages": max_pages,
                 "target_url_count": target_url_count,
@@ -685,8 +660,6 @@ def chat_pipeline_command(
         raise typer.Exit(1)
 
 
-
-
 def main():
     """CLI 入口点
 
@@ -706,138 +679,6 @@ def db_init_command(
     """初始化 PostgreSQL schema。"""
     init_db(reset=reset)
     console.print("[green]数据库 schema 已初始化[/green]")
-
-
-@app.command("multi-pipeline")
-def multi_pipeline_command(
-    site_url: str = typer.Option(
-        ...,
-        "--site-url",
-        "-u",
-        help="目标网站 URL（首页或列表页入口）",
-    ),
-    request: str = typer.Option(
-        "",
-        "--request",
-        "-r",
-        help="自然语言采集需求，如：爬取全站所有分类的数据",
-    ),
-    fields_json: str = typer.Option(
-        "",
-        "--fields-json",
-        help="字段定义 JSON（数组格式）",
-    ),
-    fields_file: str = typer.Option(
-        "",
-        "--fields-file",
-        help="字段定义 JSON 文件路径",
-    ),
-    max_concurrent: int | None = typer.Option(
-        None,
-        "--max-concurrent",
-        help="子任务最大并发数（默认取配置）",
-    ),
-    serial_mode: bool = typer.Option(
-        config.pipeline.local_serial_mode,
-        "--serial/--no-serial",
-        help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发",
-    ),
-    headless: bool = typer.Option(
-        config.browser.headless,
-        "--headless/--no-headless",
-        help="是否使用无头模式（默认读取 .env HEADLESS）",
-    ),
-    output_dir: str = typer.Option(
-        "output",
-        "--output",
-        "-o",
-        help="输出目录",
-    ),
-    thread_id: str = typer.Option("", "--thread-id", help=_GRAPH_THREAD_ID_HELP),
-):
-    """多分类并行采集流水线（Plan-Execute 架构）。
-
-    自动分析网站结构，将大任务拆分为多个子任务并行执行。
-
-    示例:
-        autospider multi-pipeline --site-url "https://example.com" --request "爬取全站所有分类的数据" --fields-file fields.json
-    """
-    if not request:
-        request = typer.prompt("请描述你的采集需求（如：爬取全站所有分类的数据）").strip()
-    if not request:
-        console.print(Panel("[red]需求不能为空[/red]", title="输入错误", style="red"))
-        raise typer.Exit(1)
-
-    try:
-        site_url = validate_url(site_url)
-    except (URLValidationError, ValidationError, ValueError) as e:
-        console.print(Panel(f"[red]{str(e)}[/red]", title="URL 验证错误", style="red"))
-        raise typer.Exit(1)
-
-    # 加载字段定义（可选）
-    import dataclasses
-    fields_dicts: list[dict] = []
-    if fields_json or fields_file:
-        try:
-            loaded = _load_fields(fields_json, fields_file)
-            fields_dicts = [dataclasses.asdict(f) for f in loaded]
-        except Exception as e:
-            console.print(Panel(f"[red]{str(e)}[/red]", title="字段加载错误", style="red"))
-            raise typer.Exit(1)
-
-    console.print(
-        Panel(
-            f"[bold]目标网站:[/bold] {site_url}\n"
-            f"[bold]采集需求:[/bold] {request}\n"
-            f"[bold]字段数量:[/bold] {len(fields_dicts) if fields_dicts else '待定'}\n"
-            f"[bold]最大并发:[/bold] {max_concurrent if max_concurrent else '默认'}\n"
-            f"[bold]串行模式:[/bold] {serial_mode}\n"
-            f"[bold]无头模式:[/bold] {headless}\n"
-            f"[bold]输出目录:[/bold] {output_dir}",
-            title="多分类并行采集",
-            style="cyan",
-        )
-    )
-
-    try:
-        graph_result = _invoke_graph(
-            "multi_pipeline",
-            {
-                "site_url": site_url,
-                "request": request,
-                "fields": fields_dicts,
-                "max_concurrent": max_concurrent,
-                "serial_mode": serial_mode,
-                "headless": headless,
-                "output_dir": output_dir,
-            },
-            thread_id=thread_id,
-        )
-        _raise_if_graph_failed(graph_result)
-        result = graph_result.get("summary") or {}
-
-        console.print(
-            Panel(
-                f"[green]多分类采集完成[/green]\n\n"
-                f"总子任务数: {result.get('total', 0)}\n"
-                f"成功: {result.get('completed', 0)}\n"
-                f"失败: {result.get('failed', 0)}\n"
-                f"总采集数: {result.get('total_collected', 0)}\n"
-                f"合并结果: {output_dir}/merged_results.jsonl\n"
-                f"恢复线程: {result.get('thread_id') or graph_result.get('thread_id', '')}",
-                title="执行完成",
-                style="green",
-            )
-        )
-
-    except KeyboardInterrupt:
-        logger.info("\n[yellow]用户中断[/yellow]")
-        raise typer.Exit(130)
-    except typer.Exit:
-        raise
-    except Exception as e:
-        console.print(Panel(f"[red]{str(e)}[/red]", title="执行错误", style="red"))
-        raise typer.Exit(1)
 
 
 

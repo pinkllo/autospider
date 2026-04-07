@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..contracts import ExecutionRequest
 from ..common.browser import BrowserSession
 from ..common.experience import SkillRuntime
 from ..crawler.planner import TaskPlanner
@@ -25,15 +26,18 @@ class PlanningService:
         self._planner_cls = planner_cls
         self._session_options_builder = session_options_builder
 
-    async def execute(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    async def execute(self, *, request: ExecutionRequest) -> dict[str, Any]:
         if self._session_options_builder is None:
             session_options = {
-                "headless": bool(params.get("headless", False)),
-                "guard_intervention_mode": "interrupt",
-                "guard_thread_id": thread_id,
+                "headless": request.headless,
+                "guard_intervention_mode": request.guard_intervention_mode,
+                "guard_thread_id": request.guard_thread_id,
             }
         else:
-            session_options = self._session_options_builder({"thread_id": thread_id}, params)
+            session_options = self._session_options_builder(
+                {"thread_id": request.guard_thread_id},
+                request.model_dump(mode="python"),
+            )
 
         planner_session = self._browser_session_cls(**session_options)
         await planner_session.start()
@@ -41,21 +45,21 @@ class PlanningService:
             runtime = self._skill_runtime_cls()
             planner = self._planner_cls(
                 page=planner_session.page,
-                site_url=str(params.get("site_url") or params.get("list_url") or ""),
-                user_request=str(params.get("request") or params.get("task_description") or ""),
-                output_dir=str(params.get("output_dir") or "output"),
+                site_url=request.site_url or request.list_url,
+                user_request=request.request or request.task_description,
+                output_dir=request.output_dir,
             )
-            planner_url = str(params.get("site_url") or params.get("list_url") or "")
+            planner_url = request.site_url or request.list_url
             selected_skill_meta = (
                 await runtime.get_or_select(
                     phase="planner",
                     url=planner_url,
                     task_context={
-                        "request": str(params.get("request") or params.get("task_description") or ""),
-                        "fields": list(params.get("fields") or []),
+                        "request": request.request or request.task_description,
+                        "fields": list(request.fields or []),
                     },
                     llm=planner.llm,
-                    preselected_skills=list(params.get("selected_skills") or []),
+                    preselected_skills=list(request.selected_skills or []),
                 )
                 if planner_url
                 else []
@@ -76,7 +80,7 @@ class PlanningService:
         finally:
             await planner_session.stop()
 
-        fields = list(params.get("fields") or [])
+        fields = list(request.fields or [])
         plan.shared_fields = fields
         plan.total_subtasks = len(plan.subtasks)
         plan_knowledge = planner.render_plan_knowledge(plan)

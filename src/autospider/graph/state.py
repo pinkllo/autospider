@@ -11,6 +11,12 @@ class GraphState(TypedDict, total=False):
     """主图状态。"""
 
     # 会话 / 入口状态
+    request_context: dict[str, Any]
+    chat_context: dict[str, Any]
+    plan_context: dict[str, Any]
+    dispatch_context: dict[str, Any]
+    result_context: dict[str, Any]
+
     entry_mode: EntryMode
     thread_id: str
     request_id: str
@@ -51,6 +57,7 @@ class GraphState(TypedDict, total=False):
     # 通用节点输出状态
     node_status: NodeStatus
     node_payload: dict[str, Any]
+    result_context: dict[str, Any]
     node_artifacts: list[dict[str, str]]
     node_error: dict[str, str] | None
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..contracts import ExecutionRequest
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage.persistence import CollectionConfig
 from ..domain.fields import FieldDefinition
@@ -31,6 +32,19 @@ def build_artifact(label: str, path: str | Path) -> dict[str, str]:
     return {"label": label, "path": str(path)}
 
 
+def build_execution_request(
+    params: dict[str, Any],
+    *,
+    thread_id: str,
+    guard_intervention_mode: str = "interrupt",
+) -> ExecutionRequest:
+    return ExecutionRequest.from_params(
+        dict(params or {}),
+        thread_id=thread_id,
+        guard_intervention_mode=guard_intervention_mode,
+    )
+
+
 def materialize_collection_config(output_dir: str | Path, collection_config: dict[str, Any]) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -39,7 +53,7 @@ def materialize_collection_config(output_dir: str | Path, collection_config: dic
     write_json_idempotent(
         config_path,
         normalized,
-        identity_keys=("list_url", "task_description"),
+        identity_keys=("list_url", "page_state_signature", "anchor_url", "variant_label", "task_description"),
     )
     return config_path
 

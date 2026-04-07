@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from ..contracts import ExecutionRequest
 from ..common.browser import create_browser_session as default_create_browser_session
 from ..common.storage.persistence import CollectionConfig, CollectionProgress, load_collection_config
 from ..crawler.batch.batch_collector import batch_collect_urls as default_batch_collect_urls
@@ -36,7 +37,7 @@ class CollectionService:
     def _session_options(*, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
         return {
             "close_engine": True,
-            "headless": bool(params.get("headless", False)),
+            "headless": params.get("headless"),
             "guard_intervention_mode": "interrupt",
             "guard_thread_id": thread_id,
         }
@@ -55,27 +56,28 @@ class CollectionService:
         )
         return progress.to_payload()
 
-    async def collect_urls(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        async with self._create_browser_session(**self._session_options(params=params, thread_id=thread_id)) as session:
+    async def collect_urls(self, *, request: ExecutionRequest) -> dict[str, Any]:
+        params = request.model_dump(mode="python")
+        async with self._create_browser_session(**self._session_options(params=params, thread_id=request.guard_thread_id)) as session:
             result = await self._collect_detail_urls(
                 page=session.page,
-                list_url=str(params.get("list_url") or ""),
-                task_description=str(params.get("task") or ""),
+                list_url=request.list_url,
+                task_description=request.task_description,
                 explore_count=int(params.get("explore_count") or 3),
-                target_url_count=params.get("target_url_count"),
-                max_pages=params.get("max_pages"),
-                output_dir=str(params.get("output_dir") or "output"),
+                target_url_count=request.target_url_count,
+                max_pages=request.max_pages,
+                output_dir=request.output_dir,
                 persist_progress=False,
-                selected_skills=list(params.get("selected_skills") or []),
+                selected_skills=list(request.selected_skills or []),
             )
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
+        output_dir = Path(request.output_dir)
         collected_urls = list(result.collected_urls)
         return {
             "collected_urls": collected_urls,
             "collection_progress": self._build_collection_progress(
-                list_url=str(params.get("list_url") or ""),
-                task_description=str(params.get("task") or ""),
+                list_url=request.list_url,
+                task_description=request.task_description,
                 collected_count=len(collected_urls),
             ),
             "summary": {"collected_urls": len(collected_urls)},
@@ -87,19 +89,20 @@ class CollectionService:
             ],
         }
 
-    async def generate_config(self, *, params: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        async with self._create_browser_session(**self._session_options(params=params, thread_id=thread_id)) as session:
+    async def generate_config(self, *, request: ExecutionRequest) -> dict[str, Any]:
+        params = request.model_dump(mode="python")
+        async with self._create_browser_session(**self._session_options(params=params, thread_id=request.guard_thread_id)) as session:
             config_result = await self._generate_collection_config(
                 page=session.page,
-                list_url=str(params.get("list_url") or ""),
-                task_description=str(params.get("task") or ""),
+                list_url=request.list_url,
+                task_description=request.task_description,
                 explore_count=int(params.get("explore_count") or 3),
-                output_dir=str(params.get("output_dir") or "output"),
+                output_dir=request.output_dir,
                 persist_progress=False,
-                selected_skills=list(params.get("selected_skills") or []),
+                selected_skills=list(request.selected_skills or []),
             )
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
+        output_dir = Path(request.output_dir)
         payload = CollectionConfig.from_dict(config_result.to_dict()).to_payload()
         return {
             "collection_config": payload,
@@ -118,30 +121,36 @@ class CollectionService:
             "artifacts": [build_artifact("collection_config", output_dir / "collection_config.json")],
         }
 
-    async def batch_collect(self, *, params: dict[str, Any], state: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    async def batch_collect(
+        self,
+        *,
+        request: ExecutionRequest,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
         collection_config = dict(state.get("collection_config") or {})
+        params = request.model_dump(mode="python")
         config_path = str(params.get("config_path") or "").strip()
         if not config_path and collection_config:
             config_path = str(
                 materialize_collection_config(
-                    str(params.get("output_dir") or "output"),
+                    request.output_dir,
                     collection_config,
                 )
             )
         if not config_path:
             raise ValueError("missing_collection_config")
 
-        async with self._create_browser_session(**self._session_options(params=params, thread_id=thread_id)) as session:
+        async with self._create_browser_session(**self._session_options(params=params, thread_id=request.guard_thread_id)) as session:
             result = await self._batch_collect_urls(
                 page=session.page,
                 config_path=config_path,
-                target_url_count=params.get("target_url_count"),
-                max_pages=params.get("max_pages"),
-                output_dir=str(params.get("output_dir") or "output"),
+                target_url_count=request.target_url_count,
+                max_pages=request.max_pages,
+                output_dir=request.output_dir,
                 persist_progress=False,
             )
 
-        output_dir = Path(str(params.get("output_dir") or "output"))
+        output_dir = Path(request.output_dir)
         if not collection_config:
             loaded_config = load_collection_config(config_path, strict=True)
             if loaded_config is None:
@@ -152,10 +161,8 @@ class CollectionService:
             "collection_config": collection_config,
             "collected_urls": collected_urls,
             "collection_progress": self._build_collection_progress(
-                list_url=str(collection_config.get("list_url") or params.get("list_url") or ""),
-                task_description=str(
-                    collection_config.get("task_description") or params.get("task") or ""
-                ),
+                list_url=str(collection_config.get("list_url") or request.list_url or ""),
+                task_description=str(collection_config.get("task_description") or request.task_description or ""),
                 collected_count=len(collected_urls),
             ),
             "summary": {"collected_urls": len(collected_urls)},

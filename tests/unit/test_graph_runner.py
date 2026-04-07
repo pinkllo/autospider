@@ -19,7 +19,7 @@ class _FakeGraph:
             "status": "success",
             "summary": {"ok": True},
             "artifacts": [{"label": "x", "path": "output/x.json"}],
-            "node_payload": {"result": {"value": 1}},
+            "result_context": {"result": {"value": 1}},
             "error_code": "",
             "error_message": "",
             **self.payload,
@@ -52,7 +52,7 @@ def test_graph_runner_invoke_success(monkeypatch):
     result = asyncio.run(
         runner.invoke(
             GraphInput(
-                entry_mode="pipeline_run",
+                entry_mode="chat_pipeline",
                 cli_args={"list_url": "https://example.com"},
                 request_id="req_test",
                 invoked_at="2026-01-01T00:00:00",
@@ -62,7 +62,7 @@ def test_graph_runner_invoke_success(monkeypatch):
     )
 
     assert result.status == "success"
-    assert result.entry_mode == "pipeline_run"
+    assert result.entry_mode == "chat_pipeline"
     assert result.summary["ok"] is True
     assert result.artifacts[0]["path"] == "output/x.json"
     assert result.data["result"]["value"] == 1
@@ -81,7 +81,7 @@ def test_graph_runner_invoke_interrupted(monkeypatch):
     result = asyncio.run(
         runner.invoke(
             GraphInput(
-                entry_mode="pipeline_run",
+                entry_mode="chat_pipeline",
                 cli_args={},
                 request_id="req_interrupt",
                 invoked_at="2026-01-01T00:00:00",

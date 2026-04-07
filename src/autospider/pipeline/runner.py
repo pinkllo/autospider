@@ -12,7 +12,6 @@ from ..common.channel.base import URLChannel, URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
 from ..common.experience import SkillRuntime
-from ..common.experience.skill_sedimenter import SkillSedimentationPayload
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
@@ -25,7 +24,6 @@ from .finalization import (
     build_record_summary as _build_record_summary_impl,
     build_run_record as _build_run_record_impl,
     classify_pipeline_result as _classify_pipeline_result_impl,
-    cleanup_output_draft_skill as _cleanup_output_draft_skill_impl,
     commit_items_file as _commit_items_file_impl,
     find_output_draft_skill as _find_output_draft_skill_impl,
     finalize_task_from_record as _finalize_task_from_record_impl,
@@ -35,7 +33,6 @@ from .finalization import (
     prepare_pipeline_output as _prepare_pipeline_output_impl,
     should_promote_skill as _should_promote_skill_impl,
     strip_draft_markers_from_skill_content as _strip_draft_markers_from_skill_content_impl,
-    try_sediment_skill as _try_sediment_skill_impl,
     write_summary as _write_summary_impl,
 )
 from .orchestration import (
@@ -57,10 +54,6 @@ def _prepare_fields_config(
 
 def _find_output_draft_skill(list_url: str, output_dir: str):
     return _find_output_draft_skill_impl(list_url, output_dir)
-
-
-def _cleanup_output_draft_skill(list_url: str, output_dir: str) -> None:
-    _cleanup_output_draft_skill_impl(list_url, output_dir)
 
 
 def _classify_pipeline_result(
@@ -176,17 +169,6 @@ def _persist_pipeline_run(context: PipelineFinalizationContext, records: dict[st
     _persist_pipeline_run_impl(context, records)
 
 
-def _try_sediment_skill(
-    *,
-    state: dict[str, object],
-    payload: SkillSedimentationPayload,
-) -> Path | None:
-    return _try_sediment_skill_impl(
-        state=state,
-        payload=payload,
-    )
-
-
 def _merge_extraction_configs(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     merged_fields: dict[str, dict[str, Any]] = {}
     ordered_names: list[str] = []
@@ -284,7 +266,7 @@ def _resolve_run_redis_key_prefix(
 ) -> str | None:
     if redis_key_prefix:
         return redis_key_prefix
-    mode = str(pipeline_mode or config.pipeline.mode).strip().lower()
+    mode = str(config.pipeline.mode if pipeline_mode is None else pipeline_mode).strip().lower()
     if mode != "redis":
         return None
     base_prefix = (config.redis.key_prefix or "autospider:urls").strip() or "autospider:urls"
@@ -297,7 +279,7 @@ async def run_pipeline(
     fields: list[FieldDefinition],
     execution_brief: dict[str, Any] | None = None,
     output_dir: str = "output",
-    headless: bool = False,
+    headless: bool | None = None,
     explore_count: int | None = None,
     validate_count: int | None = None,
     consumer_concurrency: int | None = None,
@@ -315,7 +297,6 @@ async def run_pipeline(
     anchor_url: str | None = None,
     page_state_signature: str = "",
     variant_label: str | None = None,
-    promote_skill: bool = True,
 ) -> dict:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -333,11 +314,13 @@ async def run_pipeline(
         variant_label=variant_label,
     )
 
-    explore_count = explore_count or config.field_extractor.explore_count
-    validate_count = validate_count or config.field_extractor.validate_count
+    if explore_count is None:
+        explore_count = config.field_extractor.explore_count
+    if validate_count is None:
+        validate_count = config.field_extractor.validate_count
     consumer_workers = max(
         1,
-        int(consumer_concurrency or config.pipeline.consumer_concurrency),
+        int(config.pipeline.consumer_concurrency if consumer_concurrency is None else consumer_concurrency),
     )
     effective_redis_key_prefix = _resolve_run_redis_key_prefix(
         pipeline_mode=pipeline_mode,
@@ -355,38 +338,12 @@ async def run_pipeline(
     summary_path = output_path / "pipeline_summary.json"
     skill_runtime = SkillRuntime()
 
-    try:
-        _prepare_pipeline_output(
-            output_path=output_path,
-            items_path=items_path,
-            summary_path=summary_path,
-        )
-        run_records = _load_persisted_run_records(execution_id)
-    except Exception as exc:  # noqa: BLE001
-        output_path.mkdir(parents=True, exist_ok=True)
-        summary = {
-            "run_id": execution_id,
-            "list_url": list_url,
-            "anchor_url": str(anchor_url or ""),
-            "page_state_signature": str(page_state_signature or ""),
-            "variant_label": str(variant_label or ""),
-            "task_description": task_description,
-            "mode": (pipeline_mode or config.pipeline.mode),
-            "total_urls": 0,
-            "success_count": 0,
-            "consumer_concurrency": consumer_workers,
-            "target_url_count": target_url_count,
-            "items_file": str(items_path),
-            "summary_file": str(summary_path),
-            "execution_id": execution_id,
-            "error": str(exc),
-            "execution_state": "failed",
-            "outcome_state": "failed",
-            "promotion_state": "rejected",
-            "durably_persisted": False,
-        }
-        _write_summary(summary_path, summary)
-        return summary
+    _prepare_pipeline_output(
+        output_path=output_path,
+        items_path=items_path,
+        summary_path=summary_path,
+    )
+    run_records = _load_persisted_run_records(execution_id)
 
     summary = {
         "run_id": execution_id,
@@ -395,7 +352,7 @@ async def run_pipeline(
         "page_state_signature": str(page_state_signature or ""),
         "variant_label": str(variant_label or ""),
         "task_description": task_description,
-        "mode": (pipeline_mode or config.pipeline.mode),
+        "mode": (config.pipeline.mode if pipeline_mode is None else pipeline_mode),
         "total_urls": 0,
         "success_count": 0,
         "consumer_concurrency": consumer_workers,
@@ -462,8 +419,6 @@ async def run_pipeline(
             persist_pipeline_run=_persist_pipeline_run,
             commit_items_file=_commit_items_file,
             write_summary=_write_summary,
-            try_sediment_skill=_try_sediment_skill,
-            cleanup_output_draft_skill=_cleanup_output_draft_skill,
         )
     )
 
@@ -497,12 +452,6 @@ async def run_pipeline(
                     plan_knowledge=runtime_context.plan_knowledge,
                     task_plan=dict(runtime_context.task_plan_snapshot or {}),
                     plan_journal=list(runtime_context.plan_journal or []),
-                    promote_skill=promote_skill,
-                    promotion_context={
-                        "variant_label": str(variant_label or "").strip(),
-                        "anchor_url": str(anchor_url or "").strip(),
-                        "page_state_signature": str(page_state_signature or "").strip(),
-                    },
                     tracker=runtime_context.tracker,
                     sessions=sessions,
                 )

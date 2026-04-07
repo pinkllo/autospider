@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 def _resolve_runtime_replan_max_children() -> int:
-    raw_value = getattr(config.planner, "runtime_subtasks_max_children", 0)
+    raw_value = config.planner.runtime_subtasks_max_children
     try:
         resolved = int(raw_value or 0)
     except (TypeError, ValueError):
@@ -43,7 +43,7 @@ class SubTaskWorker:
         subtask: SubTask,
         fields: list[dict],
         output_dir: str = "output",
-        headless: bool = False,
+        headless: bool | None = None,
         thread_id: str = "",
         guard_intervention_mode: str = "blocking",
         consumer_concurrency: int | None = None,
@@ -185,7 +185,7 @@ class SubTaskWorker:
                 site_url=str(self.subtask.anchor_url or self.subtask.list_url or ""),
                 user_request=str(self.subtask.task_description or ""),
                 output_dir=self.output_dir,
-                use_main_model=bool(getattr(config.planner, "runtime_subtasks_use_main_model", False)),
+                use_main_model=bool(config.planner.runtime_subtasks_use_main_model),
             )
             result = await planner.plan_runtime_subtasks(
                 parent_subtask=self.subtask,
@@ -323,7 +323,6 @@ class SubTaskWorker:
             page_state_signature=working_subtask.page_state_signature,
             variant_label=working_subtask.variant_label,
             execution_brief=working_subtask.execution_brief.model_dump(mode="python"),
-            promote_skill=False,
         )
 
         logger.info(

@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from langgraph.types import interrupt
 
+from ...contracts import AggregationFailure
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...domain.planning import TaskPlan
 from ...services import (
@@ -16,6 +17,7 @@ from ...services import (
     PipelineExecutionService,
     PlanningService,
 )
+from ...services.service_utils import build_execution_request
 
 RETRY_DELAYS = (1.0, 2.0)
 
@@ -27,6 +29,7 @@ def _ok(
     return {
         "node_status": "ok",
         "node_payload": payload or {},
+        "result_context": payload or {},
         "node_artifacts": artifacts or [],
         "node_error": None,
     }
@@ -36,6 +39,7 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
     return {
         "node_status": "fatal",
         "node_payload": {},
+        "result_context": {},
         "node_artifacts": [],
         "node_error": {"code": code, "message": message},
         "error_code": code,
@@ -132,13 +136,11 @@ async def _retry_after_browser_interrupt(
 
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await PipelineExecutionService().execute(
-                params=params,
-                thread_id=_thread_id(state),
-            )
+            service_result = await PipelineExecutionService().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -155,13 +157,11 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await CollectionService().collect_urls(
-                params=params,
-                thread_id=_thread_id(state),
-            )
+            service_result = await CollectionService().collect_urls(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -178,13 +178,11 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await CollectionService().generate_config(
-                params=params,
-                thread_id=_thread_id(state),
-            )
+            service_result = await CollectionService().generate_config(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -201,13 +199,13 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
     collection_config = dict(state.get("collection_config") or {})
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
             service_result = await CollectionService().batch_collect(
-                params=params,
+                request=request,
                 state={"collection_config": collection_config},
-                thread_id=_thread_id(state),
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -227,13 +225,13 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
     collected_urls = list(state.get("collected_urls") or [])
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
             service_result = await FieldService().execute(
-                params=params,
+                request=request,
                 state={"collected_urls": collected_urls},
-                thread_id=_thread_id(state),
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
@@ -251,13 +249,11 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
     params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await PlanningService().execute(
-                params=params,
-                thread_id=_thread_id(state),
-            )
+            service_result = await PlanningService().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -286,19 +282,26 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
     task_plan = state.get("task_plan")
     if not isinstance(task_plan, TaskPlan):
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
+    request = build_execution_request(params, thread_id=_thread_id(state))
 
-    async def _runner() -> dict[str, Any]:
+    try:
         service_result = AggregationService().execute(
-            params=params,
+            request=request,
             task_plan=task_plan,
-            dispatch_result=dict(state.get("dispatch_result") or {}),
-            subtask_results=list(state.get("subtask_results") or []),
-            plan_knowledge=str(state.get("plan_knowledge") or ""),
         )
+    except AggregationFailure as exc:
+        report = exc.report.model_dump(mode="python")
         return {
-            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-            "aggregate_result": dict(service_result.get("aggregate_result") or {}),
-            "summary": dict(service_result.get("summary") or {}),
+            **_fatal("aggregate_failed", str(exc)),
+            "aggregate_result": report,
+            "summary": {
+                "merged_items": report.get("merged_items", 0),
+                "failed_subtasks": report.get("failed_subtasks", 0),
+            },
         }
 
-    return await _run_with_retry(_runner, error_code="aggregate_failed")
+    return {
+        **_ok(_node_payload(service_result), _node_artifacts(service_result)),
+        "aggregate_result": dict(service_result.get("aggregate_result") or {}),
+        "summary": dict(service_result.get("summary") or {}),
+    }

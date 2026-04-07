@@ -8,8 +8,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-# 加载 .env 文件
-load_dotenv()
+_DOTENV_LOADED = False
+_CONFIG_CACHE: "Config | None" = None
+
+
+def _load_environment() -> None:
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+    load_dotenv()
+    _DOTENV_LOADED = True
 
 
 class LLMConfig(BaseModel):
@@ -286,6 +294,12 @@ class PlannerConfig(BaseModel):
     subtask_consumer_concurrency: int = Field(
         default_factory=lambda: int(os.getenv("PLANNER_SUBTASK_CONSUMER_CONCURRENCY", "1"))
     )
+    runtime_subtasks_max_children: int = Field(
+        default_factory=lambda: int(os.getenv("PLANNER_RUNTIME_SUBTASKS_MAX_CHILDREN", "0"))
+    )
+    runtime_subtasks_use_main_model: bool = Field(
+        default_factory=lambda: os.getenv("PLANNER_RUNTIME_SUBTASKS_USE_MAIN_MODEL", "false").lower() == "true"
+    )
 
 
 class DatabaseConfig(BaseModel):
@@ -325,6 +339,7 @@ class Config(BaseModel):
     @classmethod
     def load(cls) -> "Config":
         """加载配置"""
+        _load_environment()
         return cls()
 
     def ensure_dirs(self) -> None:
@@ -333,5 +348,20 @@ class Config(BaseModel):
         Path(self.agent.output_dir).mkdir(parents=True, exist_ok=True)
 
 
-# 全局配置实例
-config = Config.load()
+def get_config(*, reload: bool = False) -> Config:
+    global _CONFIG_CACHE
+    if reload or _CONFIG_CACHE is None:
+        _CONFIG_CACHE = Config.load()
+    return _CONFIG_CACHE
+
+
+class _ConfigProxy:
+    def __getattr__(self, name: str):
+        return getattr(get_config(), name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        setattr(get_config(), name, value)
+
+
+# 全局配置代理（惰性加载）
+config = _ConfigProxy()

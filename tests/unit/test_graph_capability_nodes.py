@@ -29,12 +29,12 @@ class _FakePlannerEmpty:
 
 def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
     class _FakePlanningService:
-        async def execute(self, *, params, thread_id):
+        async def execute(self, *, request):
             planner = _FakePlannerEmpty(
                 page=SimpleNamespace(url="https://example.com/list"),
-                site_url=str(params.get("list_url") or ""),
-                user_request=str(params.get("task_description") or ""),
-                output_dir=str(params.get("output_dir") or "output"),
+                site_url=request.list_url,
+                user_request=request.task_description,
+                output_dir=request.output_dir,
             )
             return {
                 "task_plan": await planner.plan(),
@@ -66,15 +66,15 @@ def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
 
 def test_generate_config_node_persists_collection_config_in_state(monkeypatch, tmp_path):
     class _FakeCollectionService:
-        async def generate_config(self, *, params, thread_id):
+        async def generate_config(self, *, request):
             return {
                 "collection_config": {
                     "nav_steps": [{"action": "click", "target": "招标公告"}],
                     "common_detail_xpath": "//a[@class=\"detail\"]",
                     "pagination_xpath": "//a[@class=\"next\"]",
                     "jump_widget_xpath": {"input": "//input", "button": "//button"},
-                    "list_url": params["list_url"],
-                    "task_description": params["task"],
+                    "list_url": request.list_url,
+                    "task_description": request.task_description,
                 },
                 "summary": {
                     "nav_steps": 1,
@@ -92,7 +92,7 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
                 "thread_id": "thread-1",
                 "normalized_params": {
                     "list_url": "https://example.com/list",
-                    "task": "采集公告",
+                    "task_description": "采集公告",
                     "explore_count": 2,
                     "output_dir": str(tmp_path),
                 },
@@ -108,7 +108,7 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
 
 def test_batch_collect_node_can_use_collection_config_from_state(monkeypatch, tmp_path):
     class _FakeCollectionService:
-        async def batch_collect(self, *, params, state, thread_id):
+        async def batch_collect(self, *, request, state):
             collection_config = state["collection_config"]
             assert collection_config["list_url"] == "https://example.com/list"
             return {
@@ -149,8 +149,8 @@ def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monke
     original_max_pages = config.url_collector.max_pages
 
     class _FakeCollectionService:
-        async def collect_urls(self, *, params, thread_id):
-            captured.update(params)
+        async def collect_urls(self, *, request):
+            captured.update(request.model_dump(mode="python"))
             return {
                 "collected_urls": ["https://example.com/a"],
                 "collection_progress": {"collected_count": 1},
@@ -164,7 +164,7 @@ def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monke
                 "thread_id": "thread-1",
                 "normalized_params": {
                     "list_url": "https://example.com/list",
-                    "task": "采集公告",
+                    "task_description": "采集公告",
                     "explore_count": 2,
                     "max_pages": 9,
                     "output_dir": str(tmp_path),
@@ -183,8 +183,8 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
     original_max_pages = config.url_collector.max_pages
 
     class _FakeCollectionService:
-        async def batch_collect(self, *, params, state, thread_id):
-            captured.update(params)
+        async def batch_collect(self, *, request, state):
+            captured.update(request.model_dump(mode="python"))
             return {
                 "collection_config": state["collection_config"],
                 "collected_urls": ["https://example.com/a"],
@@ -220,7 +220,7 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
 
 def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
     class _FakeFieldService:
-        async def execute(self, *, params, state, thread_id):
+        async def execute(self, *, request, state):
             assert state["collected_urls"] == ["https://example.com/a", "https://example.com/b"]
             return {
                 "fields_config": [{"name": "title", "xpath": "//h1"}],
@@ -256,7 +256,7 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
 
 def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
     class _FakePipelineExecutionService:
-        async def execute(self, *, params, thread_id):
+        async def execute(self, *, request):
             return {
                 "total_urls": 4,
                 "success_count": 3,

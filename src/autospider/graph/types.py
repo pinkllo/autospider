@@ -7,15 +7,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-EntryMode = Literal[
-    "chat_pipeline",
-    "pipeline_run",
-    "collect_urls",
-    "generate_config",
-    "batch_collect",
-    "field_extract",
-    "multi_pipeline",
-]
+PublicEntryMode = Literal["chat_pipeline"]
+InternalEntryMode = Literal["pipeline_run"]
+EntryMode = Literal["chat_pipeline", "pipeline_run"]
 
 NodeStatus = Literal["ok", "retryable", "fatal"]
 GraphStatus = Literal["success", "partial_success", "failed", "interrupted"]
@@ -31,7 +25,10 @@ class GraphError(BaseModel):
 class GraphInput(BaseModel):
     """图执行输入。"""
 
-    entry_mode: EntryMode
+    entry_mode: EntryMode = Field(
+        ...,
+        description="正式公开入口仅支持 chat_pipeline；pipeline_run 仅供内部脚本与测试使用。",
+    )
     cli_args: dict[str, Any] = Field(default_factory=dict)
     request_id: str = Field(default="")
     invoked_at: str = Field(default="")
@@ -55,7 +52,7 @@ class GraphResult(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     artifacts: list[dict[str, str]] = Field(default_factory=list)
     error: GraphError | None = None
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict, description="稳定的 result_context 结果载荷。")
     thread_id: str = ""
     checkpoint_id: str = ""
     next_nodes: list[str] = Field(default_factory=list)

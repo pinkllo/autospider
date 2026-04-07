@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-import pytest
 from pathlib import Path
 
+import pytest
+
 from autospider.common.types import SubTask, SubTaskStatus, TaskPlan
+from autospider.contracts import AggregationFailure
 from autospider.pipeline.aggregator import ResultAggregator
 
 
@@ -37,149 +39,112 @@ def _write_jsonl(path: Path, items: list[dict]) -> None:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-class TestAggregator:
-    """ResultAggregator 基础测试。"""
+def _mark_aggregate_ready(subtask: SubTask, result_file: Path) -> None:
+    subtask.result_file = str(result_file)
+    subtask.context = {
+        "durably_persisted": True,
+        "reliable_for_aggregation": True,
+    }
 
+
+class TestAggregator:
     def test_merge_two_subtasks(self, tmp_path):
-        """合并两个子任务的结果。"""
         st1 = _make_subtask("01")
         st2 = _make_subtask("02")
+        file1 = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        file2 = tmp_path / "subtask_02" / "pipeline_extracted_items.jsonl"
+        _mark_aggregate_ready(st1, file1)
+        _mark_aggregate_ready(st2, file2)
         plan = _make_plan([st1, st2])
 
-        # 创建子任务输出
         _write_jsonl(
-            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
+            file1,
             [
                 {"url": "https://example.com/a", "title": "A"},
                 {"url": "https://example.com/b", "title": "B"},
             ],
         )
-        _write_jsonl(
-            tmp_path / "subtask_02" / "pipeline_extracted_items_run2.jsonl",
-            [
-                {"url": "https://example.com/c", "title": "C"},
-            ],
-        )
+        _write_jsonl(file2, [{"url": "https://example.com/c", "title": "C"}])
 
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+        result = ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
 
-        assert result["total_items"] == 3
+        assert result["merged_items"] == 3
         assert result["unique_urls"] == 3
-        assert result["subtasks_completed"] == 2
-
-        # 检查合并文件
-        merged = tmp_path / "merged_results.jsonl"
-        assert merged.exists()
-        lines = merged.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 3
-
-        # 检查子任务来源标记
-        first_item = json.loads(lines[0])
-        assert "_subtask_id" in first_item
-        assert "_subtask_name" in first_item
+        assert result["eligible_subtasks"] == 2
+        assert result["failed_subtasks"] == 0
 
     def test_dedup_urls(self, tmp_path):
-        """重复 URL 应被去重。"""
         st1 = _make_subtask("01")
         st2 = _make_subtask("02")
+        file1 = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        file2 = tmp_path / "subtask_02" / "pipeline_extracted_items.jsonl"
+        _mark_aggregate_ready(st1, file1)
+        _mark_aggregate_ready(st2, file2)
         plan = _make_plan([st1, st2])
 
-        _write_jsonl(
-            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
-            [{"url": "https://example.com/dup", "title": "From ST1"}],
-        )
-        _write_jsonl(
-            tmp_path / "subtask_02" / "pipeline_extracted_items_run2.jsonl",
-            [{"url": "https://example.com/dup", "title": "From ST2"}],
-        )
+        _write_jsonl(file1, [{"url": "https://example.com/dup", "title": "From ST1"}])
+        _write_jsonl(file2, [{"url": "https://example.com/dup", "title": "From ST2"}])
 
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+        result = ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
 
-        assert result["total_items"] == 1
+        assert result["merged_items"] == 1
         assert result["unique_urls"] == 1
 
-    def test_skip_failed_subtasks(self, tmp_path):
-        """失败的子任务不应被包含。"""
+    def test_excludes_failed_subtasks_from_report(self, tmp_path):
         st1 = _make_subtask("01", status=SubTaskStatus.COMPLETED)
         st2 = _make_subtask("02", status=SubTaskStatus.FAILED)
+        file1 = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        _mark_aggregate_ready(st1, file1)
         plan = _make_plan([st1, st2])
 
-        _write_jsonl(
-            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
-            [{"url": "https://example.com/a", "title": "A"}],
-        )
+        _write_jsonl(file1, [{"url": "https://example.com/a", "title": "A"}])
+        result = ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
 
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+        assert result["merged_items"] == 1
+        assert result["excluded_subtasks"] == 1
+        excluded = [item for item in result["subtask_details"] if item["eligibility"] == "excluded"]
+        assert excluded[0]["reason"] == "status_failed"
 
-        assert result["total_items"] == 1
-        assert result["subtasks_completed"] == 1
-
-    def test_empty_plan(self, tmp_path):
-        """空计划应返回空结果。"""
-        plan = _make_plan([])
-
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
-
-        assert result["total_items"] == 0
-        assert result["unique_urls"] == 0
-
-
-    def test_prefer_explicit_result_file_over_stale_history(self, tmp_path):
-        """显式 result_file 应覆盖目录里的历史结果文件。"""
-        current_file = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
-        stale_file = tmp_path / "subtask_01" / "pipeline_extracted_items_old.jsonl"
-
+    def test_strictly_fails_when_result_file_missing(self, tmp_path):
         st = _make_subtask("01")
-        st.result_file = str(current_file)
+        missing_file = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        _mark_aggregate_ready(st, missing_file)
         plan = _make_plan([st])
 
-        _write_jsonl(current_file, [{"url": "https://example.com/current", "title": "Current"}])
-        _write_jsonl(stale_file, [{"url": "https://example.com/stale", "title": "Stale"}])
+        with pytest.raises(AggregationFailure) as exc_info:
+            ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
 
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
+        report = exc_info.value.report.model_dump(mode="python")
+        assert report["failed_subtasks"] == 1
+        assert report["failure_reasons"] == ["01:result_file_missing"]
 
-        assert result["total_items"] == 1
-        merged = tmp_path / "merged_results.jsonl"
-        lines = merged.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 1
-        assert json.loads(lines[0])["url"] == "https://example.com/current"
-
-    def test_skip_unreliable_completed_subtask(self, tmp_path):
+    def test_strictly_fails_when_jsonl_is_invalid(self, tmp_path):
         st = _make_subtask("01")
-        st.context = {"reliable_for_aggregation": False}
+        result_file = tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl"
+        _mark_aggregate_ready(st, result_file)
+        plan = _make_plan([st])
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        result_file.write_text("{bad json}\n", encoding="utf-8")
+
+        with pytest.raises(AggregationFailure) as exc_info:
+            ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
+
+        report = exc_info.value.report.model_dump(mode="python")
+        assert report["failed_subtasks"] == 1
+        assert "invalid_jsonl_line" in report["failure_reasons"][0]
+
+    def test_excludes_completed_but_non_durable_subtasks(self, tmp_path):
+        st = _make_subtask("01")
+        st.result_file = str(tmp_path / "subtask_01" / "pipeline_extracted_items.jsonl")
+        st.context = {
+            "durably_persisted": False,
+            "reliable_for_aggregation": True,
+        }
         plan = _make_plan([st])
 
-        _write_jsonl(
-            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
-            [{"url": "https://example.com/a", "title": "A"}],
-        )
+        result = ResultAggregator().aggregate(plan=plan, output_dir=str(tmp_path))
 
-        aggregator = ResultAggregator()
-        result = aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
-
-        assert result["total_items"] == 0
-        assert result["subtasks_completed"] == 0
-        assert result["subtasks_skipped_unreliable"] == 1
-
-        """应生成汇总文件。"""
-        st = _make_subtask("01")
-        plan = _make_plan([st])
-
-        _write_jsonl(
-            tmp_path / "subtask_01" / "pipeline_extracted_items_run1.jsonl",
-            [{"url": "https://example.com/a", "title": "A"}],
-        )
-
-        aggregator = ResultAggregator()
-        aggregator.aggregate(plan=plan, output_dir=str(tmp_path))
-
-        summary_file = tmp_path / "merged_summary.json"
-        assert summary_file.exists()
-
-        summary = json.loads(summary_file.read_text(encoding="utf-8"))
-        assert summary["total_items"] == 1
+        assert result["merged_items"] == 0
+        assert result["eligible_subtasks"] == 0
+        assert result["excluded_subtasks"] == 1
+        assert result["subtask_details"][0]["reason"] == "subtask_not_durable"

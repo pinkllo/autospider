@@ -1,4 +1,4 @@
-"""LangGraph 单图多入口编排层。"""
+"""LangGraph 主链路编排层。"""
 
 from .runner import GraphRunner
 from .types import EntryMode, GraphError, GraphInput, GraphResult

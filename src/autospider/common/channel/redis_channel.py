@@ -49,6 +49,11 @@ class RedisURLChannel(URLChannel):
         self._connected = False                        # Redis 是否连接成功的标记位
         self._recover_task: asyncio.Task | None = None # 用于自动检查并接管 stale/超时未处理的遗留信息的后台定时任务
         self._retry_buffer: deque[tuple[str, str, dict]] = deque()
+        self._background_error: RuntimeError | None = None
+
+    def _raise_background_error(self) -> None:
+        if self._background_error is not None:
+            raise self._background_error
 
     async def _recover_pending_once(self) -> None:
         """执行一次遗留未 ack (Pending) 消息的恢复逻辑。
@@ -56,6 +61,7 @@ class RedisURLChannel(URLChannel):
         扫描消费者组内处理超时的旧消息（可能来自于挂断的消费者端），改变它们的拥有权从而继续重新被当前消费者执行消费。
         受全局配置 config.redis.auto_recover 和 config.redis.task_timeout_ms 控制。
         """
+        self._raise_background_error()
         if not self._connected or not config.redis.auto_recover:
             return
         recovered = await self.manager.recover_stale_tasks(
@@ -81,14 +87,16 @@ class RedisURLChannel(URLChannel):
                 except asyncio.CancelledError:
                     break   # 当关闭通道时，任务被主动取消退出循环
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("[RedisURLChannel] 后台恢复失败: %s", exc)
-                    continue  # 防止偶尔的断连异常终止整个循环
+                    logger.error("[RedisURLChannel] 后台恢复失败: %s", exc)
+                    self._background_error = RuntimeError(f"redis_recovery_failed: {exc}")
+                    break
 
         # 创建后台常驻任务
         self._recover_task = asyncio.create_task(_loop())
 
     async def _ensure_connected(self) -> None:
         """确保已经成功连接到 Redis。如果是首次连接，则初始化相关自动恢复机制。"""
+        self._raise_background_error()
         if self._connected:
             return
             
@@ -110,6 +118,7 @@ class RedisURLChannel(URLChannel):
         Args:
             url: 被处理的目标 URL 字符串
         """
+        self._raise_background_error()
         await self._ensure_connected()
         # 使用 manager 投递任务到流的队尾
         await self.manager.push_task(url)
@@ -124,6 +133,7 @@ class RedisURLChannel(URLChannel):
         Returns:
             URLTask 对象序列
         """
+        self._raise_background_error()
         await self._ensure_connected()
 
         # 获取超时参数换算适配为阻塞毫秒数
@@ -186,8 +196,6 @@ class RedisURLChannel(URLChannel):
             try:
                 await task
             except asyncio.CancelledError:
-                pass
-            except Exception:
                 pass
         # 关闭底层 Redis 连接
         await self.manager.close()

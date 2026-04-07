@@ -1,7 +1,7 @@
 """
-MainGraph：单图多入口编排。
-该模块负责构建整个自适应爬虫的主状态图（Main Graph），管理不同模式（如聊天、单页抓取、多页抓取等）下的状态流转与节点执行。
-基于 LangGraph 实现，通过单一的入口根据 entry_mode 进行路由分发。
+MainGraph：主链路图编排。
+该模块负责构建主状态图（Main Graph）。
+对外正式入口收敛为 `chat_pipeline`，`pipeline_run` 仅保留为内部测试/脚本直连路径。
 """
 
 from __future__ import annotations
@@ -12,10 +12,6 @@ from langgraph.graph import END, StateGraph
 
 from .nodes.capability_nodes import (
     aggregate_node,
-    batch_collect_node,
-    collect_urls_node,
-    field_extract_node,
-    generate_config_node,
     plan_node,
     run_pipeline_node,
 )
@@ -39,16 +35,11 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
     根据 entry_mode 选择图的入口分支。
 
     当前用户侧主路径是 `chat_pipeline`：先经过 chat 澄清/复用/review，
-    再进入 planning 与 multi-dispatch。`pipeline_run` 保留为直接/兼容路径。
+    再进入 planning 与 multi-dispatch。`pipeline_run` 仅保留为内部直连路径。
     """
     mapping = {
         "chat_pipeline": "chat_clarify",
         "pipeline_run": "normalize_pipeline_params",
-        "collect_urls": "collect_urls_node",
-        "generate_config": "generate_config_node",
-        "batch_collect": "batch_collect_node",
-        "field_extract": "field_extract_node",
-        "multi_pipeline": "plan_node",
     }
 
     mode = str(state.get("entry_mode") or "")
@@ -112,10 +103,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("multi_dispatch_subgraph", build_multi_dispatch_subgraph())
     graph.add_node("normalize_pipeline_params", normalize_pipeline_params)
     graph.add_node("run_pipeline_node", run_pipeline_node)
-    graph.add_node("collect_urls_node", collect_urls_node)
-    graph.add_node("generate_config_node", generate_config_node)
-    graph.add_node("batch_collect_node", batch_collect_node)
-    graph.add_node("field_extract_node", field_extract_node)
     graph.add_node("plan_node", plan_node)
     graph.add_node("aggregate_node", aggregate_node)
     graph.add_node("build_artifact_index", build_artifact_index)
@@ -129,11 +116,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
         {
             "chat_clarify": "chat_clarify",
             "normalize_pipeline_params": "normalize_pipeline_params",
-            "collect_urls_node": "collect_urls_node",
-            "generate_config_node": "generate_config_node",
-            "batch_collect_node": "batch_collect_node",
-            "field_extract_node": "field_extract_node",
-            "plan_node": "plan_node",
             "finalize_result": "finalize_result",
         },
     )
@@ -170,11 +152,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
         {"ok": "run_pipeline_node", "error": "build_artifact_index"},
     )
     graph.add_edge("run_pipeline_node", "build_artifact_index")
-
-    graph.add_edge("collect_urls_node", "build_artifact_index")
-    graph.add_edge("generate_config_node", "build_artifact_index")
-    graph.add_edge("batch_collect_node", "build_artifact_index")
-    graph.add_edge("field_extract_node", "build_artifact_index")
 
     graph.add_conditional_edges(
         "plan_node",

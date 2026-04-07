@@ -109,11 +109,11 @@ async def test_initial_recovery_failure_is_not_masked(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_background_recovery_failure_is_logged(monkeypatch):
+async def test_background_recovery_failure_poison_pills_follow_up_fetch(monkeypatch):
     manager = _FakeManager()
     channel = RedisURLChannel(manager=manager, consumer_name="worker-a", block_ms=0, max_retries=3)
 
-    warnings: list[str] = []
+    errors: list[str] = []
 
     async def _boom():
         raise RuntimeError("redis down")
@@ -121,13 +121,16 @@ async def test_background_recovery_failure_is_logged(monkeypatch):
     monkeypatch.setattr(channel, "_recover_pending_once", _boom)
     monkeypatch.setattr(redis_channel_module.config.redis, "auto_recover", True, raising=False)
     monkeypatch.setattr(redis_channel_module.config.redis, "task_timeout_ms", 1, raising=False)
-    monkeypatch.setattr(redis_channel_module.logger, "warning", lambda msg, *args: warnings.append(msg % args))
+    monkeypatch.setattr(redis_channel_module.logger, "error", lambda msg, *args: errors.append(msg % args))
 
     channel._start_recover_loop()
     await asyncio.sleep(1.1)
-    await channel.close()
 
-    assert any("后台恢复失败" in message for message in warnings)
+    with pytest.raises(RuntimeError, match="redis_recovery_failed: redis down"):
+        await channel.fetch(max_items=1, timeout_s=0)
+
+    await channel.close()
+    assert any("后台恢复失败" in message for message in errors)
 
 
 @pytest.mark.asyncio

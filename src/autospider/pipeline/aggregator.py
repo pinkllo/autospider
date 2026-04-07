@@ -1,8 +1,4 @@
-"""结果聚合器 — 合并所有子任务的采集结果。
-
-负责将多个子任务的 JSONL 结果文件合并为一个，
-并执行 URL 去重和生成全局汇总报告。
-"""
+"""结果聚合器，负责严格合并可靠且可追溯的子任务结果。"""
 
 from __future__ import annotations
 
@@ -11,6 +7,12 @@ from pathlib import Path
 
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
+from ..contracts import (
+    AggregationEligibility,
+    AggregationFailure,
+    AggregationReport,
+    AggregationSubtaskDetail,
+)
 from ..domain.planning import SubTask, SubTaskStatus, TaskPlan
 
 logger = get_logger(__name__)
@@ -20,92 +22,115 @@ class ResultAggregator:
     """合并所有子任务的采集结果。"""
 
     @staticmethod
-    def _is_subtask_aggregate_eligible(subtask: SubTask) -> bool:
+    def _resolve_eligibility(subtask: SubTask) -> tuple[AggregationEligibility, str]:
         if subtask.status != SubTaskStatus.COMPLETED:
-            return False
+            return AggregationEligibility.EXCLUDED, f"status_{subtask.status.value}"
         summary = dict(getattr(subtask, "context", {}) or {})
-        if summary:
-            return bool(summary.get("reliable_for_aggregation", False))
-        return True
+        if not summary:
+            return AggregationEligibility.EXCLUDED, "missing_subtask_context"
+        if not bool(summary.get("durably_persisted")):
+            return AggregationEligibility.EXCLUDED, "subtask_not_durable"
+        if not bool(summary.get("reliable_for_aggregation")):
+            return AggregationEligibility.EXCLUDED, "subtask_not_reliable"
+        result_file = str(subtask.result_file or "").strip()
+        if not result_file:
+            return AggregationEligibility.FAILED, "missing_result_file"
+        return AggregationEligibility.INCLUDED, ""
+
+    @staticmethod
+    def _read_result_items(jsonl_file: Path) -> list[dict]:
+        payload = jsonl_file.read_text(encoding="utf-8")
+        items: list[dict] = []
+        for lineno, line in enumerate(payload.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                items.append(json.loads(stripped))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid_jsonl_line:{jsonl_file}:{lineno}:{exc}") from exc
+        return items
 
     def aggregate(self, plan: TaskPlan, output_dir: str) -> dict:
-        """合并结果并生成汇总。"""
         all_items: list[dict] = []
         seen_urls: set[str] = set()
-        subtask_stats: list[dict] = []
+        details: list[AggregationSubtaskDetail] = []
+        failure_reasons: list[str] = []
 
-        skipped_unreliable = 0
         for subtask in plan.subtasks:
-            if not self._is_subtask_aggregate_eligible(subtask):
-                if subtask.status == SubTaskStatus.COMPLETED:
-                    skipped_unreliable += 1
+            eligibility, reason = self._resolve_eligibility(subtask)
+            detail = AggregationSubtaskDetail(
+                id=subtask.id,
+                name=subtask.name,
+                status=subtask.status.value,
+                eligibility=eligibility,
+                reason=reason,
+                items=0,
+                result_file=str(subtask.result_file or ""),
+            )
+            if eligibility != AggregationEligibility.INCLUDED:
+                details.append(detail)
+                if eligibility == AggregationEligibility.FAILED:
+                    failure_reasons.append(f"{subtask.id}:{reason}")
                 continue
 
-            items_count = 0
-            for jsonl_file in self._resolve_result_files(subtask=subtask, output_dir=output_dir):
-                try:
-                    for line in jsonl_file.read_text(encoding="utf-8").splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        item = json.loads(line)
-                        url = item.get("url", "")
+            jsonl_file = Path(str(subtask.result_file or "")).expanduser()
+            if not jsonl_file.exists():
+                detail.eligibility = AggregationEligibility.FAILED
+                detail.reason = "result_file_missing"
+                details.append(detail)
+                failure_reasons.append(f"{subtask.id}:result_file_missing")
+                continue
 
-                        if url and url in seen_urls:
-                            continue
-                        if url:
-                            seen_urls.add(url)
+            try:
+                items = self._read_result_items(jsonl_file)
+            except Exception as exc:  # noqa: BLE001
+                detail.eligibility = AggregationEligibility.FAILED
+                detail.reason = str(exc)
+                details.append(detail)
+                failure_reasons.append(f"{subtask.id}:{exc}")
+                continue
 
-                        item["_subtask_id"] = subtask.id
-                        item["_subtask_name"] = subtask.name
-                        all_items.append(item)
-                        items_count += 1
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[Aggregator] 读取 %s 失败: %s", jsonl_file, exc)
-
-            subtask_stats.append({
-                "id": subtask.id,
-                "name": subtask.name,
-                "items": items_count,
-            })
+            for item in items:
+                url = str(item.get("url") or "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                normalized = dict(item)
+                normalized["_subtask_id"] = subtask.id
+                normalized["_subtask_name"] = subtask.name
+                all_items.append(normalized)
+                detail.items += 1
+            details.append(detail)
 
         output_path = Path(output_dir)
-        merged_file = output_path / "merged_results.jsonl"
         output_path.mkdir(parents=True, exist_ok=True)
+        merged_file = output_path / "merged_results.jsonl"
+        summary_file = output_path / "merged_summary.json"
+
+        report = AggregationReport(
+            merged_items=len(all_items),
+            unique_urls=len(seen_urls),
+            eligible_subtasks=sum(1 for detail in details if detail.eligibility == AggregationEligibility.INCLUDED),
+            excluded_subtasks=sum(1 for detail in details if detail.eligibility == AggregationEligibility.EXCLUDED),
+            failed_subtasks=sum(1 for detail in details if detail.eligibility == AggregationEligibility.FAILED),
+            failure_reasons=failure_reasons,
+            subtask_details=details,
+            merged_file=str(merged_file),
+            summary_file=str(summary_file),
+        )
+
+        if failure_reasons:
+            raise AggregationFailure(report)
 
         merged_payload = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in all_items)
         write_text_if_changed(merged_file, merged_payload)
-
-        summary = {
-            "total_items": len(all_items),
-            "unique_urls": len(seen_urls),
-            "subtasks_completed": len(subtask_stats),
-            "subtasks_skipped_unreliable": skipped_unreliable,
-            "subtasks_total": len(plan.subtasks),
-            "subtask_details": subtask_stats,
-            "merged_file": str(merged_file),
-        }
-
-        summary_file = output_path / "merged_summary.json"
-        write_json_idempotent(summary_file, summary, volatile_keys=set())
-
+        write_json_idempotent(summary_file, report.model_dump(mode="python"), volatile_keys=set())
         logger.info(
-            "[Aggregator] 合并完成: %d 条记录 (%d 个唯一 URL), 来自 %d 个子任务",
-            len(all_items),
-            len(seen_urls),
-            len(subtask_stats),
+            "[Aggregator] 合并完成: %d 条记录 (%d 个唯一 URL), %d 个可聚合子任务",
+            report.merged_items,
+            report.unique_urls,
+            report.eligible_subtasks,
         )
-
-        return summary
-
-    def _resolve_result_files(self, *, subtask: SubTask, output_dir: str) -> list[Path]:
-        explicit = Path(str(subtask.result_file or "")).expanduser() if subtask.result_file else None
-        if explicit and explicit.exists():
-            return [explicit]
-
-        subtask_dir = Path(output_dir) / f"subtask_{subtask.id}"
-        stable_file = subtask_dir / "pipeline_extracted_items.jsonl"
-        if stable_file.exists():
-            return [stable_file]
-
-        return sorted(subtask_dir.glob("pipeline_extracted_items_*.jsonl"))
+        return report.model_dump(mode="python")

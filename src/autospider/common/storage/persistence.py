@@ -22,6 +22,9 @@ _CONFIG_PAYLOAD_FIELDS = (
     "pagination_xpath",
     "jump_widget_xpath",
     "list_url",
+    "anchor_url",
+    "page_state_signature",
+    "variant_label",
     "task_description",
 )
 _PROGRESS_PAYLOAD_FIELDS = (
@@ -59,6 +62,9 @@ class CollectionConfig:
 
     # 任务信息
     list_url: str = ""
+    anchor_url: str = ""
+    page_state_signature: str = ""
+    variant_label: str = ""
     task_description: str = ""
 
     # 元信息
@@ -73,6 +79,9 @@ class CollectionConfig:
             "pagination_xpath": self.pagination_xpath,
             "jump_widget_xpath": self.jump_widget_xpath,
             "list_url": self.list_url,
+            "anchor_url": self.anchor_url,
+            "page_state_signature": self.page_state_signature,
+            "variant_label": self.variant_label,
             "task_description": self.task_description,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -91,6 +100,9 @@ class CollectionConfig:
             pagination_xpath=data.get("pagination_xpath"),
             jump_widget_xpath=data.get("jump_widget_xpath"),
             list_url=data.get("list_url", ""),
+            anchor_url=data.get("anchor_url", ""),
+            page_state_signature=data.get("page_state_signature", ""),
+            variant_label=data.get("variant_label", ""),
             task_description=data.get("task_description", ""),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
@@ -116,7 +128,7 @@ class ConfigPersistence:
         persisted = write_json_idempotent(
             self.config_file,
             data,
-            identity_keys=("list_url", "task_description"),
+            identity_keys=("list_url", "page_state_signature", "anchor_url", "variant_label", "task_description"),
         )
         normalized = CollectionConfig.from_dict(dict(persisted or data))
         config.created_at = normalized.created_at

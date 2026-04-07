@@ -133,7 +133,7 @@ class GraphRunner:
             summary=summary,
             artifacts=list(final_state.get("artifacts") or snapshot_values.get("artifacts") or []),
             error=error,
-            data=dict(final_state.get("node_payload") or snapshot_values.get("node_payload") or {}),
+            data=dict(final_state.get("result_context") or snapshot_values.get("result_context") or {}),
             thread_id=thread_id,
             checkpoint_id=checkpoint_id,
             next_nodes=[str(node) for node in list(getattr(snapshot, "next", ()) or [])],
@@ -176,6 +176,16 @@ class GraphRunner:
     async def invoke(self, graph_input: GraphInput) -> GraphResult:
         """异步执行主图。"""
         initial_state = {
+            "request_context": {
+                "entry_mode": graph_input.entry_mode,
+                "thread_id": graph_input.thread_id,
+                "request_id": graph_input.request_id,
+                "cli_args": dict(graph_input.cli_args),
+            },
+            "chat_context": {},
+            "plan_context": {},
+            "dispatch_context": {},
+            "result_context": {},
             "entry_mode": graph_input.entry_mode,
             "thread_id": graph_input.thread_id,
             "request_id": graph_input.request_id,

@@ -103,7 +103,7 @@ def _inherit_parent_nav_steps(payload: dict[str, Any], plan: TaskPlan) -> dict[s
 
 
 def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
-    default_value = int(getattr(config.planner, "runtime_subtasks_max_children", 0) or 0)
+    default_value = int(config.planner.runtime_subtasks_max_children or 0)
     raw_value = params.get("runtime_subtask_max_children")
     try:
         resolved = int(raw_value) if raw_value is not None else default_value
@@ -113,7 +113,7 @@ def _resolve_runtime_replan_max_children(params: dict[str, Any]) -> int:
 
 
 def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
-    default_value = bool(getattr(config.planner, "runtime_subtasks_use_main_model", False))
+    default_value = bool(config.planner.runtime_subtasks_use_main_model)
     raw_value = params.get("runtime_subtasks_use_main_model")
     if raw_value is None:
         return default_value
@@ -373,7 +373,7 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
             subtask=subtask,
             fields=shared_fields,
             output_dir=str(params.get("output_dir") or "output"),
-            headless=bool(params.get("headless", False)),
+            headless=params.get("headless"),
             thread_id=str(params.get("_thread_id") or ""),
             guard_intervention_mode="interrupt",
             consumer_concurrency=(
@@ -405,8 +405,8 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     except BrowserInterventionRequired as exc:
         interrupt(exc.payload)
         return await run_subtask_worker_node(state)
-    except Exception as exc:  # noqa: BLE001
-        result = {"error": str(exc), "items_file": "", "total_urls": 0, "spawned_subtasks": []}
+    except Exception:
+        raise
 
     effective_subtask = _restore_subtask(result.get("effective_subtask") or subtask.model_dump(mode="python"))
     spawned_subtasks = list(result.get("spawned_subtasks") or [])

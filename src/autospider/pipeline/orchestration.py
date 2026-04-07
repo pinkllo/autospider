@@ -36,7 +36,7 @@ class PipelineRuntimeContext:
     execution_brief: dict[str, Any]
     fields: list[FieldDefinition]
     output_dir: str
-    headless: bool
+    headless: bool | None
     explore_count: int
     validate_count: int
     consumer_workers: int

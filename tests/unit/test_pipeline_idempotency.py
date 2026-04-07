@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from autospider.common.experience.skill_sedimenter import SkillPromotionContext
 from autospider.common.channel.base import URLTask
 from autospider.common.config import config
 from autospider.domain.fields import FieldDefinition
@@ -20,7 +19,6 @@ from autospider.pipeline.runner import (
     _process_task,
     _should_promote_skill,
     _strip_draft_markers_from_skill_content,
-    _try_sediment_skill,
 )
 
 
@@ -335,7 +333,6 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
     monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
-    monkeypatch.setattr(pipeline_runner, "_try_sediment_skill", lambda **kwargs: None)
 
     with pytest.raises(RuntimeError, match="stop consumer"):
         await pipeline_runner.run_pipeline(
@@ -420,7 +417,6 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
     monkeypatch.setattr(pipeline_runner, "DetailPageWorker", _FakeDetailPageWorker)
     monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
-    monkeypatch.setattr(pipeline_runner, "_try_sediment_skill", lambda **kwargs: None)
 
     result = await pipeline_runner.run_pipeline(
         list_url="https://example.com/list",
@@ -442,7 +438,7 @@ def test_load_persisted_run_records_returns_empty_for_blank_execution_id():
     assert _load_persisted_run_records("") == {}
 
 
-def test_try_sediment_skill_skips_low_quality_run(tmp_path):
+def test_should_promote_skill_skips_low_quality_run():
     result = _should_promote_skill(
         state={},
         summary={"success_count": 2, "total_urls": 2, "promotion_state": "diagnostic_only"},
@@ -452,13 +448,7 @@ def test_try_sediment_skill_skips_low_quality_run(tmp_path):
     assert result is False
 
 
-def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_path):
-    captured: dict[str, object] = {}
-
-    def _fake_try_sediment_skill(**kwargs):
-        captured.update(kwargs)
-        return None
-
+def test_pipeline_finalizer_persists_summary_and_stops_sessions(tmp_path):
     finalizer = pipeline_runner.PipelineFinalizer(
         pipeline_runner.PipelineFinalizationDependencies(
             build_record_summary=lambda records: {"total_urls": 1, "success_count": 1},
@@ -472,8 +462,6 @@ def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_pat
             persist_pipeline_run=lambda context, records: None,
             commit_items_file=lambda items_path, records: None,
             write_summary=lambda summary_path, summary: None,
-            try_sediment_skill=_fake_try_sediment_skill,
-            cleanup_output_draft_skill=lambda list_url, output_dir: None,
         )
     )
 
@@ -533,8 +521,6 @@ def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_pat
         plan_knowledge="",
         task_plan={},
         plan_journal=[],
-        promote_skill=True,
-        promotion_context={"category_name": "招标公告"},
         tracker=tracker,
         sessions=sessions,
     )
@@ -542,13 +528,6 @@ def test_pipeline_finalizer_passes_context_and_evidence_to_sedimentation(tmp_pat
     import asyncio
     asyncio.run(finalizer.finalize(context))
 
-    payload = captured["payload"]
-    assert payload.extraction_evidence[0]["url"] == "https://example.com/detail/1"
-    assert payload.promotion_context == SkillPromotionContext(
-        anchor_url="https://example.com/category",
-        page_state_signature="state-a",
-        variant_label="招标公告",
-        context={"category_name": "招标公告"},
-    )
+    assert context.summary["durably_persisted"] is True
+    assert context.committed_records["https://example.com/detail/1"]["durably_persisted"] is True
     assert sessions.stopped is True
-
