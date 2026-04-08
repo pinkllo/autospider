@@ -83,6 +83,7 @@ class DispatchUseCase:
         outcome_state = str(result.get("outcome_state") or "").strip().lower()
         durability_state = str(result.get("durability_state") or "").strip().lower()
         error = str(result.get("error") or "").strip()
+        success_count = int(result.get("success_count", 0) or 0)
         if execution_state == SubTaskStatus.EXPANDED.value:
             return SubTaskStatus.EXPANDED
         if outcome_state == "no_data":
@@ -91,7 +92,7 @@ class DispatchUseCase:
             return SubTaskStatus.SYSTEM_FAILURE
         if durability_state != "durable":
             return SubTaskStatus.SYSTEM_FAILURE
-        if int(result.get("failed_count", 0) or 0) > 0:
+        if success_count <= 0:
             return SubTaskStatus.BUSINESS_FAILURE
         return SubTaskStatus.COMPLETED
 

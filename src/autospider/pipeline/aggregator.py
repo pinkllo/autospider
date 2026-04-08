@@ -28,6 +28,10 @@ class ResultAggregator:
     """合并所有子任务的采集结果。"""
 
     @staticmethod
+    def _should_raise(report: AggregationReport) -> bool:
+        return bool(report.failure_reasons) and report.eligible_subtasks <= 0
+
+    @staticmethod
     def _resolve_eligibility(
         subtask: SubTask,
         runtime_state: SubTaskRuntimeState | None,
@@ -167,9 +171,14 @@ class ResultAggregator:
             summary_file=str(summary_file),
         )
 
-        if failure_reasons:
+        if self._should_raise(report):
             raise AggregationFailure(report)
         write_json_idempotent(summary_file, report.model_dump(mode="python"), volatile_keys=set())
+        if failure_reasons:
+            logger.warning(
+                "[Aggregator] 部分子任务未参与合并: %s",
+                ", ".join(report.failure_reasons),
+            )
         logger.info(
             "[Aggregator] 合并完成: %d 条记录 (%d 个唯一 URL), %d 个可聚合子任务",
             report.merged_items,
