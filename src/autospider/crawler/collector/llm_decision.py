@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from ...common.llm.streaming import ainvoke_with_stream
 from ...common.utils.prompt_template import render_template
 from ...common.logger import get_logger
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
@@ -121,7 +122,7 @@ class LLMDecisionMaker:
         try:
             logger.info("[LLM] 调用视觉 LLM 进行决策...")
             # 使用 decider 的 LLM（视觉模型）
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
             logger.info("[LLM] 响应前100字符: %s...", response_text[:100])
 
@@ -199,7 +200,7 @@ class LLMDecisionMaker:
         ]
 
         try:
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
 
             message = parse_protocol_message(response)
@@ -244,7 +245,7 @@ class LLMDecisionMaker:
         ]
 
         try:
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
 
             message = parse_protocol_message(response)

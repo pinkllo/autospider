@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ...common.config import config
+from ...common.llm.streaming import ainvoke_with_stream
 from ...common.logger import get_logger
 from ...common.protocol import parse_json_dict_from_llm
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 logger = get_logger(__name__)
+_PLANNER_READY_TIMEOUT_MS = 5000
+_PLANNER_READY_FALLBACK_WAIT_MS = 1500
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("planner.yaml")
 
@@ -145,6 +148,7 @@ class TaskPlanner(
         logger.info("[Planner] 开始首层任务规划: %s", self.site_url)
 
         await self.page.goto(self.site_url, wait_until="domcontentloaded", timeout=30000)
+        await self._wait_for_planner_page_ready()
         logger.info("[Planner] 页面已加载: %s", self.page.url)
 
         subtasks = await self._plan_entry_subtasks()
@@ -456,7 +460,7 @@ class TaskPlanner(
 
         try:
             logger.info("[Planner] 调用 LLM 进行多模态视觉分析...")
-            response = await self.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.llm, messages)
             response_text = response.content
 
             # 从 LLM 响应中解析 JSON 字典
@@ -554,9 +558,29 @@ class TaskPlanner(
         """获取页面 DOM 内容签名，用于检测内容变化。"""
         return await self._page_state.get_dom_signature()
 
+    async def _get_element_interaction_state(self, xpath: str) -> dict[str, str]:
+        """获取候选分类元素的交互状态（active/selected 等）。"""
+        return await self._page_state.get_element_interaction_state(xpath)
+
+    def _did_interaction_state_activate(
+        self,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+    ) -> bool:
+        """判断点击后元素是否进入激活态。"""
+        return self._page_state.did_interaction_state_activate(before, after)
+
     async def _restore_original_page(self, original_url: str) -> None:
         """回退到原始页面，等待 SPA 渲染完成。"""
         await self._page_state.restore_original_page(original_url)
+
+    async def _wait_for_planner_page_ready(self) -> None:
+        """等待入口页的 SPA 内容稳定，避免过早截图导致分类状态缺失。"""
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=_PLANNER_READY_TIMEOUT_MS)
+        except Exception:
+            pass
+        await self.page.wait_for_timeout(_PLANNER_READY_FALLBACK_WAIT_MS)
 
     def _build_plan(self, subtasks: list[SubTask]) -> TaskPlan:
         """构造 TaskPlan 响应对象。"""

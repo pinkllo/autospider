@@ -14,8 +14,9 @@ from langgraph.types import interrupt
 from ...common.config import config
 from ...common.experience import SkillRuntime
 from ...common.llm import TaskClarifier
+from ...common.llm.streaming import ainvoke_with_stream
 from ...common.logger import get_logger
-from ...common.protocol import parse_json_dict_from_llm
+from ...common.protocol import extract_json_dict_from_llm_payload
 from ...common.storage.task_registry import TaskRegistry
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
@@ -640,8 +641,8 @@ async def _llm_rank_history(
     )
 
     try:
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
-        parsed = parse_json_dict_from_llm(str(response.content))
+        response = await ainvoke_with_stream(llm, [HumanMessage(content=prompt)])
+        parsed = extract_json_dict_from_llm_payload(response)
     except Exception as exc:
         logger.warning("[HistoryMatch] LLM 排序历史任务失败: %s", exc)
         return []

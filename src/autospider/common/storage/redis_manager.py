@@ -227,6 +227,44 @@ class RedisQueueManager:
             f"password={password_status}"
         )
 
+    @staticmethod
+    def _normalize_xpending_consumers(consumers: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        if not isinstance(consumers, list):
+            raise TypeError(f"unexpected xpending consumers type: {type(consumers).__name__}")
+
+        for consumer in consumers:
+            if isinstance(consumer, dict):
+                name = consumer.get("name")
+                pending = consumer.get("pending")
+            elif isinstance(consumer, (list, tuple)) and len(consumer) >= 2:
+                name, pending = consumer[0], consumer[1]
+            else:
+                raise TypeError(f"unexpected xpending consumer entry: {consumer!r}")
+
+            normalized.append({"name": str(name), "pending": int(pending)})
+
+        return normalized
+
+    def _parse_xpending_summary(self, pending_info: Any) -> dict[str, Any]:
+        if isinstance(pending_info, dict):
+            return {
+                "pending": int(pending_info["pending"]),
+                "min": pending_info.get("min"),
+                "max": pending_info.get("max"),
+                "consumers": self._normalize_xpending_consumers(pending_info.get("consumers", [])),
+            }
+
+        if isinstance(pending_info, (list, tuple)) and len(pending_info) >= 4:
+            return {
+                "pending": int(pending_info[0]),
+                "min": pending_info[1],
+                "max": pending_info[2],
+                "consumers": self._normalize_xpending_consumers(pending_info[3]),
+            }
+
+        raise TypeError(f"unexpected xpending summary: {pending_info!r}")
+
     async def connect(self) -> Redis | None:
         """连接到 Redis 服务器
 
@@ -670,17 +708,17 @@ class RedisQueueManager:
 
         try:
             if consumer_name:
-                # 获取特定消费者的 PEL 长度
-                pending_info = await self.client.xpending(self.stream_key, self.group_name)
-                # pending_info 格式: [total_pending, min_id, max_id, [[consumer, count]]]
-                if pending_info and len(pending_info) > 0:
-                    return pending_info[0]
+                pending_summary = self._parse_xpending_summary(
+                    await self.client.xpending(self.stream_key, self.group_name)
+                )
+                for consumer in pending_summary["consumers"]:
+                    if consumer["name"] == consumer_name:
+                        return consumer["pending"]
+                return 0
             else:
                 # 获取 Stream 长度
                 length = await self.client.xlen(self.stream_key)
                 return length
-
-            return 0
 
         except Exception as e:
             self.logger.error(f"获取待处理任务数失败: {e}")
@@ -705,16 +743,13 @@ class RedisQueueManager:
 
             # 获取 PEL 信息
             try:
-                pending_info = await self.client.xpending(self.stream_key, self.group_name)
-                if pending_info and len(pending_info) > 0:
-                    stats["pending_count"] = pending_info[0]
-                    if len(pending_info) > 3:
-                        stats["consumers"] = [
-                            {"name": consumer, "pending": count}
-                            for consumer, count in pending_info[3]
-                        ]
-            except Exception:
-                pass
+                pending_summary = self._parse_xpending_summary(
+                    await self.client.xpending(self.stream_key, self.group_name)
+                )
+                stats["pending_count"] = pending_summary["pending"]
+                stats["consumers"] = pending_summary["consumers"]
+            except Exception as e:
+                self.logger.warning(f"获取 PEL 信息失败: {e}")
 
             return stats
 

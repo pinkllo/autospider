@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from ..common.llm.streaming import ainvoke_with_stream
 from ..common.utils.prompt_template import render_template
 from ..common.logger import get_logger
 from ..common.utils.paths import get_prompt_path
@@ -335,7 +336,7 @@ class FieldDecider:
         ]
 
         try:
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
@@ -415,7 +416,7 @@ class FieldDecider:
         ]
 
         try:
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 
@@ -504,7 +505,7 @@ class FieldDecider:
         ]
 
         try:
-            response = await self.decider.llm.ainvoke(messages)
+            response = await ainvoke_with_stream(self.decider.llm, messages)
             response_text = response.content
             logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
 

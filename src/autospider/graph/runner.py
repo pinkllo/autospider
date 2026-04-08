@@ -7,6 +7,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from ..common.config import config
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
 from .types import GraphError, GraphInput, GraphResult
@@ -40,7 +41,10 @@ class GraphRunner:
         configurable = {"thread_id": thread_id}
         if checkpoint_id:
             configurable["checkpoint_id"] = checkpoint_id
-        return {"configurable": configurable}
+        return {
+            "configurable": configurable,
+            "recursion_limit": max(1, int(config.graph_checkpoint.recursion_limit)),
+        }
 
     @staticmethod
     def _validate_snapshot_identity(snapshot: Any, *, thread_id: str) -> tuple[dict[str, Any], dict[str, Any]]:

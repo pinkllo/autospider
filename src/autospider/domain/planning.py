@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from ..common.utils.string_maps import normalize_string_map
 
 
 class SubTaskStatus(str, Enum):
@@ -58,6 +59,11 @@ class PlanNode(BaseModel):
     executable: bool = Field(default=False, description="是否可直接执行")
     children_count: int = Field(default=0, description="子节点数")
 
+    @field_validator("context", mode="before")
+    @classmethod
+    def _normalize_context(cls, value: object) -> dict[str, str]:
+        return normalize_string_map(value, drop_empty=False)
+
 
 class PlanJournalEntry(BaseModel):
     """计划变更与执行原因日志。"""
@@ -70,6 +76,11 @@ class PlanJournalEntry(BaseModel):
     evidence: str = Field(default="", description="动作依据")
     metadata: dict[str, str] = Field(default_factory=dict, description="补充结构化元信息")
     created_at: str = Field(default="", description="记录时间")
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _normalize_metadata(cls, value: object) -> dict[str, str]:
+        return normalize_string_map(value, drop_empty=False)
 
 
 class ExecutionBrief(BaseModel):
@@ -109,6 +120,11 @@ class SubTask(BaseModel):
     error: str | None = Field(default=None, description="最近一次错误信息")
     result_file: str | None = Field(default=None, description="该子任务的结果文件路径")
     collected_count: int = Field(default=0, description="已采集数量")
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def _normalize_context(cls, value: object) -> dict[str, str]:
+        return normalize_string_map(value, drop_empty=False)
 
 
 class TaskPlan(BaseModel):

@@ -86,6 +86,10 @@ class ProducerService:
         self.context = context
         self.deps = deps
 
+    async def _release_list_session(self) -> None:
+        logger.info("[Pipeline] 释放列表页浏览器会话，准备进入详情抽取阶段")
+        await self.context.sessions.list_session.stop()
+
     async def run(self) -> None:
         try:
             collector = self.deps.collector_cls(
@@ -126,6 +130,8 @@ class ProducerService:
                 "variant_label": str(self.context.variant_label or ""),
                 "task_description": self.context.task_description,
             }
+            logger.info("[Pipeline] URL 收集完成: collected_urls=%s", len(result.collected_urls))
+            await self._release_list_session()
             await self.context.tracker.set_total(len(result.collected_urls))
             await self.context.channel.seal()
         except BrowserInterventionRequired:
@@ -141,6 +147,7 @@ class ConsumerPool:
     def __init__(self, context: PipelineRuntimeContext, deps: PipelineRuntimeDependencies) -> None:
         self.context = context
         self.deps = deps
+        self._claim_slots: asyncio.Semaphore | None = None
 
     async def run(self) -> None:
         logger.info("[Pipeline] Consumer workers: %s", self.context.consumer_workers)
@@ -150,18 +157,36 @@ class ConsumerPool:
         )
         task_queue: asyncio.Queue[URLTask | None] = asyncio.Queue(maxsize=queue_size)
         summary_lock = asyncio.Lock()
+        self._claim_slots = asyncio.Semaphore(max(1, self.context.consumer_workers))
 
         await asyncio.gather(
             self._feeder(task_queue),
             *(self._worker(task_queue, summary_lock) for _ in range(self.context.consumer_workers)),
         )
 
+    async def _fetch_one_task(self) -> list[URLTask]:
+        if self._claim_slots is None:
+            raise RuntimeError("consumer_claim_slots_uninitialized")
+
+        await self._claim_slots.acquire()
+        batch = await self.context.channel.fetch(
+            max_items=1,
+            timeout_s=config.pipeline.fetch_timeout_s,
+        )
+        if batch:
+            return batch
+
+        self._claim_slots.release()
+        return []
+
+    def _release_claim_slot(self) -> None:
+        if self._claim_slots is None:
+            raise RuntimeError("consumer_claim_slots_uninitialized")
+        self._claim_slots.release()
+
     async def _feeder(self, task_queue: asyncio.Queue[Any | None]) -> None:
         while True:
-            batch = await self.context.channel.fetch(
-                max_items=config.pipeline.batch_fetch_size,
-                timeout_s=config.pipeline.fetch_timeout_s,
-            )
+            batch = await self._fetch_one_task()
             if not batch:
                 if await self.context.channel.is_drained():
                     break
@@ -177,6 +202,7 @@ class ConsumerPool:
         task_queue: asyncio.Queue[Any | None],
         summary_lock: asyncio.Lock,
     ) -> None:
+        logger.info("[Pipeline] Consumer worker 准备启动详情页浏览器")
         session = self.deps.browser_session_factory(
             headless=self.context.headless,
             guard_intervention_mode=self.context.guard_intervention_mode,
@@ -185,6 +211,7 @@ class ConsumerPool:
             global_browser_budget=self.context.global_browser_budget,
         )
         await session.start()
+        logger.info("[Pipeline] Consumer worker 浏览器已启动")
         extractor = self.deps.detail_page_worker_cls(
             page=session.page,
             fields=self.context.fields,
@@ -196,15 +223,18 @@ class ConsumerPool:
                 task = await task_queue.get()
                 if task is None:
                     return
-                await self.deps.process_task(
-                    extractor=extractor,
-                    task=task,
-                    execution_id=self.context.execution_id,
-                    run_records=self.context.run_records,
-                    summary_lock=summary_lock,
-                    state=self.context.state,
-                    tracker=self.context.tracker,
-                )
+                try:
+                    await self.deps.process_task(
+                        extractor=extractor,
+                        task=task,
+                        execution_id=self.context.execution_id,
+                        run_records=self.context.run_records,
+                        summary_lock=summary_lock,
+                        state=self.context.state,
+                        tracker=self.context.tracker,
+                    )
+                finally:
+                    self._release_claim_slot()
         finally:
             await session.stop()
 

@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import yaml
 
 from ..logger import get_logger
+from ..utils.string_maps import normalize_string_map
 
 logger = get_logger(__name__)
 
@@ -354,15 +355,11 @@ def _parse_variant_sections(body: str) -> list[SkillVariantRule]:
                 page_state_signature=_clean_code_ticks(_extract_basic_value(context, "页面状态签名")),
                 anchor_url=_clean_code_ticks(_extract_basic_value(context, "锚点 URL")),
                 task_description=_extract_basic_value(context, "任务描述"),
-                context={
-                    str(key).strip(): str(value).strip()
-                    for key, value in (
-                        json.loads(_extract_basic_value(context, "上下文字典") or "{}")
-                        if _extract_basic_value(context, "上下文字典")
-                        else {}
-                    ).items()
-                    if str(key).strip() and str(value).strip()
-                },
+                context=normalize_string_map(
+                    json.loads(_extract_basic_value(context, "上下文字典") or "{}")
+                    if _extract_basic_value(context, "上下文字典")
+                    else {}
+                ),
                 success_rate=_parse_success_rate(_extract_basic_value(context, "成功率"))[0],
                 success_rate_text=_parse_success_rate(_extract_basic_value(context, "成功率"))[1],
                 detail_xpath=_clean_code_ticks(_extract_basic_value(nav, "详情链接 XPath")),
@@ -726,7 +723,7 @@ def _merge_variant_rule(existing: SkillVariantRule, incoming: SkillVariantRule) 
         page_state_signature=incoming.page_state_signature or existing.page_state_signature,
         anchor_url=incoming.anchor_url or existing.anchor_url,
         task_description=incoming.task_description or existing.task_description,
-        context=dict(existing.context or {}) | dict(incoming.context or {}),
+        context=normalize_string_map(dict(existing.context or {}) | dict(incoming.context or {})),
         success_rate=max(incoming.success_rate, existing.success_rate),
         success_rate_text=incoming.success_rate_text or existing.success_rate_text,
         detail_xpath=incoming.detail_xpath or existing.detail_xpath,

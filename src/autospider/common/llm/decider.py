@@ -14,6 +14,7 @@ from ..protocol import parse_protocol_message
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
+from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 
 if TYPE_CHECKING:
@@ -135,7 +136,7 @@ class LLMDecider:
         ]
 
         # 调用 LLM
-        response = await self.llm.ainvoke(messages)
+        response = await ainvoke_with_stream(self.llm, messages)
         response_text = response.content
 
         # 解析响应

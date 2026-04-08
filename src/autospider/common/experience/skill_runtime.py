@@ -11,9 +11,14 @@ from urllib.parse import urlparse
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
+from ..llm.streaming import ainvoke_with_stream
 from ..llm.trace_logger import append_llm_trace
 from ..logger import get_logger
-from ..protocol import parse_json_dict_from_llm
+from ..protocol import (
+    extract_json_dict_from_llm_payload,
+    extract_response_text_from_llm_payload,
+    summarize_llm_payload,
+)
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
 from .skill_store import SkillMetadata, SkillStore
@@ -125,15 +130,18 @@ class SkillRuntime:
         raw_response = ""
         reasoning = ""
         payload: dict[str, Any] = {}
+        response_summary: dict[str, Any] = {}
         try:
-            response = await llm.ainvoke(
+            response = await ainvoke_with_stream(
+                llm,
                 [
                     SystemMessage(content=system_prompt),
                     HumanMessage(content=user_prompt),
-                ]
+                ],
             )
-            raw_response = str(getattr(response, "content", "") or "")
-            payload = parse_json_dict_from_llm(raw_response) or {}
+            raw_response = extract_response_text_from_llm_payload(response)
+            payload = extract_json_dict_from_llm_payload(response) or {}
+            response_summary = summarize_llm_payload(response)
             reasoning = str(payload.get("reasoning") or "").strip()
             selected_indexes = self._parse_selected_indexes(
                 payload.get("selected_indexes"),
@@ -163,6 +171,7 @@ class SkillRuntime:
                     "user_prompt": user_prompt,
                 },
                 "output": {
+                    "response_summary": response_summary,
                     "raw_response": raw_response,
                     "parsed_payload": payload,
                     "selected_indexes": selected_indexes,

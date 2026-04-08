@@ -44,10 +44,26 @@ class _CheckpointGraph(_FakeGraph):
         return self.snapshot
 
 
+def test_invoke_config_includes_recursion_limit(monkeypatch):
+    monkeypatch.setattr(
+        "autospider.graph.runner.config",
+        SimpleNamespace(graph_checkpoint=SimpleNamespace(recursion_limit=64)),
+    )
+
+    assert GraphRunner._invoke_config("thread_test") == {
+        "configurable": {"thread_id": "thread_test"},
+        "recursion_limit": 64,
+    }
+
+
 def test_graph_runner_invoke_success(monkeypatch):
     fake_graph = _FakeGraph()
     monkeypatch.setattr(GraphRunner, "_compiled_graph", fake_graph)
     monkeypatch.setattr("autospider.graph.runner.graph_checkpoint_enabled", lambda: False)
+    monkeypatch.setattr(
+        "autospider.graph.runner.config",
+        SimpleNamespace(graph_checkpoint=SimpleNamespace(recursion_limit=64)),
+    )
     runner = GraphRunner()
     result = asyncio.run(
         runner.invoke(
@@ -67,7 +83,10 @@ def test_graph_runner_invoke_success(monkeypatch):
     assert result.artifacts[0]["path"] == "output/x.json"
     assert result.data["result"]["value"] == 1
     assert result.thread_id == "thread_test"
-    assert fake_graph.last_config == {"configurable": {"thread_id": "thread_test"}}
+    assert fake_graph.last_config == {
+        "configurable": {"thread_id": "thread_test"},
+        "recursion_limit": 64,
+    }
     assert fake_graph.last_state["thread_id"] == "thread_test"
 
 

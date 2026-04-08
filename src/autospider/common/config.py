@@ -140,6 +140,9 @@ class GraphCheckpointConfig(BaseModel):
         default_factory=lambda: os.getenv("GRAPH_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", None))
     )
     db: int = Field(default_factory=lambda: int(os.getenv("GRAPH_REDIS_DB", "1")))
+    recursion_limit: int = Field(
+        default_factory=lambda: int(os.getenv("GRAPH_RECURSION_LIMIT", "128"))
+    )
 
 class URLCollectorConfig(BaseModel):
     """URL 收集器配置"""

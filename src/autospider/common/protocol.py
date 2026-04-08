@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .llm_contracts import validate_protocol_message_payload
@@ -195,29 +196,98 @@ def _extract_text_from_content(content: Any) -> str:
         return ""
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if isinstance(content, Mapping):
+        for key in ("text", "content", "output_text", "arguments", "value"):
+            value = content.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for key in ("content", "message", "output", "result", "response", "data"):
+            if key in content:
+                nested_text = _extract_text_from_content(content.get(key))
+                if nested_text:
+                    return nested_text
+        for nested in content.values():
+            nested_text = _extract_text_from_content(nested)
+            if nested_text:
+                return nested_text
+        return ""
+    if isinstance(content, Sequence) and not isinstance(content, (str, bytes, bytearray)):
         parts: list[str] = []
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
                 continue
-            if isinstance(item, dict):
+            if isinstance(item, Mapping):
                 item_type = str(item.get("type") or "").strip().lower()
-                if item_type in {"text", "output_text"} and isinstance(item.get("text"), str):
-                    parts.append(item["text"])
+                if item_type in {"text", "output_text", "message", "json_schema", "tool_result"}:
+                    for key in ("text", "content", "output_text", "arguments", "value"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parts.append(value)
+                            break
                     continue
-                if isinstance(item.get("content"), str):
-                    parts.append(item["content"])
+                nested_text = _extract_text_from_content(item)
+                if nested_text:
+                    parts.append(nested_text)
                     continue
             text_attr = getattr(item, "text", None)
             if isinstance(text_attr, str) and text_attr:
                 parts.append(text_attr)
                 continue
             content_attr = getattr(item, "content", None)
-            if isinstance(content_attr, str) and content_attr:
-                parts.append(content_attr)
+            nested_text = _extract_text_from_content(content_attr)
+            if nested_text:
+                parts.append(nested_text)
         return "\n".join(part for part in parts if part).strip()
     return str(content)
+
+
+def _extract_text_candidates(value: Any) -> list[str]:
+    """递归收集响应中的候选文本。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        candidates: list[str] = []
+        for key in (
+            "text",
+            "content",
+            "output_text",
+            "arguments",
+            "value",
+            "message",
+            "output",
+            "result",
+            "response",
+        ):
+            if key in value:
+                candidates.extend(_extract_text_candidates(value.get(key)))
+        if candidates:
+            return candidates
+        for nested in value.values():
+            candidates.extend(_extract_text_candidates(nested))
+        return candidates
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        candidates: list[str] = []
+        for item in value:
+            candidates.extend(_extract_text_candidates(item))
+        return candidates
+    text_attr = getattr(value, "text", None)
+    content_attr = getattr(value, "content", None)
+    arguments_attr = getattr(value, "arguments", None)
+    candidates: list[str] = []
+    for nested in (text_attr, content_attr, arguments_attr):
+        candidates.extend(_extract_text_candidates(nested))
+    if candidates:
+        return candidates
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _extract_text_candidates(value.model_dump(mode="python"))
+        except Exception:
+            return []
+    return []
 
 
 def _extract_response_text(payload: Any) -> str:
@@ -226,10 +296,149 @@ def _extract_response_text(payload: Any) -> str:
         return ""
     if isinstance(payload, str):
         return payload
-    if isinstance(payload, dict):
-        return json.dumps(payload, ensure_ascii=False)
+    if isinstance(payload, Mapping):
+        return json.dumps(dict(payload), ensure_ascii=False, default=str)
+
+    text = getattr(payload, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
     content = getattr(payload, "content", None)
-    return _extract_text_from_content(content)
+    extracted_content = _extract_text_from_content(content)
+    if extracted_content:
+        return extracted_content
+
+    for attr in ("additional_kwargs", "response_metadata"):
+        extracted = _extract_text_from_content(getattr(payload, attr, None))
+        if extracted:
+            return extracted
+
+    candidates = _extract_text_candidates(payload)
+    return "\n".join(candidate for candidate in candidates if candidate).strip()
+
+
+_JSON_SIGNAL_KEYS = {
+    "action",
+    "args",
+    "status",
+    "intent",
+    "next_question",
+    "task_description",
+    "list_url",
+    "fields",
+    "selected_indexes",
+    "ranked",
+}
+
+
+def _extract_json_dict_from_value(value: Any) -> dict[str, Any] | None:
+    """递归从任意响应值中提取最可能的 JSON 对象。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return parse_json_dict_from_llm(value)
+    if isinstance(value, Mapping):
+        value_dict = dict(value)
+        if any(key in value_dict for key in _JSON_SIGNAL_KEYS):
+            return value_dict
+        for preferred_key in (
+            "parsed",
+            "json",
+            "output",
+            "result",
+            "response",
+            "message",
+            "data",
+            "body",
+        ):
+            parsed = _extract_json_dict_from_value(value_dict.get(preferred_key))
+            if parsed:
+                return parsed
+        for nested in value_dict.values():
+            parsed = _extract_json_dict_from_value(nested)
+            if parsed:
+                return parsed
+        return None
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            parsed = _extract_json_dict_from_value(item)
+            if parsed:
+                return parsed
+        return None
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _extract_json_dict_from_value(value.model_dump(mode="python"))
+        except Exception:
+            pass
+    for attr in ("text", "content", "arguments", "additional_kwargs", "response_metadata"):
+        parsed = _extract_json_dict_from_value(getattr(value, attr, None))
+        if parsed:
+            return parsed
+    return None
+
+
+def _summarize_response_shape(value: Any, *, depth: int = 0, max_depth: int = 5) -> Any:
+    """生成可序列化的响应结构摘要，便于定位网关返回格式。"""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if depth >= max_depth:
+        return str(type(value).__name__)
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {"__type__": type(value).__name__}
+        for key in list(value.keys())[:12]:
+            result[str(key)] = _summarize_response_shape(value.get(key), depth=depth + 1, max_depth=max_depth)
+        return result
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        items = list(value)[:6]
+        return {
+            "__type__": type(value).__name__,
+            "length": len(value),
+            "items": [_summarize_response_shape(item, depth=depth + 1, max_depth=max_depth) for item in items],
+        }
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return {
+                "__type__": type(value).__name__,
+                "model_dump": _summarize_response_shape(value.model_dump(mode="python"), depth=depth + 1, max_depth=max_depth),
+            }
+        except Exception:
+            pass
+    summary = {"__type__": type(value).__name__}
+    for attr in ("text", "content", "arguments", "additional_kwargs", "response_metadata"):
+        attr_value = getattr(value, attr, None)
+        if attr_value is not None:
+            summary[attr] = _summarize_response_shape(attr_value, depth=depth + 1, max_depth=max_depth)
+    return summary
+
+
+def summarize_llm_payload(payload: Any) -> dict[str, Any]:
+    """返回响应对象结构摘要，供 trace 调试使用。"""
+    return {
+        "payload_type": type(payload).__name__ if payload is not None else "NoneType",
+        "shape": _summarize_response_shape(payload),
+    }
+
+
+def extract_response_text_from_llm_payload(payload: Any) -> str:
+    """对外暴露的响应文本提取函数。"""
+    return _extract_response_text(payload)
+
+
+def extract_json_dict_from_llm_payload(payload: Any) -> dict[str, Any] | None:
+    """从 LLM 响应对象中尽力提取 JSON 字典。"""
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    if parsed := parse_json_dict_from_llm(_extract_response_text(payload)):
+        return parsed
+    for attr in ("additional_kwargs", "response_metadata"):
+        parsed = _extract_json_dict_from_value(getattr(payload, attr, None))
+        if parsed:
+            return parsed
+    return _extract_json_dict_from_value(getattr(payload, "content", None))
 
 
 def _extract_reasoning_from_value(value: Any) -> str:
@@ -302,7 +511,7 @@ def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
     if payload is None:
         return None
 
-    data = payload if isinstance(payload, dict) else parse_json_dict_from_llm(_extract_response_text(payload))
+    data = payload if isinstance(payload, dict) else extract_json_dict_from_llm_payload(payload)
     if not isinstance(data, dict):
         return None
 

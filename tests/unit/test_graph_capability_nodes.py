@@ -293,3 +293,46 @@ def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
     assert result["pipeline_result"]["success_rate"] == 0.75
     assert result["summary"]["failed_count"] == 1
     assert result["summary"]["execution_state"] == "completed"
+
+
+def test_aggregate_node_preserves_dispatch_summary(monkeypatch):
+    class _FakeAggregationService:
+        def execute(self, *, context, task_plan):
+            return {
+                "aggregate_result": {"merged_items": 27},
+                "summary": {"merged_items": 27, "eligible_subtasks": 4},
+                "result": {"merged_items": 27},
+                "artifacts": [],
+            }
+
+    monkeypatch.setattr(capability_nodes, "AggregationService", _FakeAggregationService)
+
+    result = asyncio.run(
+        capability_nodes.aggregate_node(
+            {
+                "thread_id": "thread-1",
+                "task_plan": capability_nodes.TaskPlan(
+                    plan_id="plan-1",
+                    original_request="采集分类项目",
+                    site_url="https://example.com",
+                    subtasks=[],
+                ),
+                "summary": {
+                    "total": 4,
+                    "completed": 4,
+                    "failed": 0,
+                    "total_collected": 55,
+                },
+                "normalized_params": {
+                    "list_url": "https://example.com/list",
+                    "task_description": "采集分类项目",
+                    "output_dir": "output",
+                },
+            }
+        )
+    )
+
+    assert result["node_status"] == "ok"
+    assert result["summary"]["total"] == 4
+    assert result["summary"]["total_collected"] == 55
+    assert result["summary"]["merged_items"] == 27

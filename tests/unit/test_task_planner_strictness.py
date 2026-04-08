@@ -55,6 +55,19 @@ def test_replay_nav_steps_preserve_success_semantics():
     assert replay_steps[1]["success"] is False
 
 
+def test_interaction_state_activation_detects_active_class():
+    state = PlannerPageState(SimpleNamespace())
+
+    assert state.did_interaction_state_activate(
+        {"class_name": "item"},
+        {"class_name": "active item"},
+    ) is True
+    assert state.did_interaction_state_activate(
+        {"class_name": "active item"},
+        {"class_name": "active item"},
+    ) is False
+
+
 def test_enter_child_state_replays_only_incremental_steps_on_same_url(monkeypatch):
     calls: dict[str, object] = {"replayed_steps": None}
 
@@ -96,6 +109,97 @@ def test_enter_child_state_replays_only_incremental_steps_on_same_url(monkeypatc
     assert result is True
     assert page.goto_calls == []
     assert calls["replayed_steps"] == [{"action": "click", "target_text": "招标公告及资格预审", "text": "", "key": "", "url": "", "scroll_delta": None, "success": True}]
+
+
+def test_get_url_by_navigation_accepts_same_page_active_state_change():
+    class _FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        async def count(self):
+            return 1
+
+        async def click(self, timeout=None):
+            _ = timeout
+
+    class _FakePage:
+        def __init__(self):
+            self.url = "https://example.com/list"
+            self.waits: list[int] = []
+
+        def locator(self, query):
+            _ = query
+            return _FakeLocator()
+
+        async def wait_for_timeout(self, timeout):
+            self.waits.append(timeout)
+
+    planner = TaskPlanner.__new__(TaskPlanner)
+    planner.page = _FakePage()
+    planner._page_state = PlannerPageState(SimpleNamespace())
+    planner._build_nav_click_step = lambda snapshot, mark_id: {"action": "click", "target_text": "交通运输工程"}
+    planner._get_best_xpath_for_mark = lambda snapshot, mark_id: "//li[contains(., '交通运输工程')]"
+
+    dom_signatures = iter(["same", "same"])
+    interaction_states = iter(
+        [
+            {"class_name": "item"},
+            {"class_name": "active item"},
+        ]
+    )
+
+    async def _fake_dom_signature():
+        return next(dom_signatures)
+
+    async def _fake_interaction_state(xpath):
+        _ = xpath
+        return next(interaction_states)
+
+    async def _fake_restore(target_url, nav_steps):
+        _ = (target_url, nav_steps)
+        return True
+
+    planner._get_dom_signature = _fake_dom_signature
+    planner._get_element_interaction_state = _fake_interaction_state
+    planner._restore_page_state = _fake_restore
+
+    variant = asyncio.run(
+        planner._get_url_by_navigation(
+            25,
+            "https://example.com/list",
+            SimpleNamespace(),
+            parent_nav_steps=[],
+            variant_label="工程建设 > 交通运输工程",
+            child_context={"category_path": "工程建设 > 交通运输工程"},
+        )
+    )
+
+    assert variant is not None
+    assert variant.same_page_variant is True
+    assert len(variant.nav_steps) == 1
+    assert variant.nav_steps[0]["target_text"] == "交通运输工程"
+
+
+def test_wait_for_planner_page_ready_falls_back_to_timeout():
+    class _FakePage:
+        def __init__(self):
+            self.calls: list[tuple[str, int | None]] = []
+
+        async def wait_for_load_state(self, state, timeout=None):
+            self.calls.append((state, timeout))
+            raise RuntimeError("network busy")
+
+        async def wait_for_timeout(self, timeout):
+            self.calls.append(("timeout", timeout))
+
+    planner = TaskPlanner.__new__(TaskPlanner)
+    planner.page = _FakePage()
+
+    asyncio.run(planner._wait_for_planner_page_ready())
+
+    assert planner.page.calls[0][0] == "networkidle"
+    assert planner.page.calls[-1] == ("timeout", 1500)
 
 
 def test_build_subtask_context_inherits_category_path():

@@ -15,9 +15,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..common.config import config
-from ..common.protocol import parse_json_dict_from_llm
-from ..common.logger import get_logger
+from ..common.llm.streaming import ainvoke_with_stream
 from ..common.llm.trace_logger import append_llm_trace
+from ..common.logger import get_logger
+from ..common.protocol import parse_json_dict_from_llm
 from ..common.utils.paths import get_prompt_path
 from ..common.utils.prompt_template import render_template
 from .value_helpers import is_semantically_valid
@@ -988,11 +989,12 @@ class XPathValueLLMValidator:
             },
         )
 
-        response = await self.llm.ainvoke(
+        response = await ainvoke_with_stream(
+            self.llm,
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt),
-            ]
+            ],
         )
         payload = parse_json_dict_from_llm(str(response.content)) or {}
         is_valid = _to_bool(payload.get("is_valid"))

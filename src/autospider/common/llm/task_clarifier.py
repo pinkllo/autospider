@@ -11,10 +11,15 @@ from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ..config import config
 from ..llm_contracts import validate_task_clarifier_payload
-from ..protocol import parse_json_dict_from_llm
+from ..protocol import (
+    extract_json_dict_from_llm_payload,
+    extract_response_text_from_llm_payload,
+    summarize_llm_payload,
+)
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
 from ..validators import validate_url
+from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 from autospider.common.logger import get_logger
 
@@ -89,14 +94,17 @@ class TaskClarifier:
         )
 
         # 调用 LLM 获取响应
-        response = await self.llm.ainvoke(
+        response = await ainvoke_with_stream(
+            self.llm,
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt),
-            ]
+            ],
         )
         # 解析 LLM 返回的 JSON 格式内容
-        raw_payload = parse_json_dict_from_llm(str(response.content)) or {}
+        raw_response = extract_response_text_from_llm_payload(response)
+        raw_payload = extract_json_dict_from_llm_payload(response) or {}
+        response_summary = summarize_llm_payload(response)
         payload, validation_errors = validate_task_clarifier_payload(raw_payload)
         if raw_payload and validation_errors:
             logger.warning(
@@ -122,7 +130,8 @@ class TaskClarifier:
                     "selected_skills_context": selected_context,
                 },
                 "output": {
-                    "raw_response": str(response.content),
+                    "response_summary": response_summary,
+                    "raw_response": raw_response,
                     "parsed_payload": raw_payload,
                     "validated_payload": payload,
                     "payload_validation_errors": validation_errors,

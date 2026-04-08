@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...common.utils.string_maps import normalize_string_map
+
 CATEGORY_PATH_KEY = "category_path"
 CATEGORY_PATH_SEPARATOR = " > "
 PLANNER_ACTION_HISTORY_LIMIT = 6
@@ -23,13 +25,7 @@ class PlannerCategorySemanticsMixin:
         return context
 
     def _sanitize_context(self, context: dict[str, str] | None) -> dict[str, str]:
-        sanitized: dict[str, str] = {}
-        for key, value in dict(context or {}).items():
-            normalized_key = str(key or "").strip()
-            normalized_value = str(value or "").strip()
-            if normalized_key and normalized_value:
-                sanitized[normalized_key] = normalized_value
-        return sanitized
+        return normalize_string_map(context)
 
     def _extract_category_path(self, context: dict[str, str] | None) -> list[str]:
         raw = str((context or {}).get(CATEGORY_PATH_KEY) or "").strip()

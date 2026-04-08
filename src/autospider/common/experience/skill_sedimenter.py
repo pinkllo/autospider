@@ -18,6 +18,7 @@ from typing import Any
 
 from ..config import config
 from ..logger import get_logger
+from ..utils.string_maps import normalize_string_map
 from .skill_store import (
     SkillDocument,
     SkillFieldRule,
@@ -142,11 +143,7 @@ class SkillSedimenter:
             variant_label=str(
                 promotion_context.variant_label or collection_config.get("variant_label") or ""
             ),
-            context={
-                str(key).strip(): str(value).strip()
-                for key, value in dict(promotion_context.context or {}).items()
-                if str(key).strip() and str(value).strip()
-            },
+            context=normalize_string_map(promotion_context.context),
         )
 
     def promote_candidates(self, payload: SkillPromotionPayload) -> Path | None:
@@ -229,11 +226,7 @@ class SkillSedimenter:
                         anchor_url=str(result.get("anchor_url") or ""),
                         page_state_signature=str(result.get("page_state_signature") or ""),
                         variant_label=str(result.get("variant_label") or ""),
-                        context={
-                            str(key).strip(): str(value).strip()
-                            for key, value in dict(result.get("context") or {}).items()
-                            if str(key).strip() and str(value).strip()
-                        },
+                        context=normalize_string_map(result.get("context")),
                     ),
                     collection_config=dict(result.get("collection_config") or {}),
                     extraction_config=dict(result.get("extraction_config") or {}),
@@ -295,7 +288,7 @@ class SkillSedimenter:
             page_state_signature=str(candidate.page_state_signature or ""),
             anchor_url=str(candidate.anchor_url or ""),
             task_description=str(candidate.task_description or ""),
-            context=dict(candidate.context or {}),
+            context=normalize_string_map(candidate.context),
             success_rate=float(candidate.summary.get("success_rate", 0.0) or 0.0),
             success_rate_text=self._build_success_rate_text(candidate.summary),
             detail_xpath=str(collection_config.get("common_detail_xpath") or ""),
@@ -870,8 +863,10 @@ class SkillSedimenter:
         )
 
         try:
-            from langchain_openai import ChatOpenAI
             from langchain_core.messages import HumanMessage
+            from langchain_openai import ChatOpenAI
+
+            from ..llm.streaming import invoke_with_stream
 
             llm = ChatOpenAI(
                 api_key=config.llm.api_key,
@@ -880,7 +875,7 @@ class SkillSedimenter:
                 temperature=0.3,
                 max_tokens=1024,
             )
-            response = llm.invoke([HumanMessage(content=prompt)])
+            response = invoke_with_stream(llm, [HumanMessage(content=prompt)])
             if response and response.content:
                 return str(response.content).strip()
         except Exception as exc:

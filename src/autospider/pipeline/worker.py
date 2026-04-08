@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -147,17 +148,19 @@ class SubTaskWorker:
         )
 
     def _build_run_namespace(self) -> str:
-        """构建稳定的运行命名空间，避免不同运行间 Redis 队列串台。"""
-        if self.thread_id:
-            return self.thread_id
+        """构建稳定且按子任务隔离的运行命名空间。"""
         payload = {
+            "thread_id": str(self.thread_id or ""),
+            "subtask_id": str(self.subtask.id or ""),
             "page_state_signature": str(self.subtask.page_state_signature or ""),
+            "variant_label": str(self.subtask.variant_label or ""),
             "anchor_url": str(self.subtask.anchor_url or ""),
             "list_url": str(self.subtask.list_url or ""),
             "task_description": str(self.subtask.task_description or ""),
+            "execution_brief": self.subtask.execution_brief.model_dump(mode="python"),
             "output_dir": str(self.output_dir or ""),
         }
-        raw = "|".join(f"{key}={value}" for key, value in payload.items())
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
     def _normalize_runtime_journal_entries(self, entries: tuple[dict[str, str], ...]) -> list[dict]:

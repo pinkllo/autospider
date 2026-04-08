@@ -9,6 +9,7 @@ from autospider.graph.subgraphs.multi_dispatch import (
     _resolve_runtime_replan_max_children,
     _resolve_runtime_subtasks_use_main_model,
     _subtask_signature,
+    _apply_result_to_plan,
     merge_dispatch_round,
     prepare_dispatch_batch,
 )
@@ -185,6 +186,32 @@ def test_worker_run_namespace_distinguishes_same_url_different_state():
     assert worker_a._build_run_namespace() != worker_b._build_run_namespace()
 
 
+def test_worker_run_namespace_distinguishes_subtasks_with_same_thread_id():
+    subtask_a = SubTask(
+        id="leaf_001",
+        name="工程建设",
+        list_url="https://example.com/list",
+        page_state_signature="state_a",
+        variant_label="工程建设",
+        task_description="采集公告",
+        execution_brief=ExecutionBrief(current_scope="工程建设"),
+    )
+    subtask_b = SubTask(
+        id="leaf_002",
+        name="交通运输工程",
+        list_url="https://example.com/list",
+        page_state_signature="state_b",
+        variant_label="交通运输工程",
+        task_description="采集公告",
+        execution_brief=ExecutionBrief(current_scope="交通运输工程"),
+    )
+
+    worker_a = SubTaskWorker(subtask=subtask_a, fields=[], thread_id="thread_shared")
+    worker_b = SubTaskWorker(subtask=subtask_b, fields=[], thread_id="thread_shared")
+
+    assert worker_a._build_run_namespace() != worker_b._build_run_namespace()
+
+
 def test_build_dispatch_summary_counts_expanded_tasks():
     expanded = SubTask(
         id="expand_001",
@@ -217,6 +244,42 @@ def test_build_dispatch_summary_counts_expanded_tasks():
     assert summary["business_failure"] == 0
     assert summary["system_failure"] == 0
     assert summary["total_collected"] == 3
+
+
+def test_apply_result_to_plan_stringifies_runtime_context_flags():
+    subtask = SubTask(
+        id="leaf_001",
+        name="工程建设",
+        list_url="https://example.com/list",
+        task_description="采集工程建设",
+    )
+    plan = TaskPlan(
+        plan_id="plan_1",
+        original_request="采集分类项目",
+        site_url="https://example.com",
+        subtasks=[subtask],
+    )
+
+    _apply_result_to_plan(
+        plan,
+        {
+            "id": subtask.id,
+            "status": SubTaskStatus.COMPLETED.value,
+            "summary": {
+                "reliable_for_aggregation": True,
+                "durably_persisted": False,
+                "durability_state": "durable",
+                "execution_id": "exec-1",
+            },
+            "outcome_type": "collected",
+        },
+    )
+
+    assert subtask.context["reliable_for_aggregation"] == "true"
+    assert subtask.context["durably_persisted"] == "false"
+    assert subtask.context["durability_state"] == "durable"
+    assert subtask.context["execution_id"] == "exec-1"
+    assert subtask.context["outcome_type"] == "collected"
 
 
 def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_children(monkeypatch):

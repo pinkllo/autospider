@@ -2,8 +2,11 @@ from __future__ import annotations
 
 
 from autospider.common.protocol import (
+    extract_json_dict_from_llm_payload,
+    extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     parse_protocol_message,
+    summarize_llm_payload,
 )
 
 
@@ -64,3 +67,90 @@ def test_parse_json_dict_from_llm_rejects_broken_json_like_payload():
     }
     """
     assert parse_json_dict_from_llm(text) is None
+
+
+class _FakeStructuredResponse:
+    def __init__(self, *, content="", text="", additional_kwargs=None):
+        self.content = content
+        self.text = text
+        self.additional_kwargs = additional_kwargs or {}
+        self.response_metadata = {}
+
+
+def test_extract_json_dict_from_llm_payload_reads_additional_kwargs_parsed():
+    response = _FakeStructuredResponse(
+        content="",
+        additional_kwargs={"parsed": {"status": "ready", "list_url": "https://example.com", "fields": []}},
+    )
+
+    parsed = extract_json_dict_from_llm_payload(response)
+
+    assert parsed == {"status": "ready", "list_url": "https://example.com", "fields": []}
+
+
+def test_extract_response_text_from_llm_payload_prefers_text_attr():
+    response = _FakeStructuredResponse(text='{"selected_indexes":[1],"reasoning":"最相关"}')
+
+    assert extract_response_text_from_llm_payload(response) == '{"selected_indexes":[1],"reasoning":"最相关"}'
+
+
+def test_extract_json_dict_from_llm_payload_reads_nested_response_metadata_message():
+    response = _FakeStructuredResponse(
+        content="",
+        additional_kwargs={},
+    )
+    response.response_metadata = {
+        "message": {
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": '{"status":"ready","list_url":"https://example.com","fields":[]}',
+                }
+            ]
+        }
+    }
+
+    parsed = extract_json_dict_from_llm_payload(response)
+
+    assert parsed == {"status": "ready", "list_url": "https://example.com", "fields": []}
+
+
+def test_extract_response_text_from_llm_payload_reads_nested_message_blocks():
+    response = _FakeStructuredResponse(
+        content=[],
+        additional_kwargs={
+            "message": {
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"selected_indexes":[1],"reasoning":"最相关"}',
+                    }
+                ]
+            }
+        },
+    )
+
+    assert extract_response_text_from_llm_payload(response) == '{"selected_indexes":[1],"reasoning":"最相关"}'
+
+
+def test_summarize_llm_payload_includes_nested_shape():
+    response = _FakeStructuredResponse(
+        content=[],
+        additional_kwargs={
+            "message": {
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"status":"ready"}',
+                    }
+                ]
+            }
+        },
+    )
+
+    summary = summarize_llm_payload(response)
+
+    assert summary["payload_type"] == "_FakeStructuredResponse"
+    assert "shape" in summary
+    assert summary["shape"]["additional_kwargs"]["message"]["content"]["items"][0]["type"] == "output_text"
+

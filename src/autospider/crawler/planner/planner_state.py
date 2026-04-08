@@ -9,6 +9,7 @@ from typing import Any
 from ...common.logger import get_logger
 
 logger = get_logger(__name__)
+_ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
 
 
 class PlannerPageState:
@@ -183,6 +184,50 @@ class PlannerPageState:
             return hashlib.md5(text.encode("utf-8")).hexdigest() if text else ""
         except Exception:
             return ""
+
+    async def get_element_interaction_state(self, xpath: str) -> dict[str, str]:
+        if not xpath:
+            return {}
+        try:
+            state = await self.page.evaluate(
+                """(xpath) => {
+                    const result = document.evaluate(
+                        xpath, document, null,
+                        XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                    );
+                    const el = result.singleNodeValue;
+                    if (!el) return {};
+                    return {
+                        class_name: String(el.className || ''),
+                        aria_selected: String(el.getAttribute('aria-selected') || ''),
+                        aria_current: String(el.getAttribute('aria-current') || ''),
+                        data_state: String(el.getAttribute('data-state') || ''),
+                    };
+                }""",
+                xpath,
+            )
+            return dict(state or {})
+        except Exception:
+            return {}
+
+    def did_interaction_state_activate(
+        self,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+    ) -> bool:
+        return self._is_selected_state(after) and not self._is_selected_state(before)
+
+    def _is_selected_state(self, state: dict[str, Any] | None) -> bool:
+        if not state:
+            return False
+        class_name = str(state.get("class_name") or "").lower()
+        if any(token in class_name for token in _ACTIVE_STATE_TOKENS):
+            return True
+        if str(state.get("aria_selected") or "").lower() == "true":
+            return True
+        if str(state.get("aria_current") or "").lower() in {"true", "page", "step", "location"}:
+            return True
+        return str(state.get("data_state") or "").lower() in _ACTIVE_STATE_TOKENS
 
     async def restore_original_page(self, original_url: str) -> None:
         try:

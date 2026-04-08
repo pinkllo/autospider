@@ -6,14 +6,11 @@ import shutil
 import uuid
 from pathlib import Path
 
+from langchain_core.messages import AIMessageChunk
+
 from autospider.common.experience import SkillRuntime, SkillSedimenter, SkillStore
 from autospider.common.experience.skill_sedimenter import SkillPromotionContext, SkillSedimentationPayload
 from autospider.common.experience.skill_store import parse_skill_document
-
-
-class _FakeResponse:
-    def __init__(self, content: str):
-        self.content = content
 
 
 class _FakeLLM:
@@ -23,10 +20,17 @@ class _FakeLLM:
         self.model = "fake-model"
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def astream(self, messages):
         self.calls += 1
         self.messages.append(messages)
-        return _FakeResponse(json.dumps(self.payload, ensure_ascii=False))
+        yield AIMessageChunk(content=json.dumps(self.payload, ensure_ascii=False))
+
+
+class _FakeStructuredLLM(_FakeLLM):
+    async def astream(self, messages):
+        self.calls += 1
+        self.messages.append(messages)
+        yield AIMessageChunk(content="", additional_kwargs={"parsed": self.payload})
 
 
 def _skill_content(name: str, description: str) -> str:
@@ -159,6 +163,31 @@ def test_skill_runtime_autocorrects_zero_based_index_from_model():
         prompt_text = llm.messages[0][1].content
         assert '"index": 1' in prompt_text
         assert '不能返回 0' in prompt_text
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_skill_runtime_reads_structured_payload_from_additional_kwargs():
+    base = _make_test_dir()
+    try:
+        store = SkillStore(skills_dir=base)
+        store.save("www.doubao.com", _skill_content("doubao-chat", "聊天页技能"))
+
+        runtime = SkillRuntime(store=store)
+        llm = _FakeStructuredLLM({"selected_indexes": [1], "reasoning": "最相关"})
+
+        async def _run():
+            return await runtime.get_or_select(
+                phase="clarifier",
+                url="https://www.doubao.com/chat/1",
+                task_context={"request": "采集聊天页"},
+                llm=llm,
+            )
+
+        selected = asyncio.run(_run())
+
+        assert [item.domain for item in selected] == ["www.doubao.com"]
+        assert llm.calls == 1
     finally:
         shutil.rmtree(base, ignore_errors=True)
 

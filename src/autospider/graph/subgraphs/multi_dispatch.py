@@ -87,6 +87,12 @@ def _restore_subtask(payload: dict[str, Any]) -> SubTask:
     return SubTask.model_validate(dict(payload or {}))
 
 
+def _stringify_subtask_context_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value or "")
+
+
 def _inherit_parent_nav_steps(payload: dict[str, Any], plan: TaskPlan) -> dict[str, Any]:
     """为运行时派生子任务补齐父导航链。"""
     hydrated = dict(payload or {})
@@ -259,15 +265,19 @@ def _apply_result_to_plan(plan: TaskPlan, result_item: dict[str, Any]) -> None:
         if summary:
             merged_context = dict(subtask.context or {})
             if "reliable_for_aggregation" in summary:
-                merged_context["reliable_for_aggregation"] = bool(summary.get("reliable_for_aggregation"))
+                merged_context["reliable_for_aggregation"] = _stringify_subtask_context_value(
+                    summary.get("reliable_for_aggregation")
+                )
             if "durability_state" in summary:
-                merged_context["durability_state"] = str(summary.get("durability_state") or "")
+                merged_context["durability_state"] = _stringify_subtask_context_value(summary.get("durability_state"))
             if "durably_persisted" in summary:
-                merged_context["durably_persisted"] = bool(summary.get("durably_persisted"))
+                merged_context["durably_persisted"] = _stringify_subtask_context_value(
+                    summary.get("durably_persisted")
+                )
             if "execution_id" in summary:
-                merged_context["execution_id"] = str(summary.get("execution_id") or "")
+                merged_context["execution_id"] = _stringify_subtask_context_value(summary.get("execution_id"))
             if result_item.get("outcome_type"):
-                merged_context["outcome_type"] = str(result_item.get("outcome_type") or "")
+                merged_context["outcome_type"] = _stringify_subtask_context_value(result_item.get("outcome_type"))
             subtask.context = merged_context
         return
 

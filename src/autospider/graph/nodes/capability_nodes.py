@@ -70,6 +70,12 @@ def _node_payload(service_result: dict[str, Any], fallback: dict[str, Any] | Non
     return fallback or {}
 
 
+def _merge_summary(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(base or {})
+    merged.update(dict(extra or {}))
+    return merged
+
+
 def _extract_pipeline_result(service_result: dict[str, Any]) -> dict[str, Any]:
     nested = service_result.get("pipeline_result") or service_result.get("result")
     if isinstance(nested, dict) and nested:
@@ -321,6 +327,7 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
     request = build_execution_request(params, thread_id=_thread_id(state))
     context = build_execution_context(request)
+    dispatch_summary = dict(state.get("summary") or {})
 
     try:
         service_result = AggregationService().execute(
@@ -329,32 +336,34 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
         )
     except AggregationFailure as exc:
         report = exc.report.model_dump(mode="python")
-        return {
-            **_fatal("aggregate_failed", str(exc)),
-            "aggregate_result": report,
-            "summary": {
+        summary = _merge_summary(
+            dispatch_summary,
+            {
                 "merged_items": report.get("merged_items", 0),
                 "failed_subtasks": report.get("failed_subtasks", 0),
             },
+        )
+        return {
+            **_fatal("aggregate_failed", str(exc)),
+            "aggregate_result": report,
+            "summary": summary,
             "result": {
                 "status": "failed",
                 "data": {"aggregate_result": report},
-                "summary": {
-                    "merged_items": report.get("merged_items", 0),
-                    "failed_subtasks": report.get("failed_subtasks", 0),
-                },
+                "summary": summary,
                 "aggregate_result": report,
             },
         }
 
+    summary = _merge_summary(dispatch_summary, dict(service_result.get("summary") or {}))
     return {
         **_ok(_node_payload(service_result), _node_artifacts(service_result)),
         "aggregate_result": dict(service_result.get("aggregate_result") or {}),
-        "summary": dict(service_result.get("summary") or {}),
+        "summary": summary,
         "result": {
             "status": "ok",
             "data": dict(service_result.get("result") or {}),
-            "summary": dict(service_result.get("summary") or {}),
+            "summary": summary,
             "aggregate_result": dict(service_result.get("aggregate_result") or {}),
             "artifacts": _node_artifacts(service_result),
         },

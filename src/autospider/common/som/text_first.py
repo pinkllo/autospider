@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import config
 from ..logger import get_logger
+from ..llm.streaming import ainvoke_with_stream
 from ..protocol import parse_protocol_message
 from ..utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
@@ -179,7 +180,7 @@ async def disambiguate_mark_id_by_text(
             ),
         ]
 
-        response = await llm.ainvoke(messages)
+        response = await ainvoke_with_stream(llm, messages)
         response_text = getattr(response, "content", "") or ""
 
         message = parse_protocol_message(response)
