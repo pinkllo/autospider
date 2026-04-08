@@ -388,11 +388,11 @@ def _coerce_field_names(fields: list["FieldDefinition"]) -> list[str]:
     return names
 
 
-def persist_pipeline_run(context: "PipelineFinalizationContext", records: dict[str, dict]) -> None:
+def persist_pipeline_records(context: "PipelineFinalizationContext", records: dict[str, dict]) -> None:
     """将现版本运行结果持久化到 PostgreSQL。"""
     from ..common.db.engine import session_scope
     from ..common.db.repositories import TaskRepository, TaskRunPayload
-    from ..common.storage.task_registry import invalidate_task_cache, normalize_url
+    from ..common.storage.task_run_query_service import invalidate_task_cache, normalize_url
 
     normalized_url = normalize_url(context.list_url)
     if not normalized_url:
@@ -467,7 +467,7 @@ class PipelineFinalizationContext:
 class PipelineFinalizationDependencies:
     build_record_summary: Callable[[dict[str, dict]], dict[str, int]]
     classify_pipeline_result: Callable[..., dict[str, object]]
-    persist_pipeline_run: Callable[["PipelineFinalizationContext", dict[str, dict]], None]
+    persist_pipeline_records: Callable[["PipelineFinalizationContext", dict[str, dict]], None]
     commit_items_file: Callable[[Path, dict[str, dict]], None]
     write_summary: Callable[[Path, dict], None]
     promote_output: Callable[[Path, Path], None]
@@ -522,7 +522,7 @@ class PipelineFinalizer:
                 context.summary["terminal_reason"] = str(
                     context.summary.get("terminal_reason") or "export_failed"
                 )
-            self._deps.persist_pipeline_run(context, committed_records)
+            self._deps.persist_pipeline_records(context, committed_records)
 
             final_status = str(context.summary.get("execution_state") or "completed")
             await context.tracker.mark_done(final_status)

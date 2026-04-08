@@ -191,6 +191,16 @@ class RedisURLChannel(URLChannel):
 
         return wrapped
 
+    async def list_existing_urls(self) -> list[str]:
+        self._raise_background_error()
+        await self._ensure_connected()
+        items = await self.manager.get_all_items()
+        return [
+            str(data.get("url") or "").strip()
+            for data in items.values()
+            if str(data.get("url") or "").strip()
+        ]
+
     async def close(self) -> None:
         """安全干净地关闭通道及底层 Redis 连接。"""
         if self._recover_task is not None:

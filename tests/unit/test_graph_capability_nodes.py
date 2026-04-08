@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from autospider.common.config import config
-from autospider.common.types import TaskPlan
+from autospider.domain.planning import TaskPlan
 from autospider.graph.nodes import capability_nodes
 
 
@@ -28,7 +28,7 @@ class _FakePlannerEmpty:
 
 
 def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
-    class _FakePlanningService:
+    class _FakePlanUseCase:
         async def execute(self, *, request):
             planner = _FakePlannerEmpty(
                 page=SimpleNamespace(url="https://example.com/list"),
@@ -42,7 +42,7 @@ def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
                 "summary": {"total_subtasks": 0},
             }
 
-    monkeypatch.setattr(capability_nodes, "PlanningService", _FakePlanningService)
+    monkeypatch.setattr(capability_nodes, "PlanUseCase", _FakePlanUseCase)
 
     result = asyncio.run(
         capability_nodes.plan_node(
@@ -65,16 +65,18 @@ def test_plan_node_fails_when_planner_returns_no_subtasks(monkeypatch):
 
 
 def test_generate_config_node_persists_collection_config_in_state(monkeypatch, tmp_path):
-    class _FakeCollectionService:
-        async def generate_config(self, *, request):
+    class _FakeGenerateCollectionConfigUseCase:
+        async def execute(self, *, request):
             return {
-                "collection_config": {
-                    "nav_steps": [{"action": "click", "target": "招标公告"}],
-                    "common_detail_xpath": "//a[@class=\"detail\"]",
-                    "pagination_xpath": "//a[@class=\"next\"]",
-                    "jump_widget_xpath": {"input": "//input", "button": "//button"},
-                    "list_url": request.list_url,
-                    "task_description": request.task_description,
+                "data": {
+                    "collection_config": {
+                        "nav_steps": [{"action": "click", "target": "招标公告"}],
+                        "common_detail_xpath": "//a[@class=\"detail\"]",
+                        "pagination_xpath": "//a[@class=\"next\"]",
+                        "jump_widget_xpath": {"input": "//input", "button": "//button"},
+                        "list_url": request.list_url,
+                        "task_description": request.task_description,
+                    }
                 },
                 "summary": {
                     "nav_steps": 1,
@@ -82,9 +84,14 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
                     "has_pagination_xpath": True,
                     "has_jump_widget_xpath": True,
                 },
+                "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
+    monkeypatch.setattr(
+        capability_nodes,
+        "GenerateCollectionConfigUseCase",
+        _FakeGenerateCollectionConfigUseCase,
+    )
 
     result = asyncio.run(
         capability_nodes.generate_config_node(
@@ -107,17 +114,20 @@ def test_generate_config_node_persists_collection_config_in_state(monkeypatch, t
 
 
 def test_batch_collect_node_can_use_collection_config_from_state(monkeypatch, tmp_path):
-    class _FakeCollectionService:
-        async def batch_collect(self, *, request, state):
-            collection_config = state["collection_config"]
+    class _FakeBatchCollectUrlsUseCase:
+        async def execute(self, *, request, collection_config):
             assert collection_config["list_url"] == "https://example.com/list"
             return {
-                "collection_config": collection_config,
-                "collected_urls": ["https://example.com/a", "https://example.com/b"],
-                "collection_progress": {"collected_count": 2},
+                "data": {
+                    "collection_config": collection_config,
+                    "collected_urls": ["https://example.com/a", "https://example.com/b"],
+                    "collection_progress": {"collected_count": 2},
+                },
+                "summary": {"collected_urls": 2},
+                "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
+    monkeypatch.setattr(capability_nodes, "BatchCollectUrlsUseCase", _FakeBatchCollectUrlsUseCase)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -148,15 +158,19 @@ def test_collect_urls_node_passes_max_pages_without_mutating_global_config(monke
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    class _FakeCollectionService:
-        async def collect_urls(self, *, request):
+    class _FakeCollectUrlsUseCase:
+        async def execute(self, *, request):
             captured.update(request.model_dump(mode="python"))
             return {
-                "collected_urls": ["https://example.com/a"],
-                "collection_progress": {"collected_count": 1},
+                "data": {
+                    "collected_urls": ["https://example.com/a"],
+                    "collection_progress": {"collected_count": 1},
+                },
+                "summary": {"collected_urls": 1},
+                "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
+    monkeypatch.setattr(capability_nodes, "CollectUrlsUseCase", _FakeCollectUrlsUseCase)
 
     result = asyncio.run(
         capability_nodes.collect_urls_node(
@@ -182,16 +196,20 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
     captured: dict[str, object] = {}
     original_max_pages = config.url_collector.max_pages
 
-    class _FakeCollectionService:
-        async def batch_collect(self, *, request, state):
+    class _FakeBatchCollectUrlsUseCase:
+        async def execute(self, *, request, collection_config):
             captured.update(request.model_dump(mode="python"))
             return {
-                "collection_config": state["collection_config"],
-                "collected_urls": ["https://example.com/a"],
-                "collection_progress": {"collected_count": 1},
+                "data": {
+                    "collection_config": collection_config,
+                    "collected_urls": ["https://example.com/a"],
+                    "collection_progress": {"collected_count": 1},
+                },
+                "summary": {"collected_urls": 1},
+                "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "CollectionService", _FakeCollectionService)
+    monkeypatch.setattr(capability_nodes, "BatchCollectUrlsUseCase", _FakeBatchCollectUrlsUseCase)
 
     result = asyncio.run(
         capability_nodes.batch_collect_node(
@@ -219,21 +237,24 @@ def test_batch_collect_node_passes_max_pages_without_mutating_global_config(monk
 
 
 def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
-    class _FakeFieldService:
-        async def execute(self, *, request, state):
-            assert state["collected_urls"] == ["https://example.com/a", "https://example.com/b"]
+    class _FakeExtractFieldsUseCase:
+        async def execute(self, *, request, collected_urls):
+            assert collected_urls == ["https://example.com/a", "https://example.com/b"]
             return {
-                "fields_config": [{"name": "title", "xpath": "//h1"}],
-                "xpath_result": {
-                    "fields": [{"name": "title", "xpath": "//h1"}],
-                    "records": [{"url": "https://example.com/a", "success": True}],
-                    "total_urls": 2,
-                    "success_count": 2,
+                "data": {
+                    "fields_config": [{"name": "title", "xpath": "//h1"}],
+                    "xpath_result": {
+                        "fields": [{"name": "title", "xpath": "//h1"}],
+                        "records": [{"url": "https://example.com/a", "success": True}],
+                        "total_urls": 2,
+                        "success_count": 2,
+                    },
                 },
                 "summary": {"url_count": 2, "field_count": 1},
+                "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "FieldService", _FakeFieldService)
+    monkeypatch.setattr(capability_nodes, "ExtractFieldsUseCase", _FakeExtractFieldsUseCase)
 
     result = asyncio.run(
         capability_nodes.field_extract_node(
@@ -255,7 +276,7 @@ def test_field_extract_node_uses_checkpoint_urls(monkeypatch, tmp_path):
 
 
 def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
-    class _FakePipelineExecutionService:
+    class _FakeExecutePipelineUseCase:
         async def execute(self, *, request):
             return {
                 "total_urls": 4,
@@ -271,7 +292,7 @@ def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
                 "execution_id": "exec_123",
             }
 
-    monkeypatch.setattr(capability_nodes, "PipelineExecutionService", _FakePipelineExecutionService)
+    monkeypatch.setattr(capability_nodes, "ExecutePipelineUseCase", _FakeExecutePipelineUseCase)
 
     result = asyncio.run(
         capability_nodes.run_pipeline_node(
@@ -296,16 +317,15 @@ def test_run_pipeline_node_exposes_unified_status_fields(monkeypatch, tmp_path):
 
 
 def test_aggregate_node_preserves_dispatch_summary(monkeypatch):
-    class _FakeAggregationService:
-        def execute(self, *, context, task_plan):
+    class _FakeAggregateResultsUseCase:
+        def execute(self, *, context, task_plan, subtask_results=None):
             return {
-                "aggregate_result": {"merged_items": 27},
+                "data": {"aggregate_result": {"merged_items": 27}},
                 "summary": {"merged_items": 27, "eligible_subtasks": 4},
-                "result": {"merged_items": 27},
                 "artifacts": [],
             }
 
-    monkeypatch.setattr(capability_nodes, "AggregationService", _FakeAggregationService)
+    monkeypatch.setattr(capability_nodes, "AggregateResultsUseCase", _FakeAggregateResultsUseCase)
 
     result = asyncio.run(
         capability_nodes.aggregate_node(

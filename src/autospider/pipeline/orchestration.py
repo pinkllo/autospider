@@ -46,7 +46,6 @@ class PipelineRuntimeContext:
     guard_thread_id: str
     selected_skills: list[dict[str, str]] | None
     channel: URLChannel
-    redis_manager: object | None
     run_records: dict[str, dict]
     summary: dict[str, Any]
     tracker: TaskProgressTracker
@@ -100,7 +99,6 @@ class ProducerService:
                 explore_count=self.context.explore_count,
                 output_dir=self.context.output_dir,
                 url_channel=self.context.channel,
-                redis_manager=self.context.redis_manager,
                 target_url_count=self.context.target_url_count,
                 max_pages=self.context.max_pages,
                 persist_progress=False,

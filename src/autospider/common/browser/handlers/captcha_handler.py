@@ -246,16 +246,3 @@ class CaptchaHandler(BaseAnomalyHandler):
                 await current_page.evaluate(js)
             except Exception:
                 pass
-
-
-def _auto_register() -> None:
-    from ..registry import get_registry
-
-    registry = get_registry()
-    name = "验证码/滑块接管"
-    if name in registry.get_all_handlers():
-        return
-    registry.register(CaptchaHandler())
-
-
-_auto_register()

@@ -44,6 +44,14 @@ class URLChannel(abc.ABC):
     async def fetch(self, max_items: int, timeout_s: float | None) -> list[URLTask]:
         """Fetch URL tasks."""
 
+    async def list_existing_urls(self) -> list[str]:
+        """List already persisted URLs for resume/recovery flows."""
+        return []
+
+    def persists_published_urls(self) -> bool:
+        """Return whether publish() already durably maintains a URL listing."""
+        return False
+
     async def seal(self) -> None:
         """Signal that no more items will be published."""
         return None
@@ -59,3 +67,6 @@ class URLChannel(abc.ABC):
     async def close(self) -> None:
         """Close channel (default: no-op)."""
         return None
+
+
+UrlQueueBackend = URLChannel

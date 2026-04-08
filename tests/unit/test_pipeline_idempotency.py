@@ -21,7 +21,7 @@ from autospider.pipeline.runner import (
     _should_promote_skill,
     _strip_draft_markers_from_skill_content,
 )
-from autospider.services.service_utils import build_execution_context
+from autospider.application.helpers import build_execution_context
 
 
 class _DummyTask:
@@ -358,10 +358,13 @@ async def test_run_pipeline_passes_max_pages_without_mutating_global_config(monk
                 },
             )()
 
-    monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
+    monkeypatch.setattr(pipeline_runner, "BrowserRuntimeSession", _FakeBrowserSession)
     monkeypatch.setattr(pipeline_runner, "URLCollector", _FakeCollector)
-    monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: (_ExplodingChannel(), None))
+    monkeypatch.setattr(pipeline_runner, "create_url_channel", lambda **kwargs: _ExplodingChannel())
+    monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
+    monkeypatch.setattr(pipeline_runner, "_persist_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(pipeline_runner, "_persist_pipeline_records", lambda context, records: None)
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
     context = build_execution_context(
         ExecutionRequest(
@@ -442,16 +445,21 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
                 },
             )()
 
-    monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
+    monkeypatch.setattr(pipeline_runner, "BrowserRuntimeSession", _FakeBrowserSession)
     monkeypatch.setattr(pipeline_runner, "URLCollector", _PublishingCollector)
     monkeypatch.setattr(
         pipeline_runner,
         "create_url_channel",
-        lambda **kwargs: (channel, None),
+        lambda **kwargs: channel,
     )
     monkeypatch.setattr(pipeline_runner, "DetailPageWorker", _FakeDetailPageWorker)
     monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
+    monkeypatch.setattr(pipeline_runner, "_persist_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(pipeline_runner, "_persist_pipeline_records", lambda context, records: None)
+    monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
+    monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
+    monkeypatch.setattr(pipeline_runner, "_promote_staged_output", lambda staging_path, final_path: None)
     context = build_execution_context(
         ExecutionRequest(
             list_url="https://example.com/list",
@@ -470,8 +478,8 @@ async def test_run_pipeline_keeps_channel_open_until_consumer_drains_remaining_u
 
     result = await pipeline_runner.run_pipeline(context)
 
-    assert result["total_urls"] == 10
-    assert result["success_count"] == 10
+    assert result["collected_urls"] == 10
+    assert len(result["extraction_evidence"]) == 10
     assert channel.close_calls == 1
 
 
@@ -502,7 +510,7 @@ def test_pipeline_finalizer_persists_summary_and_stops_sessions(tmp_path):
                 "terminal_reason": "success",
                 "durability_state": "durable",
             },
-            persist_pipeline_run=lambda context, records: None,
+            persist_pipeline_records=lambda context, records: None,
             commit_items_file=lambda items_path, records: None,
             write_summary=lambda summary_path, summary: None,
             promote_output=lambda staging_path, final_path: None,

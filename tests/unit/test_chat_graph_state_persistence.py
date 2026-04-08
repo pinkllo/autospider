@@ -94,7 +94,7 @@ def test_chat_graph_persists_clarified_task_until_review_interrupt(monkeypatch):
 
     monkeypatch.setattr(entry_nodes, "TaskClarifier", _FakeClarifier)
     monkeypatch.setattr(entry_nodes, "SkillRuntime", _FakeRuntime)
-    monkeypatch.setattr(entry_nodes, "TaskRegistry", _FakeRegistry)
+    monkeypatch.setattr(entry_nodes, "TaskRunQueryService", _FakeRegistry)
 
     graph = build_main_graph()
     result = asyncio.run(

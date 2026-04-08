@@ -1,19 +1,20 @@
-"""Application service layer."""
+"""Service package exports."""
 
-from .aggregation_service import AggregationService
-from .collection_service import CollectionService
-from .field_service import FieldService
-from .plan_mutation_service import PlanMutationService
-from .pipeline_service import PipelineExecutionService
-from .planning_service import PlanningService
-from .runtime_expansion_service import RuntimeExpansionService
+from __future__ import annotations
 
 __all__ = [
-    "AggregationService",
-    "CollectionService",
-    "FieldService",
     "PlanMutationService",
-    "PipelineExecutionService",
-    "PlanningService",
     "RuntimeExpansionService",
 ]
+
+
+def __getattr__(name: str):
+    if name == "PlanMutationService":
+        from .plan_mutation_service import PlanMutationService
+
+        return PlanMutationService
+    if name == "RuntimeExpansionService":
+        from .runtime_expansion_service import RuntimeExpansionService
+
+        return RuntimeExpansionService
+    raise AttributeError(f"module 'autospider.services' has no attribute {name!r}")

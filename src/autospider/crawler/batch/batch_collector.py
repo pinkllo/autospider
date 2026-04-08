@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from ...common.logger import get_logger
 from ...common.storage.persistence import CollectionConfig, ConfigPersistence
-from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
+from ...common.storage.idempotent_io import write_json_idempotent
 from ..collector import (
     URLCollectorResult,
     LLMDecisionMaker,
@@ -25,7 +25,6 @@ from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ...common.storage.redis_manager import RedisQueueManager
     from ...common.channel.base import URLChannel
 
 # 日志器
@@ -46,7 +45,6 @@ class BatchCollector(BaseCollector):
         max_pages: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
-        redis_manager: "RedisQueueManager | None" = None,
         persist_progress: bool = True,
     ):
         """初始化批量爬取器
@@ -70,7 +68,6 @@ class BatchCollector(BaseCollector):
             task_description=getattr(self, "task_description", ""),
             output_dir=output_dir,
             url_channel=url_channel,
-            redis_manager=redis_manager,
             target_url_count=target_url_count,
             max_pages=max_pages,
             persist_progress=persist_progress,
@@ -115,7 +112,7 @@ class BatchCollector(BaseCollector):
         logger.info("\n[Phase 0] 加载配置文件...")
         if not await self._load_config():
             logger.info("[Error] 配置文件加载失败")
-            self._save_progress_status(status="FAILED", append_urls=True)
+            self.save_progress_status(status="FAILED")
             return self._create_empty_result()
 
         logger.info("[Phase 0] ✓ 配置加载成功")
@@ -125,23 +122,25 @@ class BatchCollector(BaseCollector):
         logger.info(f"  - 公共 XPath: {'已配置' if self.common_detail_xpath else '未配置'}")
 
         # 0.5 加载历史进度
-        previous_progress = self.progress_persistence.load_progress()
+        previous_progress = self.progress_store.load()
         target_page_num = 1
-        is_resume = False
 
-        if previous_progress and not self._is_progress_compatible(previous_progress):
+        if previous_progress and not self.progress_store.is_compatible(
+            previous_progress,
+            list_url=self.list_url,
+            task_description=self.task_description,
+        ):
             logger.info("\n[断点恢复] 历史进度与当前任务不匹配，忽略旧进度")
             previous_progress = None
 
         # 0.6 连接 Redis / 本地文件并加载历史 URL（使用基类方法）
-        if previous_progress or not self.progress_persistence.has_checkpoint():
-            await self._load_previous_urls()
+        if previous_progress or not self.progress_store.has_checkpoint():
+            await self.restore_collected_urls()
 
         if previous_progress and previous_progress.current_page_num > 1:
             logger.info(f"\n[断点恢复] 检测到上次中断在第 {previous_progress.current_page_num} 页")
             logger.info(f"[断点恢复] 已收集 {previous_progress.collected_count} 个 URL")
             target_page_num = previous_progress.current_page_num
-            is_resume = True
 
             # 恢复速率控制器状态
             self.rate_controller.current_level = previous_progress.backoff_level
@@ -193,7 +192,7 @@ class BatchCollector(BaseCollector):
         logger.info(f"  - 收集到 {len(self.collected_urls)} 个详情页 URL")
 
         await self._save_result(result)
-        self._save_progress_status(status="COMPLETED", append_urls=True)
+        self.save_progress_status(status="COMPLETED")
 
         return result
 
@@ -317,13 +316,7 @@ class BatchCollector(BaseCollector):
         result.created_at = str((persisted or data).get("created_at") or result.created_at)
         logger.info(f"[Save] 结果已保存到: {output_file}")
 
-        # 保存 URL 列表
-        urls_file = self.output_dir / "urls.txt"
-        payload = "\n".join(result.collected_urls)
-        if payload:
-            payload += "\n"
-        write_text_if_changed(urls_file, payload)
-        logger.info(f"[Save] URL 列表已保存到: {urls_file}")
+        self.url_publish_service.write_snapshot(result.collected_urls)
 
 
 # 便捷函数

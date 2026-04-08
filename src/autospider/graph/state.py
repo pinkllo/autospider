@@ -42,6 +42,7 @@ class DispatchState(TypedDict, total=False):
     task_plan: Any
     plan_knowledge: str
     dispatch_result: dict[str, Any]
+    subtask_results: list[dict[str, Any]]
     summary: dict[str, Any]
     payload: dict[str, Any]
     error: StageErrorState | None
@@ -86,6 +87,7 @@ class GraphState(TypedDict, total=False):
     task_plan: Any
     plan_knowledge: str
     dispatch_result: dict[str, Any]
+    subtask_results: list[dict[str, Any]]
     node_status: NodeStatus
     node_payload: dict[str, Any]
     node_artifacts: list[dict[str, str]]

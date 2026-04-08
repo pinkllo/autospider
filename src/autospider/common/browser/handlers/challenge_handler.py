@@ -207,16 +207,3 @@ class ChallengeHandler(BaseAnomalyHandler):
                 await current_page.evaluate(js)
             except Exception:
                 pass
-
-
-def _auto_register() -> None:
-    from ..registry import get_registry
-
-    registry = get_registry()
-    name = "风控挑战接管"
-    if name in registry.get_all_handlers():
-        return
-    registry.register(ChallengeHandler())
-
-
-_auto_register()

@@ -1,6 +1,10 @@
-"""浏览器模块"""
+"""浏览器模块。
+
+BrowserRuntimeSession 是主路径生命周期抽象。
+"""
 
 from .actions import ActionExecutor
+from .composition import build_default_handlers
 from .engine import BrowserEngine, get_browser_engine, shutdown_browser_engine
 from .guard import PageGuard
 from .guarded_page import GuardedPage
@@ -13,15 +17,15 @@ from .registry import (
     get_registry,
     register_handler,
 )
-from .session import BrowserSession, create_browser_session
+from .runtime import BrowserRuntimeSession
 
 __all__ = [
     "BrowserEngine",
+    "BrowserRuntimeSession",
     "get_browser_engine",
     "PageGuard",
     "GuardedPage",
-    "BrowserSession",
-    "create_browser_session",
+    "build_default_handlers",
     "shutdown_browser_engine",
     "ActionExecutor",
     "BaseAnomalyHandler",

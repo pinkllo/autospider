@@ -17,7 +17,7 @@ It can automatically discover detail links, infer highly stable and reusable XPa
 
 ## 🏗️ System Architecture
 
-AutoSpider uses a LangGraph-based state graph architecture, routing through a unified entry node based on `entry_mode`. The public CLI now keeps only 3 main commands. In the current implementation, `chat-pipeline` is the primary user-facing path, and chat-originated work always enters planning before concurrent dispatch:
+AutoSpider uses a LangGraph-based state graph architecture centered on the `chat-pipeline` entry path. The public CLI now keeps only 3 main commands. In the current implementation, `chat-pipeline` is the primary user-facing path, and chat-originated work always enters planning before concurrent dispatch:
 
 ```mermaid
 graph LR
@@ -41,12 +41,6 @@ graph LR
 | Entry Mode | Execution Route | Description |
 |:---|:---|:---|
 | `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 AI-driven multi-turn dialog, then planning-first concurrent execution |
-| `pipeline_run` | normalize_pipeline_params → run_pipeline_node | 🔧 Internal / compatibility direct pipeline |
-| `collect_urls` | collect_urls_node | 🔗 Internal URL collection |
-| `generate_config` | generate_config_node | ⚙️ Internal config generation |
-| `batch_collect` | batch_collect_node | 📦 Internal batch collection |
-| `field_extract` | field_extract_node | 🔍 Internal field extraction |
-| `multi_pipeline` | plan_node → multi_dispatch_subgraph → aggregate_node | 🧠 Smart planning + concurrent dispatch + result aggregation |
 
 ## ⚙️ Requirements
 

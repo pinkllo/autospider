@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..common.browser import BrowserSession
+from ..common.browser.runtime import BrowserRuntimeSession
 from ..common.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLChannel, URLTask
 from ..common.channel.factory import create_url_channel
@@ -30,7 +30,7 @@ from .finalization import (
     find_output_draft_skill as _find_output_draft_skill_impl,
     finalize_task_from_record as _finalize_task_from_record_impl,
     load_persisted_run_records as _load_persisted_run_records_impl,
-    persist_pipeline_run as _persist_pipeline_run_impl,
+    persist_pipeline_records as _persist_pipeline_records_impl,
     promote_staged_output as _promote_staged_output_impl,
     prepare_fields_config as _prepare_fields_config_impl,
     prepare_pipeline_output as _prepare_pipeline_output_impl,
@@ -198,8 +198,8 @@ def _write_summary(path: Path, summary: dict) -> None:
     _write_summary_impl(path, summary)
 
 
-def _persist_pipeline_run(context: PipelineFinalizationContext, records: dict[str, dict]) -> None:
-    _persist_pipeline_run_impl(context, records)
+def _persist_pipeline_records(context: PipelineFinalizationContext, records: dict[str, dict]) -> None:
+    _persist_pipeline_records_impl(context, records)
 
 
 def _promote_staged_output(staging_path: Path, final_path: Path) -> None:
@@ -225,7 +225,7 @@ def _persist_run_snapshot(
 ) -> None:
     from ..common.db.engine import session_scope
     from ..common.db.repositories import TaskRepository, TaskRunPayload
-    from ..common.storage.task_registry import normalize_url
+    from ..common.storage.task_run_query_service import normalize_url
 
     payload = TaskRunPayload(
         normalized_url=normalize_url(str(identity.list_url or "").strip()),
@@ -483,7 +483,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
         execution_id=resolved_execution_id,
     )
 
-    channel, redis_manager = create_url_channel(
+    channel = create_url_channel(
         mode=context.pipeline_mode.value,
         output_dir=output_dir,
         redis_key_prefix=effective_redis_key_prefix,
@@ -526,7 +526,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
     }
 
     sessions = PipelineSessionBundle(
-        list_session=BrowserSession(
+        list_session=BrowserRuntimeSession(
             headless=headless,
             guard_intervention_mode=guard_intervention_mode,
             guard_thread_id=guard_thread_id,
@@ -555,7 +555,6 @@ async def run_pipeline(context: ExecutionContext) -> dict:
         guard_thread_id=guard_thread_id,
         selected_skills=selected_skills,
         channel=channel,
-        redis_manager=redis_manager,
         run_records=run_records,
         summary=summary,
         tracker=TaskProgressTracker(resolved_execution_id),
@@ -584,7 +583,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
     )
 
     runtime_deps = PipelineRuntimeDependencies(
-        browser_session_factory=BrowserSession,
+        browser_session_factory=BrowserRuntimeSession,
         collector_cls=URLCollector,
         detail_page_worker_cls=DetailPageWorker,
         set_state_error=_set_state_error,
@@ -596,7 +595,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
         PipelineFinalizationDependencies(
             build_record_summary=_build_record_summary,
             classify_pipeline_result=_classify_pipeline_result,
-            persist_pipeline_run=_persist_pipeline_run,
+            persist_pipeline_records=_persist_pipeline_records,
             commit_items_file=_commit_items_file,
             write_summary=_write_summary,
             promote_output=_promote_staged_output,

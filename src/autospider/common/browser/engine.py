@@ -16,8 +16,6 @@ from playwright.async_api import Browser, Page, Playwright, async_playwright
 
 from .guard import PageGuard
 from .task_utils import create_monitored_task
-from . import handlers  # noqa: F401
-
 try:
     from playwright_stealth import Stealth  # type: ignore
 except Exception:
@@ -125,6 +123,7 @@ class BrowserEngine:
         auto_load_cookie: bool = True,
         guard_intervention_mode: str = "blocking",
         guard_thread_id: str = "",
+        handlers: list[object] | None = None,
         **context_kwargs: Any,
     ) -> AsyncGenerator[Page, None]:
         use_headless = headless if headless is not None else self.default_headless
@@ -161,6 +160,7 @@ class BrowserEngine:
             guard = PageGuard(
                 intervention_mode=guard_intervention_mode,
                 thread_id=guard_thread_id,
+                handlers=handlers,
             )
             guard.attach_to_page(page)
             create_monitored_task(

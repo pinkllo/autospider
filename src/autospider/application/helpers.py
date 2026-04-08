@@ -1,14 +1,14 @@
-"""Shared helpers for application services."""
+"""Application-level request/context helpers."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from ..contracts import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 from ..common.config import config
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage.persistence import CollectionConfig
+from ..contracts import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 from ..domain.fields import FieldDefinition
 from ..pipeline.runtime_controls import resolve_concurrency_settings
 

@@ -84,6 +84,9 @@ class MemoryURLChannel(URLChannel):
 
         return items
 
+    async def list_existing_urls(self) -> list[str]:
+        return []
+
     async def close(self) -> None:
         """关闭内存通道。
         

@@ -342,17 +342,3 @@ class LoginHandler(BaseAnomalyHandler):
             logger.success(f">>> 登录状态已保存: {self.auth_file} ({len(cookies)} cookies) <<<")
         except Exception as exc:
             logger.error(f"保存登录状态失败: {exc}")
-
-
-def _auto_register() -> None:
-    from ..registry import get_registry
-
-    registry = get_registry()
-    handler_name = "人工登录接管"
-    if handler_name in registry.get_all_handlers():
-        logger.debug(f"[LoginHandler] 处理器 '{handler_name}' 已存在，跳过重复注册")
-        return
-    registry.register(LoginHandler())
-
-
-_auto_register()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from autospider.common.types import SubTask
+from autospider.domain.planning import SubTask
 from autospider.field.batch_xpath_extractor import BatchXPathExtractor
 from autospider.pipeline.runner import _prepare_fields_config
 from autospider.pipeline.worker import SubTaskWorker

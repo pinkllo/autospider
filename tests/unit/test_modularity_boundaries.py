@@ -21,13 +21,13 @@ def test_legacy_prompt_template_is_a_shim_to_canonical_module():
     assert not (PROJECT_ROOT / "src" / "common" / "utils" / "prompt_template.py").exists()
 
 
-def test_common_types_planning_models_are_compat_exports():
-    from autospider.common.types import SubTask as CompatSubTask
-    from autospider.common.types import TaskPlan as CompatTaskPlan
-    from autospider.domain.planning import SubTask, TaskPlan
+def test_common_types_no_longer_exports_planning_models():
+    source = (PROJECT_ROOT / "src" / "autospider" / "common" / "types.py").read_text(
+        encoding="utf-8"
+    )
 
-    assert CompatSubTask is SubTask
-    assert CompatTaskPlan is TaskPlan
+    assert "from ..domain.planning import SubTask" not in source
+    assert "from ..domain.planning import TaskPlan" not in source
 
 
 def test_browser_test_uses_canonical_browser_entry():
@@ -40,12 +40,7 @@ def test_browser_test_uses_canonical_browser_entry():
 
 
 def test_browser_session_no_longer_mutates_sys_path_for_common_browser_manager():
-    source = (PROJECT_ROOT / "src" / "autospider" / "common" / "browser" / "session.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "sys.path.insert" not in source
-    assert "from .engine import BrowserEngine, get_browser_engine, shutdown_browser_engine" in source
+    assert not (PROJECT_ROOT / "src" / "autospider" / "common" / "browser" / "session.py").exists()
 
 
 def test_browser_intervention_is_canonical_and_legacy_module_is_a_shim():
@@ -94,18 +89,23 @@ def test_services_exports_and_aliases_are_trimmed_to_canonical_entries():
     )
 
     assert "TaskRunQueryService" not in source
+    assert "CollectionService" not in source
+    assert "FieldService" not in source
+    assert "PlanningService" not in source
+    assert "AggregationService" not in source
+    assert "compatibility" not in source.lower()
+    assert "PlanMutationService" in source
+    assert "RuntimeExpansionService" in source
 
 
-def test_service_modules_no_longer_expose_run_aliases():
-    planning_source = (
-        PROJECT_ROOT / "src" / "autospider" / "services" / "planning_service.py"
-    ).read_text(encoding="utf-8")
-    pipeline_source = (
-        PROJECT_ROOT / "src" / "autospider" / "services" / "pipeline_service.py"
-    ).read_text(encoding="utf-8")
+def test_legacy_service_modules_are_removed():
+    services_root = PROJECT_ROOT / "src" / "autospider" / "services"
 
-    assert "async def run(" not in planning_source
-    assert "async def run(" not in pipeline_source
+    assert sorted(path.name for path in services_root.glob("*.py")) == [
+        "__init__.py",
+        "plan_mutation_service.py",
+        "runtime_expansion_service.py",
+    ]
 
 
 def test_capability_nodes_no_longer_define_execute_facades():
@@ -120,6 +120,46 @@ def test_capability_nodes_no_longer_define_execute_facades():
     assert "async def execute_field_extraction(" not in source
     assert "async def execute_planning(" not in source
     assert "async def execute_aggregation(" not in source
+
+
+def test_capability_nodes_use_application_use_cases_on_main_path():
+    source = (
+        PROJECT_ROOT / "src" / "autospider" / "graph" / "nodes" / "capability_nodes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "AggregateResultsUseCase" in source
+    assert "CollectUrlsUseCase" in source
+    assert "GenerateCollectionConfigUseCase" in source
+    assert "BatchCollectUrlsUseCase" in source
+    assert "ExtractFieldsUseCase" in source
+    assert "ExecutePipelineUseCase" in source
+    assert "PlanUseCase" in source
+    assert "CollectionService" not in source
+    assert "FieldService" not in source
+    assert "PlanningService" not in source
+    assert "AggregationService" not in source
+
+
+def test_storage_query_services_are_used_on_main_path():
+    entry_source = (
+        PROJECT_ROOT / "src" / "autospider" / "graph" / "nodes" / "entry_nodes.py"
+    ).read_text(encoding="utf-8")
+    detail_worker_source = (
+        PROJECT_ROOT / "src" / "autospider" / "field" / "detail_page_worker.py"
+    ).read_text(encoding="utf-8")
+
+    assert "TaskRunQueryService" in entry_source
+    assert "TaskRegistry" not in entry_source
+    assert "FieldXPathQueryService" in detail_worker_source
+    assert "FieldXPathWriteService" in detail_worker_source
+
+
+def test_legacy_storage_and_browser_modules_are_removed():
+    assert not (PROJECT_ROOT / "src" / "autospider" / "common" / "storage" / "task_registry.py").exists()
+    assert not (
+        PROJECT_ROOT / "src" / "autospider" / "common" / "storage" / "field_xpath_registry.py"
+    ).exists()
+    assert not (PROJECT_ROOT / "src" / "autospider" / "common" / "browser" / "session.py").exists()
 
 
 def test_task_run_query_service_module_is_removed():

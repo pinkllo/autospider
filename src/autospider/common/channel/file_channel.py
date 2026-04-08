@@ -54,15 +54,13 @@ class FileURLChannel(URLChannel):
         self._load_cursor()
 
     async def publish(self, url: str) -> None:
-        """发布新的 URL 到通道中。
-        
-        注意:
-            目前设计中，URL 已经由各采集器（如 ProgressPersistence）追加到 urls.txt 文件中。
-            此处为了避免重复写入或写冲突，将其作为无操作空函数 (no-op) 对待。
-        """
-        # URLs are already appended by ProgressPersistence in collectors.
-        # Keep publish as a no-op to avoid duplicate file writes.
-        return None
+        """发布新的 URL 到通道中。"""
+        normalized = str(url or "").strip()
+        if not normalized or self._sealed:
+            return
+        self.urls_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.urls_file.open("a", encoding="utf-8") as handle:
+            handle.write(f"{normalized}\n")
 
     async def fetch(self, max_items: int, timeout_s: float | None) -> list[URLTask]:
         """批量获取待处理的 URL 任务。
@@ -252,6 +250,18 @@ class FileURLChannel(URLChannel):
         self._read_new_lines()
         self._maybe_commit()
         return bool(self._sealed and not self._pending and not self._inflight)
+
+    async def list_existing_urls(self) -> list[str]:
+        if not self.urls_file.exists():
+            return []
+        try:
+            lines = self.urls_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        return [line.strip() for line in lines if line.strip()]
+
+    def persists_published_urls(self) -> bool:
+        return True
 
     async def close_with_error(self, reason: str) -> None:
         _ = reason

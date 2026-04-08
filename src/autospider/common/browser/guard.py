@@ -5,22 +5,28 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Sequence
 
 from loguru import logger
 from playwright.async_api import Page
 
 from .handlers.base import BaseAnomalyHandler
 from .intervention import BrowserInterventionRequired
-from .registry import get_handlers
 from .task_utils import create_monitored_task
 
 
 class PageGuard:
     """页面巡检员。"""
 
-    def __init__(self, intervention_mode: str = "blocking", thread_id: str = ""):
+    def __init__(
+        self,
+        intervention_mode: str = "blocking",
+        thread_id: str = "",
+        handlers: Sequence[BaseAnomalyHandler] | None = None,
+    ):
         self.intervention_mode = intervention_mode
         self.thread_id = thread_id
+        self.handlers = list(handlers or [])
         self._is_handling = False
         self._lock = asyncio.Lock()
         self._poll_tasks: dict[int, asyncio.Task] = {}
@@ -38,8 +44,7 @@ class PageGuard:
             if self._is_handling:
                 return
 
-            handlers = get_handlers()
-            for handler in handlers:
+            for handler in self.handlers:
                 try:
                     if await handler.detect(page):
                         logger.warning(f"[PageGuard] 检测到异常状态: {handler.name}")

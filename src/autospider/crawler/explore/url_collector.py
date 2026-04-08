@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
     from ...common.channel.base import URLChannel
-    from ...common.storage.redis_manager import RedisQueueManager
     from ...common.types import SoMSnapshot
 
 
@@ -59,7 +58,6 @@ class URLCollector(BaseCollector):
         max_pages: int | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
-        redis_manager: "RedisQueueManager | None" = None,
         persist_progress: bool = True,
         skill_runtime: SkillRuntime | None = None,
         selected_skills_context: str = "",
@@ -73,7 +71,6 @@ class URLCollector(BaseCollector):
             execution_brief=execution_brief,
             output_dir=output_dir,
             url_channel=url_channel,
-            redis_manager=redis_manager,
             target_url_count=target_url_count,
             max_pages=max_pages,
             persist_progress=persist_progress,
@@ -139,7 +136,7 @@ class URLCollector(BaseCollector):
             if new_visits:
                 logger.info("[URLCollector] 本页新增样本 %s 条", len(new_visits))
 
-            self._save_progress()
+            self.save_running_progress()
 
             if len(self.collected_urls) >= self.target_url_count:
                 logger.info("[URLCollector] 已达到目标 URL 数量")
@@ -185,7 +182,7 @@ class URLCollector(BaseCollector):
         crawler_script = await self._generate_crawler_script()
         result = self._create_result()
         await self._save_result(result, crawler_script)
-        self._save_progress_status(status="COMPLETED", append_urls=True)
+        self.save_progress_status(status="COMPLETED")
         return result
 
     def _initialize_handlers(self) -> None:
@@ -309,9 +306,8 @@ class URLCollector(BaseCollector):
                 continue
 
             if url not in self.collected_urls:
-                self.collected_urls.append(url)
-                await self._publish_url(url)
-                page_urls.append(url)
+                if await self.remember_collected_url(url):
+                    page_urls.append(url)
 
             if url in self.visited_detail_urls:
                 continue
@@ -378,7 +374,7 @@ class URLCollector(BaseCollector):
                 )
                 return False
 
-            self._save_progress()
+            self.save_running_progress()
             if page_index == validation_pages - 1:
                 break
             if not await self._advance_to_next_page():
@@ -485,12 +481,7 @@ class URLCollector(BaseCollector):
         result.created_at = str((persisted or data).get("created_at") or result.created_at)
         logger.info(f"[Save] 结果已保存到: {output_file}")
 
-        urls_file = self.output_dir / "urls.txt"
-        payload = "\n".join(result.collected_urls)
-        if payload:
-            payload += "\n"
-        write_text_if_changed(urls_file, payload)
-        logger.info(f"[Save] URL 列表已保存到: {urls_file}")
+        self.url_publish_service.write_snapshot(result.collected_urls)
 
         if crawler_script:
             script_file = self.output_dir / "spider.py"

@@ -1,4 +1,4 @@
-"""Result aggregation service."""
+"""聚合 use case。"""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ from typing import Any, Callable
 from ..contracts import AggregationReport, ExecutionContext
 from ..domain.planning import TaskPlan
 from ..pipeline.aggregator import ResultAggregator
-from .service_utils import build_artifact
+from .helpers import build_artifact
 
 
-class AggregationService:
-    """Aggregates subtask outputs after dispatch completes."""
+class AggregateResultsUseCase:
+    """调度结束后的结果聚合入口。"""
 
     def __init__(
         self,
@@ -28,15 +28,19 @@ class AggregationService:
         *,
         context: ExecutionContext,
         task_plan: TaskPlan,
+        subtask_results: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        aggregate_result = AggregationReport.model_validate(self._aggregator_cls().aggregate(
-            plan=task_plan,
-            output_dir=context.request.output_dir,
-        ))
+        aggregate_result = AggregationReport.model_validate(
+            self._aggregator_cls().aggregate(
+                plan=task_plan,
+                output_dir=context.request.output_dir,
+                subtask_results=list(subtask_results or []),
+            )
+        )
         output_dir = Path(context.request.output_dir)
         report = aggregate_result.model_dump(mode="python")
         return {
-            "aggregate_result": report,
+            "data": {"aggregate_result": report},
             "summary": {
                 "merged_items": aggregate_result.merged_items,
                 "unique_urls": aggregate_result.unique_urls,
@@ -45,7 +49,6 @@ class AggregationService:
                 "failed_subtasks": aggregate_result.failed_subtasks,
                 "conflict_count": aggregate_result.conflict_count,
             },
-            "result": report,
             "artifacts": [
                 self._artifact_builder("merged_results", output_dir / "merged_results.jsonl"),
                 self._artifact_builder("merged_summary", output_dir / "merged_summary.json"),

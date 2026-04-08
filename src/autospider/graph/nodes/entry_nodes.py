@@ -17,7 +17,7 @@ from ...common.llm import TaskClarifier
 from ...common.llm.streaming import ainvoke_with_stream
 from ...common.logger import get_logger
 from ...common.protocol import extract_json_dict_from_llm_payload
-from ...common.storage.task_registry import TaskRegistry
+from ...common.storage.task_run_query_service import TaskRunQueryService
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ...common.validators import validate_task_description, validate_url
@@ -298,8 +298,7 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
     mode = state.get("entry_mode")
     if not mode:
         return _fatal("missing_entry_mode", "缺少 entry_mode")
-    valid_modes = {"chat_pipeline", "pipeline_run"}
-    if str(mode) not in valid_modes:
+    if str(mode) != "chat_pipeline":
         return _fatal("invalid_entry_mode", f"不支持的 entry_mode: {mode}")
     return {
         **_ok({"entry_mode": mode}),
@@ -309,7 +308,7 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
-    """pipeline-run 参数归一化。"""
+    """执行参数归一化。"""
     normalized = _apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
     return {
         **_ok({"normalized": True}),
@@ -693,7 +692,7 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     # 1. 查找历史任务
     cli_args = dict(state.get("cli_args") or {})
     output_dir = str(cli_args.get("output_dir") or "output")
-    registry = TaskRegistry()
+    registry = TaskRunQueryService()
     history = registry.find_by_url(list_url)
 
     if not history:

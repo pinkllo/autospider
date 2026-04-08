@@ -1,22 +1,22 @@
-"""Planning service."""
+"""Planning use case。"""
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..common.browser.runtime import BrowserRuntimeSession
 from ..contracts import ExecutionRequest
-from ..common.browser import BrowserSession
 from ..common.experience import SkillRuntime
 from ..crawler.planner import TaskPlanner
 
 
-class PlanningService:
-    """Coordinates planner session lifecycle and skill selection."""
+class PlanUseCase:
+    """规划阶段应用入口。"""
 
     def __init__(
         self,
         *,
-        browser_session_cls: type = BrowserSession,
+        browser_session_cls: type = BrowserRuntimeSession,
         skill_runtime_cls: type = SkillRuntime,
         planner_cls: type = TaskPlanner,
         session_options_builder: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
@@ -28,13 +28,7 @@ class PlanningService:
 
     async def execute(self, *, request: ExecutionRequest) -> dict[str, Any]:
         if self._session_options_builder is None:
-            session_options = {
-                "headless": request.headless,
-                "guard_intervention_mode": request.guard_intervention_mode,
-                "guard_thread_id": request.guard_thread_id,
-                "budget_key": request.execution_id or request.guard_thread_id,
-                "global_browser_budget": request.global_browser_budget,
-            }
+            session_options = self._browser_session_cls.build_options(request)
         else:
             session_options = self._session_options_builder(
                 {"thread_id": request.guard_thread_id},

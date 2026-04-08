@@ -17,19 +17,17 @@ AutoSpider 是一个基于 `LangGraph + Playwright + SoM(Set-of-Mark)` 的纯视
 
 ## 🏗️ 系统架构
 
-AutoSpider 采用基于 LangGraph 的状态图架构，通过统一入口节点根据不同的 `entry_mode` 进行路由分发。对外 CLI 只保留 3 个主命令；在当前实现中，`chat-pipeline` 是主要用户路径，chat 发起的任务会固定先进入 planning，再进入 multi-dispatch：
+AutoSpider 采用基于 LangGraph 的状态图架构，通过统一入口节点进入 `chat-pipeline` 主链路。当前对外执行主路径已收敛为 `chat-pipeline`；`resume` 与 `db-init` 仅作为运维命令保留。在当前实现中，chat 发起的任务会固定先进入 planning，再进入 multi-dispatch：
 
 ```mermaid
 graph LR
   A["🚀 CLI 入口"] --> B["🔀 route_entry<br/>入口路由"]
   B --> C["💬 聊天交互路线"]
   B --> D["🔧 单流管道路线"]
-  B --> E["🛠️ 基础能力节点"]
   B --> F["🧠 多任务规划路线"]
 
   C --> G["📤 收尾整理"]
   D --> G
-  E --> G
   F --> G
   G --> H["🔴 结束"]
 ```
@@ -38,15 +36,11 @@ graph LR
 
 ### 分支路线说明
 
-| 入口模式            | 执行路线                                                        | 功能说明                          |
-| :------------------ | :-------------------------------------------------------------- | :-------------------------------- |
-| `chat_pipeline`   | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 自然语言多轮交互后进入 planning-first 并发执行 |
-| `pipeline_run`    | normalize_pipeline_params → run_pipeline_node                  | 🔧 内部 / 兼容 direct pipeline 路径       |
-| `collect_urls`    | collect_urls_node                                               | 🔗 内部 URL 收集能力              |
-| `generate_config` | generate_config_node                                            | ⚙️ 内部配置生成能力             |
-| `batch_collect`   | batch_collect_node                                              | 📦 内部批量采集能力               |
-| `field_extract`   | field_extract_node                                              | 🔍 内部字段提取能力               |
-| `multi_pipeline`  | plan_node → multi_dispatch_subgraph → aggregate_node          | 🧠 智能规划 + 并发分发 + 结果聚合 |
+| 入口模式          | 执行路线                                                                 | 功能说明                                  |
+| :---------------- | :----------------------------------------------------------------------- | :---------------------------------------- |
+| `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 正式主链路：自然语言澄清后进入 planning-first 并发执行 |
+
+> `collect_urls`、`generate_config`、`batch_collect`、`field_extract`、`multi_pipeline` 等旧内部能力节点不再作为正式入口维护；如需保留，仅视为迁移期内部实现细节。
 
 ## ⚙️ 运行要求
 
@@ -100,17 +94,7 @@ PIPELINE_MODE=memory
 autospider chat-pipeline -r "帮我采集 example 网站所有分类的公告列表，字段包含标题和发布时间"
 ```
 
-### 1) 多分类并行采集
-
-```bash
-autospider multi-pipeline \
-  --site-url "https://example.com" \
-  --request "爬取全站所有分类的公告数据" \
-  --fields-file fields.json \
-  --output output
-```
-
-### 2) 恢复中断执行
+### 1) 恢复中断执行
 
 ```bash
 autospider resume --thread-id "<thread_id>"
@@ -120,8 +104,8 @@ autospider resume --thread-id "<thread_id>"
 
 ```text
 src/autospider/
-├── cli.py                     # 命令行入口 (chat-pipeline / multi-pipeline / resume)
-├── graph/                     # LangGraph 状态图编排层
+├── cli.py                     # 命令行入口 (chat-pipeline / resume / db-init)
+├── graph/                     # LangGraph 状态图编排层（主图/恢复/汇总适配）
 │   ├── main_graph.py          #   主图构建与路由逻辑
 │   ├── runner.py              #   GraphRunner 统一执行入口
 │   ├── state.py               #   GraphState 状态定义
@@ -130,9 +114,10 @@ src/autospider/
 │       ├── entry_nodes.py     #     入口路由 / 参数归一化 / 对话澄清
 │       ├── capability_nodes.py#     各能力执行节点
 │       └── shared_nodes.py    #     共享收尾节点 (Artifact/Summary/Finalize)
-├── common/                    # 通用基础设施
+├── application/               # 应用层 use case（plan / dispatch / execute / aggregate）
+├── common/                    # 过渡期通用基础设施（后续逐步拆分，不再新增业务模块）
 │   ├── config.py              #   全局配置管理
-│   ├── browser/               #   BrowserSession 浏览器会话管理
+│   ├── browser/               #   BrowserRuntimeSession 主生命周期抽象（BrowserSession 兼容层）
 │   ├── channel/               #   消息队列 (memory / file / redis)
 │   ├── llm/                   #   LLM 对话澄清 (TaskClarifier) 与决策器
 │   ├── som/                   #   Set-of-Mark 视觉标注引擎
@@ -151,7 +136,7 @@ src/autospider/
 │   ├── field_decider.py       #   字段决策与挽救机制
 │   ├── batch_field_extractor.py#  批量字段提取
 │   └── batch_xpath_extractor.py#  批量 XPath 提取
-├── pipeline/                  # 采集执行流水线
+├── pipeline/                  # 单子任务执行流水线
 │   ├── aggregator.py          #   ResultAggregator 结果聚合器
 │   ├── worker.py              #   SubTaskWorker 子任务执行单元
 │   └── runner.py              #   Pipeline 生产者-消费者运行器
@@ -164,6 +149,10 @@ src/autospider/
     ├── xpath_pattern.yaml     #   XPath 归纳提示词
     └── decider.yaml           #   字段决策提示词
 ```
+
+> 当前约束：
+> `application/` 是主链唯一业务入口层；历史兼容入口 `BrowserSession`、
+> `TaskRegistry`、`FieldXPathRegistry` 与旧 service facade 已移除。
 
 ## 🧪 开发与测试
 

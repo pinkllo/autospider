@@ -9,7 +9,7 @@ from autospider.common.config import config
 from autospider.common.db.engine import close_db, get_engine, init_db, session_scope
 from autospider.common.db.models import TaskRecord, TaskRunItem, TaskRunValidationFailure
 from autospider.common.db.repositories import TaskRepository, TaskRunPayload
-from autospider.common.storage.task_registry import TaskRegistry
+from autospider.common.storage.task_run_query_service import TaskRunQueryService
 
 
 def _sqlite_url(db_path: Path) -> str:
@@ -142,7 +142,7 @@ def test_repository_persists_run_and_registry_reads_reusable_history(monkeypatch
         assert session.query(TaskRunItem).count() == 2
         assert session.query(TaskRunValidationFailure).count() == 1
 
-    registry = TaskRegistry()
+    registry = TaskRunQueryService()
     history = registry.find_by_url("https://example.com/list?page=9")
 
     assert len(history) == 1

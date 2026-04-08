@@ -1,8 +1,8 @@
-"""LLM module shared across crawler and field."""
+"""LLM package exports with lazy loading to avoid import cycles."""
 
-from .decider import LLMDecider
+from __future__ import annotations
+
 from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
-from .task_clarifier import TaskClarifier
 
 __all__ = [
     "LLMDecider",
@@ -11,3 +11,15 @@ __all__ = [
     "ClarificationResult",
     "ClarifiedTask",
 ]
+
+
+def __getattr__(name: str):
+    if name == "LLMDecider":
+        from .decider import LLMDecider
+
+        return LLMDecider
+    if name == "TaskClarifier":
+        from .task_clarifier import TaskClarifier
+
+        return TaskClarifier
+    raise AttributeError(name)

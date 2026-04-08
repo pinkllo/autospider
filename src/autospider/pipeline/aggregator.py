@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from ..common.db.engine import session_scope
 from ..common.db.repositories import TaskRepository
@@ -16,25 +17,33 @@ from ..contracts import (
     AggregationSubtaskDetail,
 )
 from ..domain.planning import SubTask, SubTaskStatus, TaskPlan
+from ..domain.runtime import SubTaskRuntimeState
 
 logger = get_logger(__name__)
+
+EXCLUDED_SUBTASK_STATUSES = frozenset({SubTaskStatus.NO_DATA})
 
 
 class ResultAggregator:
     """合并所有子任务的采集结果。"""
 
     @staticmethod
-    def _resolve_eligibility(subtask: SubTask) -> tuple[AggregationEligibility, str]:
-        summary = dict(getattr(subtask, "context", {}) or {})
+    def _resolve_eligibility(
+        subtask: SubTask,
+        runtime_state: SubTaskRuntimeState | None,
+    ) -> tuple[AggregationEligibility, str]:
+        if runtime_state is None:
+            return AggregationEligibility.FAILED, "missing_runtime_state"
+        if subtask.status in EXCLUDED_SUBTASK_STATUSES:
+            return AggregationEligibility.EXCLUDED, f"status_{subtask.status.value}"
         if subtask.status != SubTaskStatus.COMPLETED:
             return AggregationEligibility.FAILED, f"status_{subtask.status.value}"
-        if not summary:
-            return AggregationEligibility.FAILED, "missing_subtask_context"
-        if str(summary.get("durability_state") or "").strip().lower() != "durable":
+        summary = runtime_state.summary
+        if str(summary.durability_state or "").strip().lower() != "durable":
             return AggregationEligibility.FAILED, "subtask_not_durable"
-        if not bool(summary.get("reliable_for_aggregation")):
+        if not bool(summary.reliable_for_aggregation):
             return AggregationEligibility.FAILED, "subtask_not_reliable"
-        execution_id = str(summary.get("execution_id") or "").strip()
+        execution_id = str(summary.execution_id or "").strip()
         if not execution_id:
             return AggregationEligibility.FAILED, "missing_execution_id"
         return AggregationEligibility.INCLUDED, ""
@@ -52,14 +61,24 @@ class ResultAggregator:
             if detail.eligibility == AggregationEligibility.INCLUDED
         }
 
-    def aggregate(self, plan: TaskPlan, output_dir: str) -> dict:
+    @staticmethod
+    def _runtime_state_map(subtask_results: list[dict[str, Any]] | None) -> dict[str, SubTaskRuntimeState]:
+        results: dict[str, SubTaskRuntimeState] = {}
+        for item in list(subtask_results or []):
+            state = item if isinstance(item, SubTaskRuntimeState) else SubTaskRuntimeState.model_validate(item)
+            results[state.subtask_id] = state
+        return results
+
+    def aggregate(self, plan: TaskPlan, output_dir: str, subtask_results: list[dict[str, Any]] | None = None) -> dict:
         seen_urls: set[str] = set()
         details: list[AggregationSubtaskDetail] = []
         failure_reasons: list[str] = []
         conflict_count = 0
+        runtime_state_map = self._runtime_state_map(subtask_results)
 
         for subtask in plan.subtasks:
-            eligibility, reason = self._resolve_eligibility(subtask)
+            runtime_state = runtime_state_map.get(subtask.id)
+            eligibility, reason = self._resolve_eligibility(subtask, runtime_state)
             detail = AggregationSubtaskDetail(
                 id=subtask.id,
                 name=subtask.name,
@@ -77,7 +96,7 @@ class ResultAggregator:
                     failure_reasons.append(f"{subtask.id}:{reason}")
                 continue
 
-            execution_id = str(getattr(subtask, "context", {}).get("execution_id") or "").strip()
+            execution_id = str(runtime_state.summary.execution_id if runtime_state else "").strip()
             if not execution_id:
                 detail.eligibility = AggregationEligibility.FAILED
                 detail.reason = "missing_execution_id"
@@ -115,7 +134,8 @@ class ResultAggregator:
                 if subtask.id not in included_ids:
                     continue
                 detail = next(item for item in details if item.id == subtask.id)
-                execution_id = str(getattr(subtask, "context", {}).get("execution_id") or "").strip()
+                runtime_state = runtime_state_map.get(subtask.id)
+                execution_id = str(runtime_state.summary.execution_id if runtime_state else "").strip()
                 items = self._load_execution_items(execution_id)
                 for item in items:
                     payload = dict(item.get("item") or {})

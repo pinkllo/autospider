@@ -246,7 +246,7 @@ def test_build_dispatch_summary_counts_expanded_tasks():
     assert summary["total_collected"] == 3
 
 
-def test_apply_result_to_plan_stringifies_runtime_context_flags():
+def test_apply_result_to_plan_keeps_runtime_flags_out_of_business_context():
     subtask = SubTask(
         id="leaf_001",
         name="工程建设",
@@ -263,7 +263,10 @@ def test_apply_result_to_plan_stringifies_runtime_context_flags():
     _apply_result_to_plan(
         plan,
         {
-            "id": subtask.id,
+            "subtask_id": subtask.id,
+            "name": subtask.name,
+            "list_url": subtask.list_url,
+            "task_description": subtask.task_description,
             "status": SubTaskStatus.COMPLETED.value,
             "summary": {
                 "reliable_for_aggregation": True,
@@ -275,14 +278,11 @@ def test_apply_result_to_plan_stringifies_runtime_context_flags():
         },
     )
 
-    assert subtask.context["reliable_for_aggregation"] == "true"
-    assert subtask.context["durably_persisted"] == "false"
-    assert subtask.context["durability_state"] == "durable"
-    assert subtask.context["execution_id"] == "exec-1"
-    assert subtask.context["outcome_type"] == "collected"
+    assert subtask.context == {}
+    assert subtask.status == SubTaskStatus.COMPLETED
 
 
-def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_children(monkeypatch):
+def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_children():
     parent = SubTask(
         id="expand_parent",
         name="工程建设",
@@ -338,25 +338,6 @@ def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_childr
         },
     )
 
-    class _FakeMutationResult:
-        def __init__(self, task_plan, dispatch_queue):
-            self.task_plan = task_plan
-            self.dispatch_queue = tuple(dispatch_queue)
-            self.plan_knowledge = "knowledge"
-
-    monkeypatch.setattr(
-        "autospider.graph.subgraphs.multi_dispatch.PlanMutationService.merge_expand_requests",
-        lambda self, *, plan, expand_requests, pending_queue, output_dir: _FakeMutationResult(
-            plan.model_copy(
-                update={
-                    "subtasks": [*plan.subtasks, child],
-                    "journal": [*plan.journal, *result_item["journal_entries"]],
-                }
-            ),
-            [pending.model_dump(mode="python"), child.model_dump(mode="python")],
-        ),
-    )
-
     merged = merge_dispatch_round(
         {
             "task_plan": plan,
@@ -378,4 +359,4 @@ def test_merge_dispatch_round_preserves_pending_queue_and_appends_runtime_childr
     assert [item["id"] for item in merged["dispatch_queue"]] == [pending.id, child.id]
     assert [subtask.id for subtask in merged["task_plan"].subtasks] == [parent.id, pending.id, child.id]
     assert merged["summary"]["expanded"] == 1
-    assert merged["task_plan"].journal[0]["action"] == "runtime_expand"
+    assert merged["task_plan"].journal[0].action == "runtime_expand"

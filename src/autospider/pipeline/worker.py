@@ -18,9 +18,9 @@ from ..common.logger import get_logger
 from ..contracts import ExecutionRequest, PipelineMode, SubtaskOutcomeType
 from ..domain.fields import FieldDefinition
 from ..domain.planning import SubTask, SubTaskMode, format_execution_brief
-from .runtime_controls import resolve_concurrency_settings
+from ..application.helpers import build_execution_context
 from ..services import RuntimeExpansionService
-from ..services.service_utils import build_execution_context
+from .runtime_controls import resolve_concurrency_settings
 
 logger = get_logger(__name__)
 

@@ -46,7 +46,6 @@ class LLMDecider:
         api_key: str | None = None,
         api_base: str | None = None,
         model: str | None = None,
-        history_screenshots: int = 3,  # 兼容参数：历史截图功能已移除
     ):
         self.api_key = api_key or config.llm.api_key
         self.api_base = api_base or config.llm.api_base
@@ -85,9 +84,6 @@ class LLMDecider:
         # 循环检测：记录最近的操作序列
         self.recent_action_signatures: list[str] = []
         self.max_signature_history: int = 10
-
-        # 历史截图功能已移除，保留参数仅用于兼容旧调用方
-        _ = history_screenshots
 
     async def decide(
         self,

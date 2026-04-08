@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..common.browser import BrowserSession
+from ..common.browser.runtime import BrowserRuntimeSession
 from ..contracts import ExpandRequest
 from ..crawler.planner import TaskPlanner
 from ..domain.planning import SubTask, SubTaskMode
@@ -24,7 +24,7 @@ class RuntimeExpansionService:
     def __init__(
         self,
         *,
-        browser_session_cls: type = BrowserSession,
+        browser_session_cls: type = BrowserRuntimeSession,
         planner_cls: type = TaskPlanner,
     ) -> None:
         self._browser_session_cls = browser_session_cls

@@ -7,17 +7,19 @@ from typing import Any, Awaitable, Callable
 
 from langgraph.types import interrupt
 
+from ...application import (
+    AggregateResultsUseCase,
+    BatchCollectUrlsUseCase,
+    CollectUrlsUseCase,
+    ExecutePipelineUseCase,
+    ExtractFieldsUseCase,
+    GenerateCollectionConfigUseCase,
+    PlanUseCase,
+)
 from ...contracts import AggregationFailure
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...domain.planning import TaskPlan
-from ...services import (
-    AggregationService,
-    CollectionService,
-    FieldService,
-    PipelineExecutionService,
-    PlanningService,
-)
-from ...services.service_utils import build_execution_context, build_execution_request
+from ...application.helpers import build_execution_context, build_execution_request
 
 RETRY_DELAYS = (1.0, 2.0)
 
@@ -162,7 +164,7 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await PipelineExecutionService().execute(request=request)
+            service_result = await ExecutePipelineUseCase().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -190,15 +192,15 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await CollectionService().collect_urls(request=request)
+            use_case_result = await CollectUrlsUseCase().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
         return {
-            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-            "collected_urls": list(service_result.get("collected_urls") or []),
-            "collection_progress": dict(service_result.get("collection_progress") or {}),
-            "summary": dict(service_result.get("summary") or {}),
+            **_ok(dict(use_case_result.get("data") or {}), list(use_case_result.get("artifacts") or [])),
+            "collected_urls": list(dict(use_case_result.get("data") or {}).get("collected_urls") or []),
+            "collection_progress": dict(dict(use_case_result.get("data") or {}).get("collection_progress") or {}),
+            "summary": dict(use_case_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="collect_urls_failed")
@@ -211,14 +213,14 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await CollectionService().generate_config(request=request)
+            use_case_result = await GenerateCollectionConfigUseCase().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
         return {
-            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-            "collection_config": dict(service_result.get("collection_config") or {}),
-            "summary": dict(service_result.get("summary") or {}),
+            **_ok(dict(use_case_result.get("data") or {}), list(use_case_result.get("artifacts") or [])),
+            "collection_config": dict(dict(use_case_result.get("data") or {}).get("collection_config") or {}),
+            "summary": dict(use_case_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="generate_config_failed")
@@ -232,19 +234,19 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await CollectionService().batch_collect(
+            use_case_result = await BatchCollectUrlsUseCase().execute(
                 request=request,
-                state={"collection_config": collection_config},
+                collection_config=collection_config,
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
         return {
-            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-            "collection_config": dict(service_result.get("collection_config") or {}),
-            "collected_urls": list(service_result.get("collected_urls") or []),
-            "collection_progress": dict(service_result.get("collection_progress") or {}),
-            "summary": dict(service_result.get("summary") or {}),
+            **_ok(dict(use_case_result.get("data") or {}), list(use_case_result.get("artifacts") or [])),
+            "collection_config": dict(dict(use_case_result.get("data") or {}).get("collection_config") or {}),
+            "collected_urls": list(dict(use_case_result.get("data") or {}).get("collected_urls") or []),
+            "collection_progress": dict(dict(use_case_result.get("data") or {}).get("collection_progress") or {}),
+            "summary": dict(use_case_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="batch_collect_failed")
@@ -258,18 +260,18 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await FieldService().execute(
+            use_case_result = await ExtractFieldsUseCase().execute(
                 request=request,
-                state={"collected_urls": collected_urls},
+                collected_urls=collected_urls,
             )
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
         return {
-            **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-            "fields_config": list(service_result.get("fields_config") or []),
-            "xpath_result": service_result.get("xpath_result"),
-            "summary": dict(service_result.get("summary") or {}),
+            **_ok(dict(use_case_result.get("data") or {}), list(use_case_result.get("artifacts") or [])),
+            "fields_config": list(dict(use_case_result.get("data") or {}).get("fields_config") or []),
+            "xpath_result": dict(use_case_result.get("data") or {}).get("xpath_result"),
+            "summary": dict(use_case_result.get("summary") or {}),
         }
 
     node_result = await _run_with_retry(_runner, error_code="field_extract_failed")
@@ -282,7 +284,7 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
     async def _runner() -> dict[str, Any]:
         try:
-            service_result = await PlanningService().execute(request=request)
+            service_result = await PlanUseCase().execute(request=request)
         except BrowserInterventionRequired as exc:
             return {"__browser_intervention__": exc.payload}
 
@@ -328,11 +330,13 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
     request = build_execution_request(params, thread_id=_thread_id(state))
     context = build_execution_context(request)
     dispatch_summary = dict(state.get("summary") or {})
+    subtask_results = list(state.get("subtask_results") or [])
 
     try:
-        service_result = AggregationService().execute(
+        service_result = AggregateResultsUseCase().execute(
             context=context,
             task_plan=task_plan,
+            subtask_results=subtask_results,
         )
     except AggregationFailure as exc:
         report = exc.report.model_dump(mode="python")
@@ -355,16 +359,17 @@ async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
+    aggregate_data = dict(service_result.get("data") or {})
     summary = _merge_summary(dispatch_summary, dict(service_result.get("summary") or {}))
     return {
-        **_ok(_node_payload(service_result), _node_artifacts(service_result)),
-        "aggregate_result": dict(service_result.get("aggregate_result") or {}),
+        **_ok(aggregate_data, _node_artifacts(service_result)),
+        "aggregate_result": dict(aggregate_data.get("aggregate_result") or {}),
         "summary": summary,
         "result": {
             "status": "ok",
-            "data": dict(service_result.get("result") or {}),
+            "data": aggregate_data,
             "summary": summary,
-            "aggregate_result": dict(service_result.get("aggregate_result") or {}),
+            "aggregate_result": dict(aggregate_data.get("aggregate_result") or {}),
             "artifacts": _node_artifacts(service_result),
         },
     }

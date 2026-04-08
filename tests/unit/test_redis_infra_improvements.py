@@ -6,7 +6,7 @@ from autospider.common.config import config
 from autospider.common.storage import redis_pool
 from autospider.contracts import ExecutionRequest, PipelineMode
 from autospider.pipeline import runner as pipeline_runner
-from autospider.services.service_utils import build_execution_context
+from autospider.application.helpers import build_execution_context
 
 
 class _FakePage:
@@ -26,11 +26,40 @@ class _FakeBrowserSession:
 
 
 class _ExplodingChannel:
+    def __init__(self):
+        self.sealed = False
+
+    async def seal(self):
+        self.sealed = True
+
+    async def is_drained(self):
+        return self.sealed
+
+    async def close_with_error(self, reason: str):
+        return None
+
     async def close(self):
         return None
 
     async def fetch(self, *args, **kwargs):
-        raise RuntimeError("stop consumer")
+        return []
+
+
+class _NoopTracker:
+    def __init__(self, execution_id: str):
+        self.execution_id = execution_id
+
+    async def set_total(self, total: int):
+        return None
+
+    async def record_success(self, url: str = ""):
+        return None
+
+    async def record_failure(self, url: str = "", error: str = ""):
+        return None
+
+    async def mark_done(self, final_status: str = "completed"):
+        return None
 
 
 @pytest.mark.asyncio
@@ -55,12 +84,15 @@ async def test_run_pipeline_uses_run_scoped_redis_prefix(monkeypatch, tmp_path):
 
     def _fake_create_url_channel(**kwargs):
         captured["create_url_channel_kwargs"] = kwargs
-        return _ExplodingChannel(), None
+        return _ExplodingChannel()
 
-    monkeypatch.setattr(pipeline_runner, "BrowserSession", _FakeBrowserSession)
+    monkeypatch.setattr(pipeline_runner, "BrowserRuntimeSession", _FakeBrowserSession)
     monkeypatch.setattr(pipeline_runner, "URLCollector", _FakeCollector)
     monkeypatch.setattr(pipeline_runner, "create_url_channel", _fake_create_url_channel)
+    monkeypatch.setattr(pipeline_runner, "TaskProgressTracker", _NoopTracker)
     monkeypatch.setattr(pipeline_runner, "_load_persisted_run_records", lambda execution_id: {})
+    monkeypatch.setattr(pipeline_runner, "_persist_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(pipeline_runner, "_persist_pipeline_records", lambda context, records: None)
     monkeypatch.setattr(pipeline_runner, "_commit_items_file", lambda items_path, records: None)
     monkeypatch.setattr(pipeline_runner, "_write_summary", lambda summary_path, summary: None)
     monkeypatch.setattr(config.pipeline, "mode", "redis", raising=False)

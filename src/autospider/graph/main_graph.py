@@ -1,7 +1,7 @@
 """
 MainGraph：主链路图编排。
 该模块负责构建主状态图（Main Graph）。
-对外正式入口收敛为 `chat_pipeline`，`pipeline_run` 仅保留为内部测试/脚本直连路径。
+对外正式入口收敛为 `chat_pipeline`。
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from langgraph.graph import END, StateGraph
 from .nodes.capability_nodes import (
     aggregate_node,
     plan_node,
-    run_pipeline_node,
 )
 from .nodes.entry_nodes import (
     chat_clarify,
@@ -21,7 +20,6 @@ from .nodes.entry_nodes import (
     chat_history_match,
     chat_review_task,
     chat_prepare_execution_handoff,
-    normalize_pipeline_params,
     route_entry,
 )
 from .nodes.shared_nodes import build_artifact_index, build_summary, finalize_result
@@ -35,17 +33,12 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
     根据 entry_mode 选择图的入口分支。
 
     当前用户侧主路径是 `chat_pipeline`：先经过 chat 澄清/复用/review，
-    再进入 planning 与 multi-dispatch。`pipeline_run` 仅保留为内部直连路径。
+    再进入 planning 与 multi-dispatch。
     """
-    mapping = {
-        "chat_pipeline": "chat_clarify",
-        "pipeline_run": "normalize_pipeline_params",
-    }
-
     mode = str(state.get("entry_mode") or "")
-    if mode not in mapping:
+    if mode != "chat_pipeline":
         return "finalize_result"
-    return mapping[mode]
+    return "chat_clarify"
 
 
 
@@ -115,8 +108,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("chat_review_task", chat_review_task)
     graph.add_node("chat_prepare_execution_handoff", chat_prepare_execution_handoff)
     graph.add_node("multi_dispatch_subgraph", build_multi_dispatch_subgraph())
-    graph.add_node("normalize_pipeline_params", normalize_pipeline_params)
-    graph.add_node("run_pipeline_node", run_pipeline_node)
     graph.add_node("plan_node", plan_node)
     graph.add_node("aggregate_node", aggregate_node)
     graph.add_node("build_artifact_index", build_artifact_index)
@@ -129,7 +120,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
         resolve_entry_route,
         {
             "chat_clarify": "chat_clarify",
-            "normalize_pipeline_params": "normalize_pipeline_params",
             "finalize_result": "finalize_result",
         },
     )
@@ -159,13 +149,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
         resolve_node_outcome,
         {"ok": "plan_node", "error": "build_artifact_index"},
     )
-
-    graph.add_conditional_edges(
-        "normalize_pipeline_params",
-        resolve_node_outcome,
-        {"ok": "run_pipeline_node", "error": "build_artifact_index"},
-    )
-    graph.add_edge("run_pipeline_node", "build_artifact_index")
 
     graph.add_conditional_edges(
         "plan_node",

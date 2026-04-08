@@ -114,7 +114,7 @@ class GraphRunner:
         status = str(final_state.get("status") or snapshot_values.get("status") or "success")
         if interrupts:
             status = "interrupted"
-        elif status not in {"success", "partial_success", "failed"}:
+        elif status not in {"success", "partial_success", "failed", "no_data"}:
             status = "failed" if error else "success"
 
         result_state = dict(final_state.get("result") or snapshot_values.get("result") or {})
@@ -201,7 +201,14 @@ class GraphRunner:
                 "selected_skills": [],
             },
             "planning": {"status": "", "task_plan": None, "plan_knowledge": "", "summary": {}},
-            "dispatch": {"status": "", "task_plan": None, "plan_knowledge": "", "dispatch_result": {}, "summary": {}},
+            "dispatch": {
+                "status": "",
+                "task_plan": None,
+                "plan_knowledge": "",
+                "dispatch_result": {},
+                "subtask_results": [],
+                "summary": {},
+            },
             "result": {"status": "", "summary": {}, "data": {}, "artifacts": []},
             "error": None,
             "normalized_params": {},
@@ -217,6 +224,7 @@ class GraphRunner:
             "status": "",
             "error_code": "",
             "error_message": "",
+            "subtask_results": [],
         }
         return await self._invoke_with_graph(
             initial_state,

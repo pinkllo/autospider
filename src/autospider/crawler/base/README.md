@@ -9,7 +9,8 @@
 
 #### 主要功能：
 - **速率控制**：集成 `AdaptiveRateController` 实现自适应爬取频率。
-- **持久化管理**：集成 `ProgressPersistence` 负责保存和恢复采集进度。
+- **进度边界**：通过 `ProgressStore` 负责 `progress.json` 的保存、恢复和兼容性判断。
+- **URL 发布边界**：通过 `UrlPublishService` 统一负责 URL 发布、历史 URL 恢复和 `urls.txt` 的唯一写入口。
 - **组件集成**：提供了 URL 提取、LLM 决策、页面导航和分页处理的统一接口。
 - **路径管理**：自动创建输出目录和截图目录。
 - **状态跟踪**：记录已收集的 URL、导航步骤和公共 XPath。

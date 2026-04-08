@@ -6,9 +6,6 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from ..domain.planning import SubTask, SubTaskStatus, TaskPlan
-
-
 # ============================================================================
 # 输入参数
 # ============================================================================

@@ -12,7 +12,7 @@ from typing import Any
 
 from autospider.common.logger import get_logger
 from ..utils.file_utils import ensure_directory, file_exists, load_json
-from .idempotent_io import write_json_idempotent, write_text_if_changed
+from .idempotent_io import write_json_idempotent
 
 logger = get_logger(__name__)
 
@@ -241,7 +241,6 @@ class ProgressPersistence:
         ensure_directory(self.output_dir)
 
         self.progress_file = self.output_dir / "progress.json"
-        self.urls_file = self.output_dir / "urls.txt"
 
     def save_progress(self, progress: CollectionProgress) -> None:
         """保存进度"""
@@ -274,42 +273,6 @@ class ProgressPersistence:
             logger.error(f"[进度] 加载进度失败: {e}")
             raise RuntimeError(f"failed_to_load_collection_progress: {self.progress_file}") from e
 
-    def append_urls(self, urls: list[str]) -> None:
-        """追加URL到文件
-
-        Args:
-            urls: URL列表
-        """
-        if not urls:
-            return
-
-        # 读取已有URL(去重)
-        existing_urls = set()
-        if file_exists(self.urls_file):
-            existing_urls = set(self.urls_file.read_text(encoding="utf-8").strip().split("\n"))
-            existing_urls.discard("")  # 移除空字符串
-
-        # 追加新URL
-        new_urls = [url for url in urls if url not in existing_urls]
-        if new_urls:
-            merged_urls = sorted(existing_urls.union(new_urls))
-            payload = "\n".join(merged_urls)
-            if payload:
-                payload += "\n"
-            write_text_if_changed(self.urls_file, payload)
-
-    def load_collected_urls(self) -> list[str]:
-        """加载已收集的URL
-
-        Returns:
-            URL列表
-        """
-        if not file_exists(self.urls_file):
-            return []
-
-        urls = self.urls_file.read_text(encoding="utf-8").strip().split("\n")
-        return [url for url in urls if url]  # 过滤空字符串
-
     def has_checkpoint(self) -> bool:
         """检查是否存在checkpoint
 
@@ -322,8 +285,6 @@ class ProgressPersistence:
         """清除所有进度数据"""
         if file_exists(self.progress_file):
             self.progress_file.unlink()
-        if file_exists(self.urls_file):
-            self.urls_file.unlink()
 
 
 def load_collection_config(config_path: str | Path, *, strict: bool = True) -> CollectionConfig | None:

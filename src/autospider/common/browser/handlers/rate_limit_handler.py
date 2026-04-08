@@ -96,16 +96,3 @@ class RateLimitHandler(BaseAnomalyHandler):
             return urlparse(url).netloc.lower() or "unknown"
         except Exception:
             return "unknown"
-
-
-def _auto_register() -> None:
-    from ..registry import get_registry
-
-    registry = get_registry()
-    name = "频率限制退避"
-    if name in registry.get_all_handlers():
-        return
-    registry.register(RateLimitHandler())
-
-
-_auto_register()

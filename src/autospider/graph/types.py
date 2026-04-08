@@ -8,11 +8,10 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 PublicEntryMode = Literal["chat_pipeline"]
-InternalEntryMode = Literal["pipeline_run"]
-EntryMode = Literal["chat_pipeline", "pipeline_run"]
+EntryMode = PublicEntryMode
 
 NodeStatus = Literal["ok", "retryable", "fatal"]
-GraphStatus = Literal["success", "partial_success", "failed", "interrupted"]
+GraphStatus = Literal["success", "partial_success", "failed", "no_data", "interrupted"]
 
 
 class GraphError(BaseModel):
@@ -27,7 +26,7 @@ class GraphInput(BaseModel):
 
     entry_mode: EntryMode = Field(
         ...,
-        description="正式公开入口仅支持 chat_pipeline；pipeline_run 仅供内部脚本与测试使用。",
+        description="正式公开入口仅支持 chat_pipeline。",
     )
     cli_args: dict[str, Any] = Field(default_factory=dict)
     request_id: str = Field(default="")

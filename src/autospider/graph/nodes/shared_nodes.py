@@ -52,15 +52,20 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 def _resolve_summary_outcome_state(summary: dict[str, Any]) -> str:
     outcome_state = str(summary.get("outcome_state") or "").strip().lower()
-    if outcome_state in {"success", "partial_success", "failed", "no_data", "system_failure"}:
+    if outcome_state in {"success", "partial_success", "failed", "no_data"}:
         return outcome_state
+    if outcome_state == "system_failure":
+        return "failed"
 
     failed = int(summary.get("failed", 0) or summary.get("failed_count", 0) or 0)
     completed = int(summary.get("completed", 0) or summary.get("success_count", 0) or 0)
+    no_data = int(summary.get("no_data", 0) or 0)
     if failed > 0 and completed > 0:
         return "partial_success"
     if failed > 0:
         return "failed"
+    if no_data > 0 and completed <= 0:
+        return "no_data"
     return "success"
 
 def finalize_result(state: dict[str, Any]) -> dict[str, Any]:
@@ -75,10 +80,10 @@ def finalize_result(state: dict[str, Any]) -> dict[str, Any]:
         error_message = str(node_error.get("message") or "")
 
     result = dict(state.get("result") or {})
-    status = str(result.get("status") or "").strip().lower() or "success"
+    status = str(result.get("status") or "").strip().lower()
     if error_code:
         status = "failed"
-    elif not result.get("status"):
+    elif status not in {"success", "partial_success", "failed", "no_data", "interrupted"}:
         summary = dict(result.get("summary") or state.get("summary") or {})
         status = _resolve_summary_outcome_state(summary)
 

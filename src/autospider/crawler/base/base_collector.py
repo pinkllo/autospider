@@ -2,19 +2,21 @@
 
 抽取 URLCollector 和 BatchCollector 的公共逻辑，
 减少代码重复，提高可维护性。
+
+下一轮拆分入口已经固定：
+- ProgressStore：进度持久化 / 历史 URL 恢复
+- UrlPublishService：URL 去重后发布到 queue backend
 """
 
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...common.config import config
 from ...common.logger import get_logger
-from ...common.storage.persistence import CollectionProgress, ProgressPersistence
 from ..checkpoint import AdaptiveRateController
 from ..checkpoint.resume_strategy import ResumeCoordinator
 from ..collector import (
@@ -31,10 +33,11 @@ from ...common.som import (
     inject_and_scan,
 )
 from ...common.som.text_first import resolve_mark_ids_from_map
+from .progress_store import ProgressStore
+from .url_publish_service import UrlPublishService
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ...common.storage.redis_manager import RedisQueueManager
     from ...common.channel.base import URLChannel
 
 # 日志器
@@ -47,9 +50,12 @@ class BaseCollector(ABC):
     提供公共的收集逻辑：
     - 速率控制
     - 断点续爬
-    - Redis 持久化
+    - queue / 进度恢复边界
     - XPath/LLM 收集
     - 分页处理
+
+    注意：不要继续向这个基类新增 queue/progress/persistence 逻辑，
+    这些职责将在下一轮拆到 ProgressStore / UrlPublishService。
     """
 
     def __init__(
@@ -60,7 +66,6 @@ class BaseCollector(ABC):
         execution_brief: dict | None = None,
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
-        redis_manager: "RedisQueueManager | None" = None,
         target_url_count: int | None = None,
         max_pages: int | None = None,
         persist_progress: bool = True,
@@ -87,8 +92,6 @@ class BaseCollector(ABC):
 
         # 运行时数据存储
         self.collected_urls: list[str] = []
-        # 性能优化：记录已增量写入本地文件的 URL 数量，避免全量 I/O
-        self._last_appended_url_count: int = 0
         # 存储探索阶段产生的导航步骤（点击、输入等），用于在后续页面重放
         self.nav_steps: list[dict] = []
         # 存储自动发现的详情页 XPath，若存在则优先使用 XPath 模式提高效率
@@ -110,47 +113,17 @@ class BaseCollector(ABC):
         self.rate_controller = AdaptiveRateController()
         logger.info(f"速率控制器已初始化 (基础延迟: {self.rate_controller.base_delay}s)")
 
-        # 持久化管理器：负责保存/加载采集进度和 URL 列表
-        self.progress_persistence = ProgressPersistence(output_dir=output_dir)
-
         # 各核心功能处理器（采用延迟加载/初始化策略）
         self.url_extractor: URLExtractor | None = None  # URL 提取逻辑
         self.llm_decision_maker: LLMDecisionMaker | None = None  # LLM 决策逻辑
         self.navigation_handler: NavigationHandler | None = None  # 页面导航/重放逻辑
         self.pagination_handler: PaginationHandler | None = None  # 分页处理逻辑
 
-        # URL 通道（用于内存/文件/Redis pipeline）
-        self.url_channel = url_channel
-
-        # 分布式支持：Redis 任务队列管理器
-        self.redis_manager: "RedisQueueManager | None" = redis_manager
-        self._init_redis_manager()
-
-    def _init_redis_manager(self) -> None:
-        """根据配置文件初始化 Redis 任务队列管理器
-        
-        如果 config.redis.enabled 为 True，则尝试连接 Redis 并初始化管理器。
-        """
-        if self.redis_manager is not None:
-            return
-        if self.url_channel is not None:
-            return
-        if not config.redis.enabled:
-            return
-
-        try:
-            from ...common.storage.redis_manager import RedisQueueManager
-
-            self.redis_manager = RedisQueueManager(
-                host=config.redis.host,
-                port=config.redis.port,
-                password=config.redis.password,
-                db=config.redis.db,
-                key_prefix=config.redis.key_prefix,
-                logger=logger,
-            )
-        except ImportError:
-            logger.warning("Redis 依赖未安装，使用 pip install autospider[redis] 安装")
+        self.progress_store = ProgressStore(output_dir=output_dir)
+        self.url_publish_service = UrlPublishService(
+            output_dir=output_dir,
+            url_channel=url_channel,
+        )
 
     def _initialize_handlers(self) -> None:
         """初始化所有子处理器组件
@@ -209,67 +182,48 @@ class BaseCollector(ABC):
             if list_url:
                 self.navigation_handler.list_url = list_url
 
-    def _is_progress_compatible(self, progress: CollectionProgress | None) -> bool:
-        """验证加载的进度对象是否与当前任务匹配
-
-        防止在不同的 URL 或任务描述下错误地恢复进度。
-        """
-        if not progress:
-            return False
-        # 校验 URL 和任务描述是否一致
-        if progress.list_url and progress.list_url != self.list_url:
-            return False
-        if progress.task_description and progress.task_description != self.task_description:
-            return False
-        return True
-
-    async def _load_previous_urls(self) -> None:
-        """加载已采集的历史 URL 数据（支持 Redis 和本地文件多源加载）
-
-        此方法用于初始化 collected_urls 列表，实现断点续爬时的增量采集和去重。
-        """
-        loaded_urls: list[str] = []
-
-        # 1. 尝试从 Redis 加载
-        if self.redis_manager:
-            client = await self.redis_manager.connect()
-            if client:
-                items = await self.redis_manager.get_all_items()
-                urls = [data["url"] for data in items.values() if "url" in data]
-                if urls:
-                    loaded_urls.extend(urls)
-                    logger.info(f"从 Redis 加载了 {len(urls)} 个历史 URL")
-
-        # 2. 尝试从本地 urls.txt 加载
-        if self.persist_progress:
-            file_urls = self.progress_persistence.load_collected_urls()
-            if file_urls:
-                loaded_urls.extend(file_urls)
-                logger.info(f"从本地文件加载了 {len(file_urls)} 个历史 URL")
-
+    async def restore_collected_urls(self) -> None:
+        """加载已采集的历史 URL 数据。"""
+        loaded_urls = await self.url_publish_service.load_existing_urls()
         if not loaded_urls:
             return
-
-        # 3. 合并并去重
         existing = set(self.collected_urls)
-        new_urls = [url for url in loaded_urls if url and url not in existing]
+        new_urls = [url for url in loaded_urls if url not in existing]
         if new_urls:
             self.collected_urls.extend(new_urls)
             logger.info(f"合并后历史 URL 总数: {len(self.collected_urls)}")
 
-    async def _publish_url(self, url: str) -> None:
-        """发布新 URL 到通道或 Redis（如果配置）。"""
-        if self.url_channel:
-            try:
-                await self.url_channel.publish(url)
-            except Exception as e:
-                logger.warning(f"URL 通道发布失败: {e}")
+    async def remember_collected_url(self, url: str) -> bool:
+        """记录并发布一个新 URL。"""
+        normalized = str(url or "").strip()
+        if not normalized or normalized in self.collected_urls:
+            return False
+        self.collected_urls.append(normalized)
+        await self.url_publish_service.publish(normalized)
+        return True
+
+    def save_running_progress(self) -> None:
+        self.save_progress_status(status="RUNNING")
+
+    def save_progress_status(
+        self,
+        *,
+        status: str,
+        pause_reason: str | None = None,
+    ) -> None:
+        if not self.persist_progress:
             return
-        if self.redis_manager:
-            try:
-                await self.redis_manager.push_task(url)
-            except Exception as e:
-                logger.warning(f"Redis 推送失败: {e}")
+        current_page_num = self.pagination_handler.current_page_num if self.pagination_handler else 1
+        self.progress_store.save(
+            status=status,
+            pause_reason=pause_reason,
+            list_url=self.list_url,
+            task_description=self.task_description,
+            current_page_num=current_page_num,
+            collected_count=len(self.collected_urls),
+            backoff_level=self.rate_controller.current_level,
+            consecutive_success_pages=self.rate_controller.consecutive_success_count,
+        )
 
     async def _resume_to_target_page(
         self,
@@ -346,7 +300,7 @@ class BaseCollector(ABC):
                 self.rate_controller.record_success()
 
             # 实时保存进度
-            self._save_progress()
+            self.save_running_progress()
 
             if len(self.collected_urls) >= target_url_count:
                 break
@@ -386,9 +340,8 @@ class BaseCollector(ABC):
                 if self.url_extractor:
                     url = await self.url_extractor.extract_from_locator(locator, self.nav_steps)
                     if url and url not in self.collected_urls:
-                        self.collected_urls.append(url)
-                        await self._publish_url(url)
-                        logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
+                        if await self.remember_collected_url(url):
+                            logger.info(f"✓ [{i+1}/{count}] {url[:60]}...")
 
             return len(self.collected_urls) > urls_before
 
@@ -443,7 +396,7 @@ class BaseCollector(ABC):
             if page_success:
                 self.rate_controller.record_success()
 
-            self._save_progress()
+            self.save_running_progress()
 
             if len(self.collected_urls) >= target_url_count:
                 break
@@ -552,8 +505,7 @@ class BaseCollector(ABC):
                                     candidate, snapshot, nav_steps=self.nav_steps
                                 )
                                 if url and url not in self.collected_urls:
-                                    self.collected_urls.append(url)
-                                    await self._publish_url(url)
+                                    await self.remember_collected_url(url)
 
                 # 4. 统计更新情况
                 current_count = len(self.collected_urls)
@@ -577,61 +529,6 @@ class BaseCollector(ABC):
             self.rate_controller.apply_penalty()
 
         return page_success
-
-    def _save_progress(self) -> None:
-        """持久化当前采集状态和 URL 数据
-
-        此方法会保存：
-        - 采集状态（页码、URL 计数、速率等级等）到 progress.json
-        - 新发现的 URL 增量追加到 urls.txt
-        """
-        self._save_progress_status(status="RUNNING", append_urls=True)
-
-    def _save_progress_status(
-        self,
-        status: str,
-        pause_reason: str | None = None,
-        append_urls: bool = False,
-    ) -> None:
-        """按指定状态持久化进度。"""
-        if not self.persist_progress:
-            return
-        normalized_status = (status or "RUNNING").upper()
-        progress = CollectionProgress(
-            status=normalized_status,
-            pause_reason=pause_reason,
-            list_url=self.list_url,
-            task_description=self.task_description,
-            current_page_num=(
-                self.pagination_handler.current_page_num if self.pagination_handler else 1
-            ),
-            collected_count=len(self.collected_urls),
-            backoff_level=self.rate_controller.current_level,
-            consecutive_success_pages=self.rate_controller.consecutive_success_count,
-        )
-        self.progress_persistence.save_progress(progress)
-        if append_urls:
-            self._append_new_urls_to_progress()
-
-    def _append_new_urls_to_progress(self) -> None:
-        """将新增的 URL 增量保存到本地文件
-
-        采用增量模式而非全量覆写，以优化大规模采集时的性能。
-        """
-        if not self.collected_urls:
-            return
-
-        # 检查是否有新数据需要追加
-        if self._last_appended_url_count >= len(self.collected_urls):
-            return
-
-        # 仅切片获取新增部分
-        new_urls = self.collected_urls[self._last_appended_url_count :]
-        if new_urls:
-            self.progress_persistence.append_urls(new_urls)
-
-        # 更新计数器
-        self._last_appended_url_count = len(self.collected_urls)
 
     def _create_result(self) -> URLCollectorResult:
         """构建最终的收集结果对象

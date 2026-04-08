@@ -113,6 +113,28 @@ def test_graph_runner_invoke_interrupted(monkeypatch):
     assert result.interrupts == [{"id": "interrupt_1", "value": {"message": "need human"}}]
 
 
+def test_graph_runner_preserves_no_data_status(monkeypatch):
+    fake_graph = _FakeGraph(payload={"status": "no_data", "summary": {"outcome_state": "no_data"}})
+    monkeypatch.setattr(GraphRunner, "_compiled_graph", fake_graph)
+    monkeypatch.setattr("autospider.graph.runner.graph_checkpoint_enabled", lambda: False)
+
+    runner = GraphRunner()
+    result = asyncio.run(
+        runner.invoke(
+            GraphInput(
+                entry_mode="chat_pipeline",
+                cli_args={},
+                request_id="req_no_data",
+                invoked_at="2026-01-01T00:00:00",
+                thread_id="thread_no_data",
+            )
+        )
+    )
+
+    assert result.status == "no_data"
+    assert result.summary["outcome_state"] == "no_data"
+
+
 
 
 def test_graph_runner_inspect_requires_checkpoint():
@@ -129,7 +151,7 @@ def test_graph_runner_inspect_requires_checkpoint():
 def test_graph_runner_inspect_validates_snapshot_identity(monkeypatch):
     runner = GraphRunner()
     snapshot = _Snapshot(
-        values={"thread_id": "other-thread", "entry_mode": "pipeline_run"},
+        values={"thread_id": "other-thread", "entry_mode": "chat_pipeline"},
         config={"configurable": {"thread_id": "other-thread"}},
     )
     graph = _CheckpointGraph(snapshot)
