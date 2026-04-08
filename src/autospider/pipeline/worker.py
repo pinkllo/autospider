@@ -15,23 +15,31 @@ from pathlib import Path
 
 from ..common.config import config
 from ..common.logger import get_logger
-from ..contracts import ExecutionRequest, PipelineMode, SubtaskOutcomeType
+from ..pipeline.types import ExecutionRequest, PipelineMode, SubtaskOutcomeType
 from ..domain.fields import FieldDefinition
 from ..domain.planning import SubTask, SubTaskMode, format_execution_brief
-from ..application.helpers import build_execution_context
-from ..services import RuntimeExpansionService
+from ..pipeline.helpers import build_execution_context
+from ..crawler.planner.runtime import RuntimeExpansionService
 from .runtime_controls import resolve_concurrency_settings
 
 logger = get_logger(__name__)
 
 
-def _resolve_runtime_replan_max_children() -> int:
-    raw_value = config.planner.runtime_subtasks_max_children
+def _resolve_runtime_replan_max_children(raw_value: object | None) -> int:
+    candidate = config.planner.runtime_subtasks_max_children if raw_value is None else raw_value
     try:
-        resolved = int(raw_value or 0)
+        resolved = int(candidate or 0)
     except (TypeError, ValueError):
         resolved = 0
     return max(0, resolved)
+
+
+def _resolve_runtime_subtasks_use_main_model(raw_value: object | None) -> bool:
+    if raw_value is None:
+        return bool(config.planner.runtime_subtasks_use_main_model)
+    if isinstance(raw_value, bool):
+        return raw_value
+    return str(raw_value).strip().lower() not in {"0", "false", "no", "off", ""}
 
 
 class SubTaskWorker:
@@ -58,6 +66,8 @@ class SubTaskWorker:
         plan_journal: list[dict] | None = None,
         pipeline_mode: PipelineMode | None = None,
         runtime_expansion_service_cls: type | None = None,
+        runtime_subtask_max_children: int | None = None,
+        runtime_subtasks_use_main_model: bool | None = None,
     ):
         self.subtask = subtask
         self.raw_fields = fields
@@ -73,6 +83,8 @@ class SubTaskWorker:
         self.task_plan_snapshot = dict(task_plan_snapshot or {})
         self.plan_journal = list(plan_journal or [])
         self.pipeline_mode = pipeline_mode
+        self.runtime_subtask_max_children = runtime_subtask_max_children
+        self.runtime_subtasks_use_main_model = runtime_subtasks_use_main_model
         service_cls = runtime_expansion_service_cls or RuntimeExpansionService
         self.runtime_expansion_service = service_cls()
 
@@ -183,8 +195,8 @@ class SubTaskWorker:
             thread_id=self.thread_id,
             guard_intervention_mode=self.guard_intervention_mode,
             global_browser_budget=self._resolved_concurrency().global_browser_budget,
-            max_children=_resolve_runtime_replan_max_children(),
-            use_main_model=bool(config.planner.runtime_subtasks_use_main_model),
+            max_children=_resolve_runtime_replan_max_children(self.runtime_subtask_max_children),
+            use_main_model=_resolve_runtime_subtasks_use_main_model(self.runtime_subtasks_use_main_model),
         )
         journal_entries = self._normalize_runtime_journal_entries(expanded.journal_entries)
         return {

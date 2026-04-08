@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from ..common.db.engine import session_scope
 from ..common.db.repositories import TaskRepository
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent
-from ..contracts import (
+from .types import (
     AggregationEligibility,
     AggregationFailure,
     AggregationReport,
@@ -66,14 +65,15 @@ class ResultAggregator:
         }
 
     @staticmethod
-    def _runtime_state_map(subtask_results: list[dict[str, Any]] | None) -> dict[str, SubTaskRuntimeState]:
-        results: dict[str, SubTaskRuntimeState] = {}
-        for item in list(subtask_results or []):
-            state = item if isinstance(item, SubTaskRuntimeState) else SubTaskRuntimeState.model_validate(item)
-            results[state.subtask_id] = state
-        return results
+    def _runtime_state_map(subtask_results: list[SubTaskRuntimeState] | None) -> dict[str, SubTaskRuntimeState]:
+        return {state.subtask_id: state for state in list(subtask_results or [])}
 
-    def aggregate(self, plan: TaskPlan, output_dir: str, subtask_results: list[dict[str, Any]] | None = None) -> dict:
+    def aggregate(
+        self,
+        plan: TaskPlan,
+        output_dir: str,
+        subtask_results: list[SubTaskRuntimeState] | None = None,
+    ) -> dict:
         seen_urls: set[str] = set()
         details: list[AggregationSubtaskDetail] = []
         failure_reasons: list[str] = []
@@ -173,7 +173,8 @@ class ResultAggregator:
 
         if self._should_raise(report):
             raise AggregationFailure(report)
-        write_json_idempotent(summary_file, report.model_dump(mode="python"), volatile_keys=set())
+        serialized = report.model_dump(mode="json")
+        write_json_idempotent(summary_file, serialized, volatile_keys=set())
         if failure_reasons:
             logger.warning(
                 "[Aggregator] 部分子任务未参与合并: %s",
@@ -185,4 +186,4 @@ class ResultAggregator:
             report.unique_urls,
             report.eligible_subtasks,
         )
-        return report.model_dump(mode="python")
+        return serialized

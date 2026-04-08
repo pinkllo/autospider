@@ -71,6 +71,7 @@ class AgentConfig(BaseModel):
     max_fail_count: int = 3
     screenshot_dir: str = "screenshots"
     output_dir: str = "output"
+    skills_dir: str = Field(default_factory=lambda: os.getenv("AUTOSPIDER_SKILLS_DIR", "skills"))
 
 
 class RedisConfig(BaseModel):
@@ -349,6 +350,7 @@ class Config(BaseModel):
         """确保输出目录存在"""
         Path(self.agent.screenshot_dir).mkdir(parents=True, exist_ok=True)
         Path(self.agent.output_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.agent.skills_dir).mkdir(parents=True, exist_ok=True)
 
 
 def get_config(*, reload: bool = False) -> Config:

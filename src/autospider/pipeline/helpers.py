@@ -1,4 +1,4 @@
-"""Application-level request/context helpers."""
+"""Pipeline-facing execution helpers."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from ..common.config import config
+from ..common.storage.collection_persistence import CollectionConfig
 from ..common.storage.idempotent_io import write_json_idempotent
-from ..common.storage.persistence import CollectionConfig
-from ..contracts import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 from ..domain.fields import FieldDefinition
-from ..pipeline.runtime_controls import resolve_concurrency_settings
+from .runtime_controls import resolve_concurrency_settings
+from .types import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 
 
 def build_field_definitions(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
@@ -87,7 +87,6 @@ def build_execution_context(
     )
     infra = build_infra_config()
     pipeline_mode = request.pipeline_mode or infra.pipeline_mode_default
-    execution_id = str(request.execution_id or "").strip()
     return ExecutionContext(
         request=request,
         identity=identity,
@@ -97,7 +96,7 @@ def build_execution_context(
         max_concurrent=resolved.max_concurrent,
         global_browser_budget=resolved.global_browser_budget,
         resume_mode=request.resume_mode,
-        execution_id=execution_id,
+        execution_id=str(request.execution_id or "").strip(),
         selected_skills=tuple(list(request.selected_skills or [])),
         plan_knowledge=str(request.plan_knowledge or ""),
         task_plan_snapshot=dict(request.task_plan_snapshot or {}),
@@ -128,3 +127,4 @@ def serialize_xpath_result(raw_result: Any) -> dict[str, Any] | None:
         "total_urls": int(raw_result.get("total_urls", 0) or 0),
         "success_count": int(raw_result.get("success_count", 0) or 0),
     }
+

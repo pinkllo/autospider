@@ -68,7 +68,7 @@ def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
         return "error"
 
     conversation = dict(state.get("conversation") or {})
-    flow_state = str(conversation.get("flow_state") or state.get("chat_flow_state") or "")
+    flow_state = str(conversation.get("flow_state") or "")
     if flow_state == "needs_input":
         return "chat_collect_user_input"
     if flow_state == "ready":
@@ -83,7 +83,7 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
         return "error"
 
     conversation = dict(state.get("conversation") or {})
-    review_state = str(conversation.get("review_state") or state.get("chat_review_state") or "")
+    review_state = str(conversation.get("review_state") or "")
     if review_state == "approved":
         return "chat_prepare_execution_handoff"
     if review_state == "reclarify":

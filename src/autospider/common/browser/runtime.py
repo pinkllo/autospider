@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 
 from playwright.async_api import Page
 
-from ...contracts import ExecutionRequest
+from ...pipeline.types import ExecutionRequest
 from ...pipeline.runtime_controls import get_browser_budget
 from ..config import config
 from .composition import build_default_handlers

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from ..domain.runtime import SubTaskRuntimeState
 from .types import EntryMode, NodeStatus
 
 
@@ -16,6 +17,7 @@ class ConversationState(TypedDict, total=False):
     status: NodeStatus
     flow_state: str
     review_state: str
+    normalized_params: dict[str, Any]
     clarified_task: dict[str, Any] | None
     chat_history: list[dict[str, str]]
     chat_turn_count: int
@@ -42,7 +44,7 @@ class DispatchState(TypedDict, total=False):
     task_plan: Any
     plan_knowledge: str
     dispatch_result: dict[str, Any]
-    subtask_results: list[dict[str, Any]]
+    subtask_results: list[SubTaskRuntimeState]
     summary: dict[str, Any]
     payload: dict[str, Any]
     error: StageErrorState | None
@@ -73,21 +75,12 @@ class GraphState(TypedDict, total=False):
     status: str
     error_code: str
     error_message: str
-    clarified_task: dict[str, Any] | None
-    chat_history: list[dict[str, str]]
-    chat_turn_count: int
-    chat_max_turns: int
-    chat_pending_question: str
-    chat_flow_state: str
-    chat_review_state: str
-    matched_skills: list[dict[str, str]]
-    selected_skills: list[dict[str, str]]
     history_match_done: bool
     history_match_signature: str
     task_plan: Any
     plan_knowledge: str
     dispatch_result: dict[str, Any]
-    subtask_results: list[dict[str, Any]]
+    subtask_results: list[SubTaskRuntimeState]
     node_status: NodeStatus
     node_payload: dict[str, Any]
     node_artifacts: list[dict[str, str]]

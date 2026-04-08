@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...common.logger import get_logger
-from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
 from ...common.storage.idempotent_io import write_json_idempotent
 from ..collector import (
     URLCollectorResult,

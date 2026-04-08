@@ -38,7 +38,6 @@ def _ok(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "result_context": resolved_payload,
         "node_artifacts": [],
         "node_error": None,
-        "conversation": {"status": "ok"},
         "error": None,
     }
 
@@ -191,6 +190,14 @@ def _coalesce_cli_option(cli_args: dict[str, Any], key: str, fallback: Any) -> A
     return fallback if value is None else value
 
 
+def _conversation_state(state: dict[str, Any]) -> dict[str, Any]:
+    return dict(state.get("conversation") or {})
+
+
+def _conversation_value(state: dict[str, Any], key: str, default: Any = None) -> Any:
+    return _conversation_state(state).get(key, default)
+
+
 def _is_serial_mode_enabled(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -319,23 +326,21 @@ def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
 
 async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 澄清节点。"""
-    clarified_task = state.get("clarified_task")
+    clarified_task = _conversation_value(state, "clarified_task")
     if isinstance(clarified_task, dict) and clarified_task:
         return {
             **_ok({"clarified": True, "source": "state"}),
-            "clarified_task": clarified_task,
-            "chat_flow_state": "ready",
             "conversation": {"status": "ok", "flow_state": "ready", "clarified_task": clarified_task},
         }
 
     cli_args = dict(state.get("cli_args") or {})
     initial_request = str(cli_args.get("request") or "").strip()
-    history = _history_from_state(state.get("chat_history"), initial_request)
+    history = _history_from_state(_conversation_value(state, "chat_history"), initial_request)
     if not history:
         return _fatal("empty_request", "chat-pipeline 缺少初始需求")
 
-    max_turns = _to_positive_int(state.get("chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
-    turn_count = _to_non_negative_int(state.get("chat_turn_count"), 0)
+    max_turns = _to_positive_int(_conversation_value(state, "chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
+    turn_count = _to_non_negative_int(_conversation_value(state, "chat_turn_count"), 0)
     clarifier = TaskClarifier()
     runtime = SkillRuntime()
     latest_url = _latest_history_url(history)
@@ -365,20 +370,13 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("clarifier_reject", result.reason or "该任务暂不支持自动执行")
 
     if result.status == "ready" and result.task is not None:
+        clarified_payload = _clarified_task_to_dict(result.task)
         return {
             **_ok({"clarified": True, "source": "llm"}),
-            "clarified_task": _clarified_task_to_dict(result.task),
-            "chat_history": _history_to_state(history),
-            "chat_turn_count": turn_count,
-            "chat_max_turns": max_turns,
-            "chat_pending_question": "",
-            "chat_flow_state": "ready",
-            "matched_skills": matched_skills,
-            "selected_skills": selected_skills,
             "conversation": {
                 "status": "ok",
                 "flow_state": "ready",
-                "clarified_task": _clarified_task_to_dict(result.task),
+                "clarified_task": clarified_payload,
                 "chat_history": _history_to_state(history),
                 "chat_turn_count": turn_count,
                 "chat_max_turns": max_turns,
@@ -394,13 +392,6 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
     question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
     return {
         **_ok({"clarified": False, "next_question": question}),
-        "chat_history": _history_to_state(history),
-        "chat_turn_count": turn_count + 1,
-        "chat_max_turns": max_turns,
-        "chat_pending_question": question,
-        "chat_flow_state": "needs_input",
-        "matched_skills": matched_skills,
-        "selected_skills": selected_skills,
         "conversation": {
             "status": "ok",
             "flow_state": "needs_input",
@@ -418,13 +409,13 @@ async def chat_collect_user_input(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 人工回答节点。"""
     cli_args = dict(state.get("cli_args") or {})
     initial_request = str(cli_args.get("request") or "").strip()
-    question = str(state.get("chat_pending_question") or "").strip()
+    question = str(_conversation_value(state, "pending_question") or "").strip()
     if not question:
         return _fatal("missing_clarification_question", "缺少待回答的澄清问题")
 
-    history = _history_from_state(state.get("chat_history"), initial_request)
-    turn_count = _to_non_negative_int(state.get("chat_turn_count"), 0)
-    max_turns = _to_positive_int(state.get("chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
+    history = _history_from_state(_conversation_value(state, "chat_history"), initial_request)
+    turn_count = _to_non_negative_int(_conversation_value(state, "chat_turn_count"), 0)
+    max_turns = _to_positive_int(_conversation_value(state, "chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
     answer_payload = interrupt(
         {
             "type": "chat_clarification",
@@ -440,9 +431,6 @@ async def chat_collect_user_input(state: dict[str, Any]) -> dict[str, Any]:
     history.append(DialogueMessage(role="user", content=answer))
     return {
         **_ok({"answer_collected": True}),
-        "chat_history": _history_to_state(history),
-        "chat_pending_question": "",
-        "chat_flow_state": "input_collected",
         "conversation": {
             "status": "ok",
             "flow_state": "input_collected",
@@ -456,7 +444,7 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 执行前确认节点。"""
     cli_args = dict(state.get("cli_args") or {})
     initial_request = str(cli_args.get("request") or "").strip()
-    task = dict(state.get("clarified_task") or {})
+    task = dict(_conversation_value(state, "clarified_task") or {})
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
@@ -468,20 +456,19 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
     if action in {"approve", "start", "execute"}:
         return {
             **_ok({"review_action": action}),
-            "chat_review_state": "approved",
-            "conversation": {"status": "ok", "review_state": "approved"},
+            "conversation": {
+                "status": "ok",
+                "review_state": "approved",
+                "clarified_task": task,
+            },
         }
 
     if action == "supplement":
         supplement = _normalize_resume_answer(action_payload) or _DEFAULT_CHAT_FALLBACK
-        history = _history_from_state(state.get("chat_history"), initial_request)
+        history = _history_from_state(_conversation_value(state, "chat_history"), initial_request)
         history.append(DialogueMessage(role="user", content=supplement))
         return {
             **_ok({"review_action": action}),
-            "chat_history": _history_to_state(history),
-            "clarified_task": None,
-            "chat_review_state": "reclarify",
-            "chat_flow_state": "input_collected",
             "conversation": {
                 "status": "ok",
                 "review_state": "reclarify",
@@ -498,8 +485,6 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
             return _fatal("invalid_override_task", str(exc))
         return {
             **_ok({"review_action": action}),
-            "clarified_task": override_task,
-            "chat_review_state": "approved",
             "conversation": {
                 "status": "ok",
                 "review_state": "approved",
@@ -517,7 +502,7 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
 def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 进入 planning / multi-dispatch 前的参数交接节点。"""
     cli_args = dict(state.get("cli_args") or {})
-    task = dict(state.get("clarified_task") or {})
+    task = dict(_conversation_value(state, "clarified_task") or {})
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
@@ -557,7 +542,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "execution_mode_resolved": dispatch_mode,
         "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
         "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
-        "selected_skills": list(state.get("selected_skills") or []),
+        "selected_skills": list(_conversation_value(state, "selected_skills") or []),
         "global_browser_budget": cli_args.get("global_browser_budget"),
     })
     concurrency = resolve_concurrency_settings(base_params)
@@ -673,7 +658,7 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     加上"创建新任务"组成最多 4 个选项，interrupt 让用户选择。
     如果用户已在本轮对话中完成过选择（补充需求重新生成场景），则直接跳过。
     """
-    task = dict(state.get("clarified_task") or {})
+    task = dict(_conversation_value(state, "clarified_task") or {})
     signature_payload = {
         "list_url": str(task.get("list_url") or ""),
         "task_description": str(task.get("task_description") or ""),
@@ -751,7 +736,7 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
         )
         return {
             **_ok({"history_reused": True, "matched_registry_id": selected["registry_id"]}),
-            "clarified_task": task,
+            "conversation": {"status": "ok", "clarified_task": task},
             "history_match_done": True,
             "history_match_signature": task_signature,
         }

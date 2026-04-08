@@ -11,7 +11,7 @@ from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
 from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
-from ...common.storage.persistence import CollectionConfig, ConfigPersistence
+from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
 from ..base.base_collector import BaseCollector
 from ..collector import (
     CommonPattern,

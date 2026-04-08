@@ -1,7 +1,7 @@
 """Skill 文件存储 — 读写标准 Agent Skills 格式的站点采集技能。
 
 标准 Skills 目录结构：
-    .agents/skills/{domain}/SKILL.md
+    skills/{domain}/SKILL.md
 
 SKILL.md 文件格式：
     ---
@@ -22,12 +22,13 @@ from urllib.parse import urlparse
 
 import yaml
 
+from ..config import config
 from ..logger import get_logger
 from ..utils.string_maps import normalize_string_map
 
 logger = get_logger(__name__)
 
-_DEFAULT_SKILLS_DIR = ".agents/skills"
+_DEFAULT_SKILLS_DIR = "skills"
 _FALLBACK_LIMIT = 5
 
 
@@ -837,10 +838,11 @@ class SkillStore:
     """
 
     def __init__(self, skills_dir: str | Path | None = None):
-        if skills_dir:
-            self.skills_dir = Path(skills_dir)
-        else:
-            self.skills_dir = self._find_project_root() / _DEFAULT_SKILLS_DIR
+        configured_dir = skills_dir or str(config.agent.skills_dir or "").strip() or _DEFAULT_SKILLS_DIR
+        resolved_dir = Path(configured_dir)
+        if not resolved_dir.is_absolute():
+            resolved_dir = self._find_project_root() / resolved_dir
+        self.skills_dir = resolved_dir
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
     def save_document(

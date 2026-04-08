@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +12,7 @@ from ..common.channel.base import URLChannel, URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
 from ..common.experience import SkillRuntime
-from ..contracts import ExecutionContext, PipelineMode, TaskIdentity
+from .types import ExecutionContext, PipelineMode, TaskIdentity
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
@@ -22,17 +21,15 @@ from .finalization import (
     PipelineFinalizationContext,
     PipelineFinalizationDependencies,
     PipelineFinalizer,
-    build_execution_id as _build_execution_id_impl,
+    build_execution_id,
     build_record_summary as _build_record_summary_impl,
     build_run_record as _build_run_record_impl,
     classify_pipeline_result as _classify_pipeline_result_impl,
     commit_items_file as _commit_items_file_impl,
-    find_output_draft_skill as _find_output_draft_skill_impl,
     finalize_task_from_record as _finalize_task_from_record_impl,
     load_persisted_run_records as _load_persisted_run_records_impl,
     persist_pipeline_records as _persist_pipeline_records_impl,
     promote_staged_output as _promote_staged_output_impl,
-    prepare_fields_config as _prepare_fields_config_impl,
     prepare_pipeline_output as _prepare_pipeline_output_impl,
     should_promote_skill as _should_promote_skill_impl,
     strip_draft_markers_from_skill_content as _strip_draft_markers_from_skill_content_impl,
@@ -47,16 +44,6 @@ from .orchestration import (
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
-
-
-def _prepare_fields_config(
-    fields_config: list[dict],
-) -> tuple[list[dict], list[str], list[str]]:
-    return _prepare_fields_config_impl(fields_config)
-
-
-def _find_output_draft_skill(list_url: str, output_dir: str):
-    return _find_output_draft_skill_impl(list_url, output_dir)
 
 
 def _classify_pipeline_result(
@@ -91,39 +78,6 @@ def _should_promote_skill(
 
 def _strip_draft_markers_from_skill_content(content: str) -> str:
     return _strip_draft_markers_from_skill_content_impl(content)
-
-
-def _build_execution_id(
-    *,
-    list_url: str,
-    task_description: str,
-    execution_brief: dict[str, Any] | None,
-    fields: list[FieldDefinition],
-    target_url_count: int | None,
-    max_pages: int | None,
-    pipeline_mode: str | None,
-    thread_id: str,
-    page_state_signature: str = "",
-    anchor_url: str | None = None,
-    variant_label: str | None = None,
-) -> str:
-    return _build_execution_id_impl(
-        list_url=list_url,
-        task_description=task_description,
-        execution_brief=dict(execution_brief or {}),
-        fields=fields,
-        target_url_count=target_url_count,
-        max_pages=max_pages,
-        pipeline_mode=pipeline_mode,
-        thread_id=thread_id,
-        page_state_signature=page_state_signature,
-        anchor_url=anchor_url,
-        variant_label=variant_label,
-    )
-
-
-def _generate_execution_id() -> str:
-    return f"exec_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
 
 def _prepare_pipeline_output(
@@ -458,7 +412,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
     is_resume = context.resume_mode.value == "resume"
     resolved_execution_id = str(context.execution_id or "").strip()
     if not resolved_execution_id:
-        resolved_execution_id = _build_execution_id(
+        resolved_execution_id = build_execution_id(
             list_url=list_url,
             task_description=task_description,
             execution_brief=execution_brief,

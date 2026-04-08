@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 
 import yaml
 
+from ..common.experience import (
+    SkillPromotionContext,
+    SkillSedimentationPayload,
+    SkillSedimenter,
+)
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 
@@ -214,6 +219,62 @@ def strip_draft_markers_from_skill_content(content: str) -> str:
     if cleaned:
         cleaned += "\n"
     return cleaned
+
+
+def _stringify_context_map(raw_context: dict[str, Any] | None) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in dict(raw_context or {}).items():
+        name = str(key or "").strip()
+        text = str(value or "").strip()
+        if name and text:
+            normalized[name] = text
+    return normalized
+
+
+def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | None:
+    if not should_promote_skill(
+        state=context.state,
+        summary=context.summary,
+        validation_failures=context.validation_failures,
+    ):
+        logger.info(
+            "[Pipeline] 跳过 Skill 晋升: promotion_state=%s, success=%s/%s",
+            str(context.summary.get("promotion_state") or ""),
+            int(context.summary.get("success_count", 0) or 0),
+            int(context.summary.get("total_urls", 0) or 0),
+        )
+        return None
+
+    payload = SkillSedimentationPayload(
+        list_url=context.list_url,
+        task_description=context.task_description,
+        fields=[field.model_dump(mode="python") for field in context.fields],
+        promotion_context=SkillPromotionContext(
+            anchor_url=str(context.anchor_url or ""),
+            page_state_signature=str(context.page_state_signature or ""),
+            variant_label=str(context.variant_label or ""),
+            context=_stringify_context_map(context.execution_brief),
+        ),
+        collection_config=dict(context.collection_config or {}),
+        extraction_config=dict(context.extraction_config or {}),
+        extraction_evidence=list(context.state.get("extraction_evidence") or []),
+        summary=dict(context.summary or {}),
+        validation_failures=list(context.validation_failures or []),
+        plan_knowledge=str(context.plan_knowledge or ""),
+        status="validated",
+    )
+    promoted_path = SkillSedimenter().sediment_from_pipeline_result(payload)
+    if promoted_path is None:
+        logger.warning(
+            "[Pipeline] Skill 晋升未生成有效结果: list_url=%s, task=%s",
+            context.list_url,
+            context.task_description[:120],
+        )
+        return None
+
+    cleanup_output_draft_skill(context.list_url, context.output_dir)
+    logger.info("[Pipeline] Skill 已晋升到正式目录: %s", promoted_path)
+    return promoted_path
 
 
 def build_execution_id(
@@ -522,6 +583,9 @@ class PipelineFinalizer:
                 context.summary["terminal_reason"] = str(
                     context.summary.get("terminal_reason") or "export_failed"
                 )
+            promoted_skill = promote_pipeline_skill(context)
+            context.summary["skill_path"] = str(promoted_skill or "")
+            context.summary["skill_state"] = "promoted" if promoted_skill else "skipped"
             self._deps.persist_pipeline_records(context, committed_records)
 
             final_status = str(context.summary.get("execution_state") or "completed")
