@@ -22,18 +22,29 @@ playwright install chromium
 - Redis：只用于 graph checkpoint
 - Playwright Chromium：用于真实浏览器流程
 
-一个本地示例环境变量如下：
+默认情况下，E2E 会自动加载仓库根目录下的 `.env.e2e`。
+
+当前推荐内容：
+
+```env
+AUTOSPIDER_E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/autospider_e2e_test
+AUTOSPIDER_E2E_REDIS_URL=redis://127.0.0.1:6380/15
+```
+
+如果你想临时覆盖，也可以直接设置环境变量。
+
+CMD 示例：
 
 ```bash
-set AUTOSPIDER_E2E_DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/autospider_e2e_test
-set AUTOSPIDER_E2E_REDIS_URL=redis://127.0.0.1:6379/15
+set AUTOSPIDER_E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/autospider_e2e_test
+set AUTOSPIDER_E2E_REDIS_URL=redis://127.0.0.1:6380/15
 ```
 
 如果使用 PowerShell：
 
 ```powershell
-$env:AUTOSPIDER_E2E_DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/autospider_e2e_test"
-$env:AUTOSPIDER_E2E_REDIS_URL="redis://127.0.0.1:6379/15"
+$env:AUTOSPIDER_E2E_DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/autospider_e2e_test"
+$env:AUTOSPIDER_E2E_REDIS_URL="redis://127.0.0.1:6380/15"
 ```
 
 如果不提供 `AUTOSPIDER_E2E_REDIS_URL`，fixture 会尝试从本机 `PATH` 中启动临时 `redis-server`。

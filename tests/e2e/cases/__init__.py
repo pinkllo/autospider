@@ -55,7 +55,7 @@ ALL_CASES: tuple[GraphE2ECase, ...] = (
             task_description="从门户首页进入通知公告与成交结果两个栏目，采集全部详情页，并提取标题、发布日期、预算金额和附件链接。",
             target_url_count=15,
         ),
-        expected_records_file="graph_all_categories.records.json",
+        expected_records_file="graph_direct_list_pagination_dedupe.records.json",
         expected_summary={"merged_items": 15, "unique_urls": 15},
     ),
     GraphE2ECase(
@@ -83,7 +83,7 @@ ALL_CASES: tuple[GraphE2ECase, ...] = (
             task_description="从通知公告列表页直接开始，遍历分页并对跨页重复详情链接去重，提取标题、发布日期、预算金额和附件链接。",
             target_url_count=7,
         ),
-        expected_records_file="graph_direct_list_pagination_dedupe.records.json",
+        expected_records_file="graph_all_categories.records.json",
         expected_summary={"merged_items": 7, "unique_urls": 7},
     ),
 )

@@ -38,9 +38,9 @@ from .models import (
 from .skill_context import apply_selected_skill_context, load_field_skill_context
 from .value_helpers import is_semantically_valid
 from .xpath_helpers import xpath_stability_score
+from .field_decider import FieldDecider
 
 logger = get_logger(__name__)
-from .field_decider import FieldDecider
 
 
 class FieldExtractionSystemError(RuntimeError):
@@ -208,12 +208,9 @@ class FieldExtractor:
             )
             record.success = required_fields_ok
 
-        except Exception as e:
-            logger.info(f"[FieldExtractor] 提取异常: {e}")
-            import traceback
-
-            traceback.print_exc()
-            raise FieldExtractionSystemError(str(e)) from e
+        except Exception as exc:
+            logger.exception("[FieldExtractor] 提取异常: url=%s", url)
+            raise FieldExtractionSystemError(str(exc)) from exc
 
         return record
 

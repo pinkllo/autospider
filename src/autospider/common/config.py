@@ -44,7 +44,7 @@ class LLMConfig(BaseModel):
         default_factory=lambda: os.getenv("LLM_TRACE_ENABLED", "true").lower() == "true"
     )
     trace_file: str = Field(
-        default_factory=lambda: os.getenv("LLM_TRACE_FILE", "output/llm_trace.json")
+        default_factory=lambda: os.getenv("LLM_TRACE_FILE", "output/llm_trace.jsonl")
     )
     trace_max_chars: int = Field(default_factory=lambda: int(os.getenv("LLM_TRACE_MAX_CHARS", "20000")))
     enable_thinking: bool = Field(
@@ -312,7 +312,7 @@ class DatabaseConfig(BaseModel):
     url: str = Field(
         default_factory=lambda: os.getenv(
             "DATABASE_URL",
-            "postgresql+psycopg2://postgres:postgres@localhost:5432/autospider",
+            "postgresql+psycopg://postgres:postgres@localhost:5432/autospider",
         )
     )
     echo: bool = Field(

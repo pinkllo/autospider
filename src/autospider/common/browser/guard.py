@@ -7,12 +7,14 @@ from __future__ import annotations
 import asyncio
 from typing import Sequence
 
-from loguru import logger
 from playwright.async_api import Page
+from autospider.common.logger import get_logger
 
 from .handlers.base import BaseAnomalyHandler
 from .intervention import BrowserInterventionRequired
 from .task_utils import create_monitored_task
+
+logger = get_logger(__name__)
 
 
 class PageGuard:

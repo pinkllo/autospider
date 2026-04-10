@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable
 
-from loguru import logger
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 _BENIGN_ERROR_MARKERS: tuple[str, ...] = (
     "target page, context or browser has been closed",

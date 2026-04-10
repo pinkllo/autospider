@@ -16,6 +16,7 @@ from tests.e2e.env import (
 )
 
 _SESSION_RUNTIME: E2ERuntime | None = None
+_SESSION_RUNTIME_SKIP_REASON: str | None = None
 
 
 def _ensure_src_path() -> None:
@@ -30,26 +31,43 @@ _ensure_src_path()
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "e2e: end-to-end graph tests")
-    global _SESSION_RUNTIME
-    if _SESSION_RUNTIME is not None:
+    global _SESSION_RUNTIME, _SESSION_RUNTIME_SKIP_REASON
+    if _SESSION_RUNTIME is not None or _SESSION_RUNTIME_SKIP_REASON is not None:
         return
     workspace = Path(tempfile.mkdtemp(prefix="autospider-e2e-runtime-"))
-    _SESSION_RUNTIME = prepare_e2e_runtime(workspace)
+    try:
+        _SESSION_RUNTIME = prepare_e2e_runtime(workspace)
+    except RuntimeError as exc:
+        _SESSION_RUNTIME_SKIP_REASON = f"E2E 基础设施不可用: {exc}"
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     del config
-    global _SESSION_RUNTIME
+    global _SESSION_RUNTIME, _SESSION_RUNTIME_SKIP_REASON
     if _SESSION_RUNTIME is None:
+        _SESSION_RUNTIME_SKIP_REASON = None
         return
     teardown_e2e_runtime(_SESSION_RUNTIME)
     _SESSION_RUNTIME = None
+    _SESSION_RUNTIME_SKIP_REASON = None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    del config
+    if _SESSION_RUNTIME_SKIP_REASON is None:
+        return
+    skip_marker = pytest.mark.skip(reason=_SESSION_RUNTIME_SKIP_REASON)
+    e2e_root = Path(__file__).resolve().parent
+    for item in items:
+        if Path(str(item.fspath)).resolve().is_relative_to(e2e_root):
+            item.add_marker(skip_marker)
 
 
 @pytest.fixture(scope="session")
 def e2e_runtime() -> E2ERuntime:
     if _SESSION_RUNTIME is None:
-        raise RuntimeError("E2E runtime 尚未初始化。")
+        reason = _SESSION_RUNTIME_SKIP_REASON or "E2E runtime 尚未初始化。"
+        pytest.skip(reason)
     return _SESSION_RUNTIME
 
 

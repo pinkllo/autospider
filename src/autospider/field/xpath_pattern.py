@@ -18,7 +18,11 @@ from ..common.config import config
 from ..common.llm.streaming import ainvoke_with_stream
 from ..common.llm.trace_logger import append_llm_trace
 from ..common.logger import get_logger
-from ..common.protocol import parse_json_dict_from_llm
+from ..common.protocol import (
+    extract_response_text_from_llm_payload,
+    parse_json_dict_from_llm,
+    summarize_llm_payload,
+)
 from ..common.utils.paths import get_prompt_path
 from ..common.utils.prompt_template import render_template
 from .value_helpers import is_semantically_valid
@@ -996,7 +1000,9 @@ class XPathValueLLMValidator:
                 HumanMessage(content=user_prompt),
             ],
         )
-        payload = parse_json_dict_from_llm(str(response.content)) or {}
+        raw_response = extract_response_text_from_llm_payload(response)
+        response_summary = summarize_llm_payload(response)
+        payload = parse_json_dict_from_llm(raw_response) or {}
         is_valid = _to_bool(payload.get("is_valid"))
         normalized_value = str(payload.get("normalized_value") or extracted_value).strip()
         reason = str(payload.get("reason") or "").strip()
@@ -1017,8 +1023,9 @@ class XPathValueLLMValidator:
                     "xpath_pattern": xpath_pattern,
                     "extracted_value": extracted_value,
                 },
+                "response_summary": response_summary,
                 "output": {
-                    "raw_response": str(response.content),
+                    "raw_response": raw_response,
                     "parsed_payload": payload,
                     "is_valid": is_valid,
                     "normalized_value": normalized_value,

@@ -10,7 +10,11 @@ from langchain_openai import ChatOpenAI
 
 from ..config import config
 from ..types import Action, ActionType, ScrollInfo
-from ..protocol import parse_protocol_message
+from ..protocol import (
+    extract_response_text_from_llm_payload,
+    parse_protocol_message,
+    summarize_llm_payload,
+)
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
@@ -133,7 +137,8 @@ class LLMDecider:
 
         # 调用 LLM
         response = await ainvoke_with_stream(self.llm, messages)
-        response_text = response.content
+        response_text = extract_response_text_from_llm_payload(response)
+        response_summary = summarize_llm_payload(response)
 
         # 解析响应
         action = self._parse_response(response)
@@ -160,6 +165,7 @@ class LLMDecider:
                     ),
                     "screenshot_base64_len": len(screenshot_base64 or ""),
                 },
+                "response_summary": response_summary,
                 "output": {
                     "raw_response": str(response_text),
                     "parsed_action": action.model_dump(),

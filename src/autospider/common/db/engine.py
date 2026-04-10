@@ -9,6 +9,7 @@ from __future__ import annotations
 import atexit
 from contextlib import contextmanager
 from typing import Generator
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import MetaData, Table, create_engine, event, inspect
 from sqlalchemy.engine import Engine
@@ -21,6 +22,19 @@ logger = get_logger(__name__)
 
 _engine: Engine | None = None
 _SessionFactory: sessionmaker[Session] | None = None
+
+
+def _normalize_database_url(url: str) -> str:
+    text = str(url or "").strip()
+    if not text:
+        return text
+    parsed = urlsplit(text)
+    scheme = str(parsed.scheme or "").strip().lower()
+    if scheme != "postgresql":
+        return text
+    return urlunsplit(("postgresql+psycopg", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 _LEGACY_TABLES = [
     "field_xpaths",
     "task_run_validation_failures",
@@ -120,7 +134,7 @@ def get_engine() -> Engine:
         return _engine
 
     db_config = config.database
-    url = db_config.url
+    url = _normalize_database_url(db_config.url)
 
     engine_kwargs: dict = {
         "echo": db_config.echo,

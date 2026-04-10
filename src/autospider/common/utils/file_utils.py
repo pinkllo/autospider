@@ -8,7 +8,9 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
-from loguru import logger
+from autospider.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def ensure_directory(path: str | Path) -> bool:

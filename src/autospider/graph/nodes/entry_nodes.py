@@ -7,7 +7,7 @@ import hashlib
 import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
@@ -15,8 +15,13 @@ from ...common.config import config
 from ...common.experience import SkillRuntime
 from ...common.llm import TaskClarifier
 from ...common.llm.streaming import ainvoke_with_stream
+from ...common.llm.trace_logger import append_llm_trace
 from ...common.logger import get_logger
-from ...common.protocol import extract_json_dict_from_llm_payload
+from ...common.protocol import (
+    extract_json_dict_from_llm_payload,
+    extract_response_text_from_llm_payload,
+    summarize_llm_payload,
+)
 from ...common.storage.task_run_query_service import TaskRunQueryService
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
@@ -577,6 +582,10 @@ def _parse_user_choice(answer: Any) -> int:
         return -1
 
 
+def _llm_model_name(llm: Any) -> str | None:
+    return getattr(llm, "model_name", None) or getattr(llm, "model", None) or config.llm.model
+
+
 async def _llm_rank_history(
     current_desc: str,
     history: list[dict[str, Any]],
@@ -626,12 +635,51 @@ async def _llm_rank_history(
 
     try:
         response = await ainvoke_with_stream(llm, [HumanMessage(content=prompt)])
+        raw_response = extract_response_text_from_llm_payload(response)
+        response_summary = summarize_llm_payload(response)
         parsed = extract_json_dict_from_llm_payload(response)
+        ranked_indices = list(parsed.get("ranked", [])) if parsed else []
+        append_llm_trace(
+            component="entry_history_match_ranker",
+            payload={
+                "model": _llm_model_name(llm),
+                "input": {
+                    "current_desc": current_desc,
+                    "history_candidates": history,
+                    "prompt": prompt,
+                },
+                "output": {
+                    "raw_response": raw_response,
+                    "parsed_payload": parsed,
+                    "ranked_indices": ranked_indices,
+                },
+                "response_summary": response_summary,
+            },
+        )
     except Exception as exc:
+        append_llm_trace(
+            component="entry_history_match_ranker",
+            payload={
+                "model": _llm_model_name(llm),
+                "input": {
+                    "current_desc": current_desc,
+                    "history_candidates": history,
+                    "prompt": prompt,
+                },
+                "output": {
+                    "raw_response": "",
+                    "parsed_payload": None,
+                    "ranked_indices": [],
+                },
+                "response_summary": {},
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            },
+        )
         logger.warning("[HistoryMatch] LLM 排序历史任务失败: %s", exc)
         return []
-
-    ranked_indices = list(parsed.get("ranked", [])) if parsed else []
 
     # 校验并映射回历史任务对象
     selected: list[dict[str, Any]] = []
@@ -675,8 +723,6 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
         return {**_ok(), "history_match_done": True}
 
     # 1. 查找历史任务
-    cli_args = dict(state.get("cli_args") or {})
-    output_dir = str(cli_args.get("output_dir") or "output")
     registry = TaskRunQueryService()
     history = registry.find_by_url(list_url)
 

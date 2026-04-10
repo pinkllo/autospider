@@ -14,10 +14,16 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..common.llm.streaming import ainvoke_with_stream
+from ..common.llm.trace_logger import append_llm_trace
 from ..common.utils.prompt_template import render_template
 from ..common.logger import get_logger
 from ..common.utils.paths import get_prompt_path
-from ..common.protocol import parse_protocol_message, coerce_bool
+from ..common.protocol import (
+    coerce_bool,
+    extract_response_text_from_llm_payload,
+    parse_protocol_message,
+    summarize_llm_payload,
+)
 from ..domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
@@ -59,6 +65,33 @@ class FieldDecider:
     def _parse_response_json(self, response_payload: object) -> dict | None:
         # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
         return parse_protocol_message(response_payload)
+
+    def _get_model_name(self) -> str | None:
+        return getattr(self.decider.llm, "model_name", None) or getattr(
+            self.decider.llm, "model", None
+        )
+
+    def _append_trace(
+        self,
+        component: str,
+        input_payload: dict[str, object],
+        raw_response: str,
+        response_summary: dict[str, object],
+        parsed_payload: dict | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "model": self._get_model_name(),
+            "input": input_payload,
+            "output": {
+                "raw_response": raw_response,
+                "parsed_payload": parsed_payload,
+            },
+            "response_summary": response_summary,
+        }
+        if error is not None:
+            payload["error"] = error
+        append_llm_trace(component=component, payload=payload)
 
     def _compact_text(self, text: str, max_len: int = 60) -> str:
         cleaned = re.sub(r"\s+", " ", text).strip()
@@ -335,12 +368,39 @@ class FieldDecider:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "current_url": current_url,
+            "field_name": field.name,
+            "field_description": field.description,
+            "field_example": field.example or "",
+            "nav_steps_count": nav_steps_count,
+            "nav_steps_summary": nav_steps_summary or "无",
+            "scroll_status": scroll_status,
+            "page_text_hit": page_text_hit_text,
+            "clickable_candidates_count": clickable_candidates_count,
+            "input_candidates_count": input_candidates_count,
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+            "candidate_count": len(getattr(snapshot, "marks", []) or []),
+        }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
-            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
+            logger.info(f"[FieldDecider] 响应: {raw_response[:150]}...")
 
             message = self._parse_response_json(response)
+            self._append_trace(
+                component="field_navigation_decision",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                parsed_payload=message,
+            )
             if message:
                 action = message.get("action")
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
@@ -360,11 +420,15 @@ class FieldDecider:
                 logger.info(f"[FieldDecider] 决策: {action}")
                 return message
             logger.info("[FieldDecider] 响应中未找到 JSON")
-        except Exception as e:
-            logger.info(f"[FieldDecider] 决策失败: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception as exc:
+            self._append_trace(
+                component="field_navigation_decision",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                error=exc,
+            )
+            logger.exception("[FieldDecider] 导航决策失败")
 
         return None
 
@@ -415,12 +479,33 @@ class FieldDecider:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "page_url": self.page.url,
+            "field_name": field.name,
+            "field_description": field.description,
+            "field_data_type": field.data_type,
+            "field_example": field.example or "",
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+        }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
-            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
+            logger.info(f"[FieldDecider] 响应: {raw_response[:150]}...")
 
             message = self._parse_response_json(response)
+            self._append_trace(
+                component="field_text_extraction",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                parsed_payload=message,
+            )
             if message:
                 action = message.get("action")
                 args = message.get("args") if isinstance(message.get("args"), dict) else {}
@@ -448,8 +533,15 @@ class FieldDecider:
                 else:
                     logger.info("[FieldDecider] 未找到字段")
                 return message
-        except Exception as e:
-            logger.info(f"[FieldDecider] 提取失败: {e}")
+        except Exception as exc:
+            self._append_trace(
+                component="field_text_extraction",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                error=exc,
+            )
+            logger.exception("[FieldDecider] 提取字段文本失败")
 
         return None
 
@@ -477,9 +569,6 @@ class FieldDecider:
             section="select_match_system_prompt",
         )
 
-        # 构建候选列表文本
-        candidates_text = "\n".join([f"- **[{c['mark_id']}]** {c['text']}" for c in candidates])
-
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="select_match_user_message",
@@ -504,12 +593,33 @@ class FieldDecider:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "page_url": self.page.url,
+            "field_name": field.name,
+            "field_description": field.description,
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+        }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
-            logger.info(f"[FieldDecider] 响应: {response_text[:150]}...")
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
+            logger.info(f"[FieldDecider] 响应: {raw_response[:150]}...")
 
             message = self._parse_response_json(response)
+            self._append_trace(
+                component="field_match_selection",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                parsed_payload=message,
+            )
             if message:
                 action = message.get("action")
                 if action != "select":
@@ -526,8 +636,15 @@ class FieldDecider:
                     selected = args.get("mark_id")
                 logger.info(f"[FieldDecider] 选择: mark_id={selected}")
                 return message
-        except Exception as e:
-            logger.info(f"[FieldDecider] 消歧失败: {e}")
+        except Exception as exc:
+            self._append_trace(
+                component="field_match_selection",
+                input_payload=trace_input,
+                raw_response=raw_response,
+                response_summary=response_summary,
+                error=exc,
+            )
+            logger.exception("[FieldDecider] 多候选消歧失败")
 
         return None
 

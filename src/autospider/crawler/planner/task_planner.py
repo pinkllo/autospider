@@ -16,8 +16,13 @@ from langchain_openai import ChatOpenAI
 
 from ...common.config import config
 from ...common.llm.streaming import ainvoke_with_stream
+from ...common.llm.trace_logger import append_llm_trace
 from ...common.logger import get_logger
-from ...common.protocol import parse_json_dict_from_llm
+from ...common.protocol import (
+    extract_response_text_from_llm_payload,
+    parse_json_dict_from_llm,
+    summarize_llm_payload,
+)
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
 from ...domain.planning import (
     ExecutionBrief,
@@ -461,10 +466,36 @@ class TaskPlanner(
         try:
             logger.info("[Planner] 调用 LLM 进行多模态视觉分析...")
             response = await ainvoke_with_stream(self.llm, messages)
-            response_text = response.content
+            response_text = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
 
             # 从 LLM 响应中解析 JSON 字典
             result = parse_json_dict_from_llm(response_text)
+            append_llm_trace(
+                component="planner_site_analysis",
+                payload={
+                    "model": getattr(self.llm, "model_name", None)
+                    or getattr(self.llm, "model", None)
+                    or config.llm.planner_model
+                    or config.llm.model,
+                    "input": {
+                        "system_prompt": system_prompt,
+                        "user_message": user_message,
+                        "current_url": self.page.url,
+                        "site_url": self.site_url,
+                        "user_request": self.user_request,
+                        "node_context": dict(node_context or {}),
+                        "nav_steps": list(nav_steps or []),
+                        "candidate_count": len(getattr(snapshot, "marks", []) or []),
+                        "selected_skills": list(self.selected_skills or []),
+                    },
+                    "output": {
+                        "raw_response": response_text,
+                        "parsed_payload": result,
+                    },
+                    "response_summary": response_summary,
+                },
+            )
             if result:
                 result = self._post_process_analysis(result, snapshot, node_context=node_context)
                 subtask_count = len(result.get("subtasks", []))
@@ -473,7 +504,33 @@ class TaskPlanner(
 
             logger.warning("[Planner] LLM 响应内容不符合预期的 JSON 格式: %s", str(response_text)[:200])
         except Exception as e:
-            logger.error("[Planner] 调用 LLM 分析网站结构时发生异常: %s", e)
+            append_llm_trace(
+                component="planner_site_analysis",
+                payload={
+                    "model": getattr(self.llm, "model_name", None)
+                    or getattr(self.llm, "model", None)
+                    or config.llm.planner_model
+                    or config.llm.model,
+                    "input": {
+                        "system_prompt": system_prompt,
+                        "user_message": user_message,
+                        "current_url": self.page.url,
+                        "site_url": self.site_url,
+                        "user_request": self.user_request,
+                        "node_context": dict(node_context or {}),
+                        "nav_steps": list(nav_steps or []),
+                        "candidate_count": len(getattr(snapshot, "marks", []) or []),
+                        "selected_skills": list(self.selected_skills or []),
+                    },
+                    "output": {},
+                    "response_summary": {},
+                    "error": {
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    },
+                },
+            )
+            logger.exception("[Planner] 调用 LLM 分析网站结构时发生异常")
 
         return None
 

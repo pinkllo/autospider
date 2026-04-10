@@ -140,6 +140,7 @@ class SkillRuntime:
         reasoning = ""
         payload: dict[str, Any] = {}
         response_summary: dict[str, Any] = {}
+        error_payload: dict[str, str] | None = None
         try:
             response = await ainvoke_with_stream(
                 llm,
@@ -159,6 +160,10 @@ class SkillRuntime:
             )
         except Exception as exc:
             logger.debug("[SkillRuntime] skill selection failed for %s: %s", phase, exc)
+            error_payload = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
 
         selected = [
             skills[index - 1]
@@ -188,6 +193,8 @@ class SkillRuntime:
                     "selected_skill_paths": [skill.path for skill in selected],
                     "reasoning": reasoning,
                 },
+                "response_summary": response_summary,
+                "error": error_payload,
             },
         )
         return selected

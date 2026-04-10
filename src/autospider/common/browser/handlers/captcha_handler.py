@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 
-from loguru import logger
 from playwright.async_api import Page
+from autospider.common.logger import get_logger
 
 from .base import BaseAnomalyHandler
 from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
+
+logger = get_logger(__name__)
 
 CAPTCHA_STRONG_SELECTORS = [
     "iframe[src*='captcha']",
@@ -139,7 +141,7 @@ class CaptchaHandler(BaseAnomalyHandler):
         stable_not_detected = 0
         while True:
             if self._user_confirmed:
-                logger.success("[CaptchaHandler] 用户确认已完成验证码")
+                logger.info("[CaptchaHandler] 用户确认已完成验证码")
                 return
             elapsed = asyncio.get_running_loop().time() - start
             if elapsed >= self.max_wait_time:
@@ -151,7 +153,7 @@ class CaptchaHandler(BaseAnomalyHandler):
             else:
                 stable_not_detected = 0
             if stable_not_detected >= 2:
-                logger.success("[CaptchaHandler] 验证弹窗已消失，恢复执行")
+                logger.info("[CaptchaHandler] 验证弹窗已消失，恢复执行")
                 return
             remaining = int(self.max_wait_time - elapsed)
             await self._update_banner(page, remaining)

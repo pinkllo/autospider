@@ -1,8 +1,8 @@
-"""LLM 输入输出追踪日志（JSON 数组）。"""
+"""LLM 输入输出追踪日志（JSONL append-only）。"""
 
 from __future__ import annotations
 
-import hashlib
+from datetime import datetime, timezone
 import json
 import threading
 from pathlib import Path
@@ -10,95 +10,84 @@ from typing import Any
 
 from ..config import config
 from ..logger import get_logger
-from ..storage.idempotent_io import write_text_if_changed
+from ..utils.paths import resolve_repo_path
 
 logger = get_logger(__name__)
 _TRACE_WRITE_LOCK = threading.Lock()
+_DEFAULT_TRACE_FILE = "output/llm_trace.jsonl"
 
 
 def append_llm_trace(component: str, payload: dict[str, Any]) -> None:
-    """追加一条 LLM 追踪记录到 JSON 文件。"""
+    """追加一条 LLM 追踪记录到 JSONL 文件。"""
     if not config.llm.trace_enabled:
         return
 
     max_chars = max(2000, int(config.llm.trace_max_chars))
+    record = _build_trace_record(component, payload, max_chars)
+    trace_path = _resolve_trace_path(config.llm.trace_file)
+
+    try:
+        _append_record(trace_path, record)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[LLMTrace] 写入失败: component=%s path=%s error=%s",
+            component,
+            trace_path,
+            exc,
+            exc_info=True,
+        )
+
+
+def _build_trace_record(component: str, payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
     sanitized = _sanitize(payload, max_chars)
-    trace_id = _build_trace_id(component=component, payload=sanitized)
-    record = {
-        "trace_id": trace_id,
-        "timestamp": "",
+    input_payload = _normalize_trace_value(sanitized.pop("input", None))
+    output_payload = _normalize_trace_value(sanitized.pop("output", None))
+    response_summary = sanitized.pop("response_summary", None)
+    if response_summary is None and isinstance(output_payload, dict):
+        response_summary = output_payload.get("response_summary")
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "component": component,
+        "model": sanitized.pop("model", None),
+        "input": input_payload,
+        "output": output_payload,
+        "response_summary": _normalize_trace_value(response_summary),
+        "error": _normalize_error(sanitized.pop("error", None)),
         **sanitized,
     }
 
-    trace_path = Path(config.llm.trace_file)
-    if not trace_path.is_absolute():
-        trace_path = Path.cwd() / trace_path
 
-    try:
-        trace_path.parent.mkdir(parents=True, exist_ok=True)
-        with _TRACE_WRITE_LOCK:
-            records = _load_trace_records(trace_path)
-            replaced = False
-            for index, existing in enumerate(records):
-                if str(existing.get("trace_id") or "") != trace_id:
-                    continue
-                preserved = dict(existing)
-                preserved.update(record)
-                preserved["timestamp"] = str(existing.get("timestamp") or record["timestamp"])
-                records[index] = preserved
-                replaced = True
-                break
-            if not replaced:
-                records.append(record)
-            text = json.dumps(records, ensure_ascii=False, indent=2, default=str) + "\n"
-            write_text_if_changed(trace_path, text)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug(f"[LLMTrace] 写入失败（忽略）: {exc}")
+def _resolve_trace_path(raw_path: str) -> Path:
+    target = str(raw_path or "").strip() or _DEFAULT_TRACE_FILE
+    return resolve_repo_path(target)
 
 
-
-def _build_trace_id(component: str, payload: dict[str, Any]) -> str:
-    raw = json.dumps({"component": component, "payload": payload}, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-def _load_trace_records(path: Path) -> list[dict[str, Any]]:
-    """读取既有追踪记录，兼容 JSON 数组与历史 JSONL。"""
-    if not path.exists():
-        return []
-
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return []
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return _parse_jsonl_records(raw)
-
-    if isinstance(parsed, list):
-        return [item for item in parsed if isinstance(item, dict)]
-    if isinstance(parsed, dict):
-        records = parsed.get("records")
-        if isinstance(records, list):
-            return [item for item in records if isinstance(item, dict)]
-    return []
+def _append_record(path: Path, record: dict[str, Any]) -> None:
+    line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _TRACE_WRITE_LOCK:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
 
 
-def _parse_jsonl_records(raw: str) -> list[dict[str, Any]]:
-    """解析历史 JSONL 文本。"""
-    records: list[dict[str, Any]] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(item, dict):
-            records.append(item)
-    return records
+def _normalize_trace_value(value: Any) -> Any:
+    if value is None:
+        return {}
+    return value
+
+
+def _normalize_error(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        normalized = dict(value)
+        if "type" not in normalized and "message" in normalized:
+            normalized["type"] = "Error"
+        return normalized
+    if isinstance(value, BaseException):
+        return {"type": type(value).__name__, "message": str(value)}
+    return {"type": type(value).__name__, "message": str(value)}
 
 
 def _sanitize(value: Any, max_chars: int) -> Any:

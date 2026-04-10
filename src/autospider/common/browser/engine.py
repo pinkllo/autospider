@@ -11,11 +11,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Literal
 
-from loguru import logger
 from playwright.async_api import Browser, Page, Playwright, async_playwright
+from autospider.common.logger import get_logger
 
 from .guard import PageGuard
 from .task_utils import create_monitored_task
+
+logger = get_logger(__name__)
 try:
     from playwright_stealth import Stealth  # type: ignore
 except Exception:

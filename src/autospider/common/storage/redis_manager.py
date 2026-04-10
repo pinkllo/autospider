@@ -27,6 +27,7 @@ import json
 import time
 
 import redis.asyncio as aioredis
+from autospider.common.logger import get_logger
 
 try:
     from redis.asyncio.client import Script
@@ -35,6 +36,8 @@ except ImportError:  # pragma: no cover - 兼容较新的 redis-py 导出变化
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
+
+logger = get_logger(__name__)
 
 # ==================== Lua 脚本定义 ====================
 
@@ -185,7 +188,7 @@ class RedisQueueManager:
         self.db = db
         self.key_prefix = key_prefix
         self.client: Redis | None = None
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or get_logger(__name__)
 
         # Key 名称
         self.data_key = f"{key_prefix}:data"

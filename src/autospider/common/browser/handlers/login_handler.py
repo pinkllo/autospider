@@ -6,12 +6,14 @@ import asyncio
 import os
 from typing import List, Optional, Set
 
-from loguru import logger
 from playwright.async_api import Page
+from autospider.common.logger import get_logger
 
 from .base import BaseAnomalyHandler
 from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled
 from ..task_utils import create_monitored_task
+
+logger = get_logger(__name__)
 
 _OVERLAY_STYLE = "position:fixed;top:0;left:0;width:100%;z-index:2147483647;font-family:sans-serif;text-align:center;padding:15px;box-shadow:0 4px 12px rgba(0,0,0,0.15);box-sizing:border-box;"
 _BUTTON_STYLE = "margin-left:20px;padding:8px 24px;color:white;background-color:#28a745;border:none;border-radius:5px;cursor:pointer;font-weight:bold;"
@@ -134,7 +136,7 @@ class LoginHandler(BaseAnomalyHandler):
             await self._inject_banner(page)
             success_reason = await self._wait_for_login_success(page)
             if success_reason:
-                logger.success(f">>> 检测到登录成功: {success_reason} <<<")
+                logger.info(f">>> 检测到登录成功: {success_reason} <<<")
                 await self._save_auth_state(page)
             else:
                 logger.warning(">>> 等待超时，未检测到登录成功，不保存状态 <<<")
@@ -339,6 +341,6 @@ class LoginHandler(BaseAnomalyHandler):
                 os.makedirs(save_dir)
             await page.context.storage_state(path=self.auth_file)
             cookies = await page.context.cookies()
-            logger.success(f">>> 登录状态已保存: {self.auth_file} ({len(cookies)} cookies) <<<")
+            logger.info(f">>> 登录状态已保存: {self.auth_file} ({len(cookies)} cookies) <<<")
         except Exception as exc:
             logger.error(f"保存登录状态失败: {exc}")

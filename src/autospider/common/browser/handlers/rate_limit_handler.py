@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import urlparse
 
-from loguru import logger
 from playwright.async_api import Page
+from autospider.common.logger import get_logger
 
 from .base import BaseAnomalyHandler
+
+logger = get_logger(__name__)
 
 RATE_LIMIT_KEYWORDS = [
     "访问过于频繁",

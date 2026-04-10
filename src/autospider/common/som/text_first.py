@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 文本优先的 mark_id 解析/消歧工具
 
@@ -9,6 +7,8 @@ from __future__ import annotations
 - 为提升鲁棒性，全项目统一使用“文本优先、歧义重选、未命中报错”的策略。
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -16,7 +16,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..config import config
 from ..logger import get_logger
 from ..llm.streaming import ainvoke_with_stream
-from ..protocol import parse_protocol_message
+from ..llm.trace_logger import append_llm_trace
+from ..protocol import (
+    extract_response_text_from_llm_payload,
+    parse_protocol_message,
+    summarize_llm_payload,
+)
 from ..utils.prompt_template import render_template
 from ..utils.paths import get_prompt_path
 from .mark_id_validator import MarkIdValidator
@@ -30,6 +35,38 @@ if TYPE_CHECKING:
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("disambiguate_by_text.yaml")
 logger = get_logger(__name__)
+
+
+def _llm_model_name(llm: "ChatOpenAI") -> str | None:
+    return getattr(llm, "model_name", None) or getattr(llm, "model", None) or config.llm.model
+
+
+def _candidate_trace_preview(candidates: list["ElementMark"]) -> list[dict[str, str | int]]:
+    return [
+        {
+            "overlay_mark_id": index + 1,
+            "mark_id": candidate.mark_id,
+            "text": candidate.text[:120],
+        }
+        for index, candidate in enumerate(candidates[:20])
+    ]
+
+
+def _extract_selected_index(message: dict[str, object] | None) -> int | None:
+    if not message:
+        return None
+    args = message.get("args") if isinstance(message.get("args"), dict) else {}
+    selected = args.get("selected_mark_id")
+    if selected is None:
+        items = args.get("items") or []
+        if items and isinstance(items[0], dict):
+            selected = items[0].get("mark_id")
+    if selected is None:
+        selected = args.get("mark_id")
+    try:
+        return int(selected)
+    except (TypeError, ValueError):
+        return None
 
 
 async def resolve_mark_ids_from_map(
@@ -150,6 +187,7 @@ async def disambiguate_mark_id_by_text(
         {"mark_id": str(i + 1), "bbox": c.bbox.model_dump()}
         for i, c in enumerate(candidates[:20])  # 防止候选过多影响可读性
     ]
+    candidate_preview = _candidate_trace_preview(candidates)
 
     system_prompt = render_template(PROMPT_TEMPLATE_PATH, section="system_prompt")
     user_message = render_template(
@@ -162,7 +200,7 @@ async def disambiguate_mark_id_by_text(
     )
 
     attempts = max(1, int(max_retries or 1))
-    for _ in range(attempts):
+    for attempt_index in range(attempts):
         _, screenshot_base64 = await capture_screenshot_with_custom_marks(
             page, overlay_marks, hide_original_som=True
         )
@@ -180,29 +218,76 @@ async def disambiguate_mark_id_by_text(
             ),
         ]
 
-        response = await ainvoke_with_stream(llm, messages)
-        response_text = getattr(response, "content", "") or ""
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        try:
+            response = await ainvoke_with_stream(llm, messages)
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
+            message = parse_protocol_message(response)
+        except Exception as exc:
+            append_llm_trace(
+                component="text_first_disambiguate",
+                payload={
+                    "model": _llm_model_name(llm),
+                    "input": {
+                        "target_text": target_text,
+                        "attempt_index": attempt_index + 1,
+                        "max_retries": attempts,
+                        "candidate_count": len(candidate_preview),
+                        "candidates": candidate_preview,
+                        "system_prompt": system_prompt,
+                        "user_message": user_message,
+                        "screenshot_base64_len": len(screenshot_base64 or ""),
+                    },
+                    "output": {
+                        "raw_response": raw_response,
+                        "parsed_payload": None,
+                        "selected_overlay_mark_id": None,
+                        "resolved_mark_id": None,
+                    },
+                    "response_summary": response_summary,
+                    "error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                },
+            )
+            raise
 
-        message = parse_protocol_message(response)
+        selected_index = _extract_selected_index(message)
+        resolved_mark_id = None
+        if selected_index is not None and 1 <= selected_index <= len(overlay_marks):
+            resolved_mark_id = candidates[selected_index - 1].mark_id
+        append_llm_trace(
+            component="text_first_disambiguate",
+            payload={
+                "model": _llm_model_name(llm),
+                "input": {
+                    "target_text": target_text,
+                    "attempt_index": attempt_index + 1,
+                    "max_retries": attempts,
+                    "candidate_count": len(candidate_preview),
+                    "candidates": candidate_preview,
+                    "system_prompt": system_prompt,
+                    "user_message": user_message,
+                    "screenshot_base64_len": len(screenshot_base64 or ""),
+                },
+                "output": {
+                    "raw_response": raw_response,
+                    "parsed_payload": message,
+                    "selected_overlay_mark_id": selected_index,
+                    "resolved_mark_id": resolved_mark_id,
+                },
+                "response_summary": response_summary,
+            },
+        )
         if not message:
             continue
         if message.get("action") != "select":
             continue
 
-        args = message.get("args") if isinstance(message.get("args"), dict) else {}
-        selected = args.get("selected_mark_id")
-        if selected is None:
-            items = args.get("items") or []
-            if items and isinstance(items[0], dict):
-                selected = items[0].get("mark_id")
-        if selected is None:
-            selected = args.get("mark_id")
-        try:
-            selected_index = int(selected)
-        except (TypeError, ValueError):
-            continue
-
-        if 1 <= selected_index <= len(overlay_marks):
-            return candidates[selected_index - 1].mark_id
+        if resolved_mark_id is not None:
+            return resolved_mark_id
 
     return None

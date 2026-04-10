@@ -151,6 +151,7 @@ class TaskClarifier:
                         },
                     },
                 },
+                "response_summary": response_summary,
             },
         )
         return result

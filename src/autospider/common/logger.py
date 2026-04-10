@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
+
+from .utils.paths import get_repo_root, resolve_output_path, resolve_repo_path
 
 if TYPE_CHECKING:
     pass
@@ -18,6 +22,10 @@ if TYPE_CHECKING:
 
 # 全局控制台实例
 console = Console()
+_BOOTSTRAPPED = False
+_CURRENT_LOG_FILE = ""
+_CONSOLE_HANDLER: logging.Handler | None = None
+_FILE_HANDLER: logging.Handler | None = None
 
 # 日志级别映射
 LOG_LEVEL_MAP = {
@@ -29,14 +37,97 @@ LOG_LEVEL_MAP = {
 }
 
 
+def _load_logging_environment() -> None:
+    env_file = get_repo_root() / ".env"
+    load_dotenv(env_file, override=False)
+
+
 def get_log_level() -> int:
     """从环境变量获取日志级别
 
     Returns:
         日志级别常量
     """
+    _load_logging_environment()
     level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     return LOG_LEVEL_MAP.get(level_str, logging.INFO)
+
+
+def _should_show_locals() -> bool:
+    _load_logging_environment()
+    return os.getenv("LOG_SHOW_LOCALS", "false").lower() == "true"
+
+
+def _resolve_runtime_log_file(output_dir: str | None = None) -> Path:
+    if output_dir:
+        return resolve_output_path(output_dir, "runtime.log")
+
+    _load_logging_environment()
+    configured = os.getenv("LOG_FILE", "output/runtime.log").strip() or "output/runtime.log"
+    return resolve_repo_path(configured)
+
+
+def _build_console_handler(level: int) -> logging.Handler:
+    handler = RichHandler(
+        console=console,
+        show_time=True,
+        show_path=False,
+        rich_tracebacks=True,
+        tracebacks_show_locals=_should_show_locals(),
+        markup=False,
+    )
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(message)s", datefmt="[%X]"))
+    return handler
+
+
+def _build_file_handler(log_file: Path, level: int) -> logging.Handler:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    handler.setLevel(level)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    return handler
+
+
+def _configure_root_logger(level: int, log_file: Path) -> None:
+    global _CONSOLE_HANDLER, _FILE_HANDLER, _CURRENT_LOG_FILE
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    if _CONSOLE_HANDLER is None:
+        _CONSOLE_HANDLER = _build_console_handler(level)
+        root_logger.addHandler(_CONSOLE_HANDLER)
+    else:
+        _CONSOLE_HANDLER.setLevel(level)
+        root_logger.addHandler(_CONSOLE_HANDLER)
+
+    target_log_file = str(log_file)
+    if _FILE_HANDLER is not None and _CURRENT_LOG_FILE != target_log_file:
+        root_logger.removeHandler(_FILE_HANDLER)
+        _FILE_HANDLER.close()
+        _FILE_HANDLER = None
+
+    if _FILE_HANDLER is None:
+        _FILE_HANDLER = _build_file_handler(log_file, level)
+        _CURRENT_LOG_FILE = target_log_file
+        root_logger.addHandler(_FILE_HANDLER)
+    else:
+        _FILE_HANDLER.setLevel(level)
+        root_logger.addHandler(_FILE_HANDLER)
+
+
+def bootstrap_logging(*, output_dir: str | None = None) -> None:
+    """初始化统一日志系统，并按需切换输出目录。"""
+    global _BOOTSTRAPPED
+    level = get_log_level()
+    log_file = _resolve_runtime_log_file(output_dir)
+    _configure_root_logger(level, log_file)
+    _BOOTSTRAPPED = True
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -55,39 +146,11 @@ def get_logger(name: str) -> logging.Logger:
         >>> logger = get_logger(__name__)
         >>> logger.info("这是一条日志")
     """
+    if not _BOOTSTRAPPED:
+        bootstrap_logging()
     logger = logging.getLogger(name)
-
-    # 避免重复配置
-    if logger.handlers:
-        return logger
-
-    # 设置日志级别
-    log_level = get_log_level()
-    logger.setLevel(log_level)
-
-    # 配置 Rich 处理器
-    rich_handler = RichHandler(
-        console=console,
-        show_time=True,
-        show_path=False,
-        rich_tracebacks=True,
-        tracebacks_show_locals=os.getenv("LOG_SHOW_LOCALS", "false").lower() == "true",
-        markup=True,
-    )
-    rich_handler.setLevel(log_level)
-
-    # 设置格式
-    formatter = logging.Formatter(
-        "%(message)s",
-        datefmt="[%X]",
-    )
-    rich_handler.setFormatter(formatter)
-
-    logger.addHandler(rich_handler)
-
-    # 阻止日志传播到父级
-    logger.propagate = False
-
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
     return logger
 
 
@@ -103,15 +166,8 @@ def setup_file_logging(
         log_file: 日志文件路径
         level: 文件日志级别
     """
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(level)
-
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    file_handler.setFormatter(formatter)
-
+    resolved = resolve_repo_path(log_file)
+    file_handler = _build_file_handler(resolved, level)
     logger.addHandler(file_handler)
 
 

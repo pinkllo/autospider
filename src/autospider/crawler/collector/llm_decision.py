@@ -8,10 +8,15 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...common.llm.streaming import ainvoke_with_stream
+from ...common.llm.trace_logger import append_llm_trace
 from ...common.utils.prompt_template import render_template
 from ...common.logger import get_logger
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
-from ...common.protocol import parse_protocol_message
+from ...common.protocol import (
+    extract_response_text_from_llm_payload,
+    parse_protocol_message,
+    summarize_llm_payload,
+)
 from ...common.utils.paths import get_prompt_path
 from ...domain.planning import format_execution_brief
 
@@ -24,6 +29,33 @@ if TYPE_CHECKING:
 # Prompt 模板文件路径
 PROMPT_TEMPLATE_PATH = get_prompt_path("url_collector.yaml")
 logger = get_logger(__name__)
+
+
+def _get_model_name(llm: object) -> str | None:
+    return getattr(llm, "model_name", None) or getattr(llm, "model", None)
+
+
+def _build_trace_payload(
+    *,
+    llm: object,
+    input_payload: dict[str, object],
+    raw_response: str,
+    response_summary: dict[str, object],
+    parsed_payload: dict | None = None,
+    error: Exception | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "model": _get_model_name(llm),
+        "input": input_payload,
+        "output": {
+            "raw_response": raw_response,
+            "parsed_payload": parsed_payload,
+        },
+        "response_summary": response_summary,
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
 
 
 class LLMDecisionMaker:
@@ -119,34 +151,76 @@ class LLMDecisionMaker:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "current_url": current_url,
+            "list_url": self.list_url,
+            "task_description": self.task_description,
+            "visited_detail_count": len(self.visited_detail_urls),
+            "collected_urls_sample": list(self.collected_urls)[:10],
+            "validation_feedback": validation_feedback,
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+            "candidate_count": len(getattr(snapshot, "marks", []) or []),
+        }
         try:
             logger.info("[LLM] 调用视觉 LLM 进行决策...")
             # 使用 decider 的 LLM（视觉模型）
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
-            logger.info("[LLM] 响应前100字符: %s...", response_text[:100])
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
+            logger.info("[LLM] 响应前100字符: %s...", raw_response[:100])
 
             message = parse_protocol_message(response)
+            append_llm_trace(
+                component="collector_decision",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    parsed_payload=message,
+                ),
+            )
             if message:
-                args = message.get("args") if isinstance(message.get("args"), dict) else {}
                 reasoning = message.get("thinking") or ""
                 logger.info("[LLM] 决策: %s", message.get("action"))
                 if reasoning:
                     logger.info("[LLM] 理由: %s...", str(reasoning)[:100])
                 return message
 
-            logger.warning("[LLM] 响应中未找到 JSON: %s", response_text[:200])
+            logger.warning("[LLM] 响应中未找到 JSON: %s", raw_response[:200])
         except json.JSONDecodeError as e:
             logger.warning("[LLM] JSON 解析失败: %s", e)
             logger.warning(
                 "[LLM] 原始响应: %s",
-                response_text[:300] if "response_text" in locals() else "N/A",
+                raw_response[:300] if raw_response else "N/A",
+            )
+            append_llm_trace(
+                component="collector_decision",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    error=e,
+                ),
             )
         except Exception as e:
-            logger.error("[LLM] 决策失败: %s", e)
-            import traceback
-
-            traceback.print_exc()
+            append_llm_trace(
+                component="collector_decision",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    error=e,
+                ),
+            )
+            logger.exception("[LLM] 决策失败")
 
         return None
 
@@ -199,15 +273,46 @@ class LLMDecisionMaker:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "page_url": self.page.url,
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+            "candidate_count": len(getattr(snapshot, "marks", []) or []),
+        }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
 
             message = parse_protocol_message(response)
+            append_llm_trace(
+                component="collector_jump_widget_detection",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    parsed_payload=message,
+                ),
+            )
             if message:
                 return message
         except Exception as e:
-            logger.warning("[Extract-JumpWidget-LLM] LLM 识别失败: %s", e)
+            append_llm_trace(
+                component="collector_jump_widget_detection",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    error=e,
+                ),
+            )
+            logger.exception("[Extract-JumpWidget-LLM] LLM 识别失败")
 
         return None
 
@@ -244,14 +349,45 @@ class LLMDecisionMaker:
             ),
         ]
 
+        raw_response = ""
+        response_summary: dict[str, object] = {}
+        trace_input = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "page_url": self.page.url,
+            "selected_skills": list(self.selected_skills or []),
+            "screenshot_base64_len": len(screenshot_base64 or ""),
+            "candidate_count": len(getattr(snapshot, "marks", []) or []),
+        }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
-            response_text = response.content
+            raw_response = extract_response_text_from_llm_payload(response)
+            response_summary = summarize_llm_payload(response)
 
             message = parse_protocol_message(response)
+            append_llm_trace(
+                component="collector_pagination_detection",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    parsed_payload=message,
+                ),
+            )
             if message:
                 return message
         except Exception as e:
-            logger.warning("[Extract-Pagination-LLM] LLM 识别失败: %s", e)
+            append_llm_trace(
+                component="collector_pagination_detection",
+                payload=_build_trace_payload(
+                    llm=self.decider.llm,
+                    input_payload=trace_input,
+                    raw_response=raw_response,
+                    response_summary=response_summary,
+                    error=e,
+                ),
+            )
+            logger.exception("[Extract-Pagination-LLM] LLM 识别失败")
 
         return None

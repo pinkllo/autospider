@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .common.db.engine import init_db
-from .common.logger import get_logger
+from .common.logger import bootstrap_logging, get_logger
 from .domain.fields import FieldDefinition, build_field_definitions, serialize_field_definitions
 from .graph import EntryMode, GraphInput, GraphRunner
 from .common.config import config
@@ -583,6 +583,7 @@ def chat_pipeline_command(
     thread_id: str = typer.Option("", "--thread-id", help=_GRAPH_THREAD_ID_HELP),
 ):
     """全自然语言多轮交互后执行流水线。"""
+    bootstrap_logging(output_dir=output_dir)
     if max_turns < 1:
         console.print(
             Panel(
