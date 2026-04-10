@@ -19,6 +19,7 @@ from ...pipeline.subtask_runtime import (
     inherit_parent_nav_steps,
     resolve_subtask_status,
     restore_subtask,
+    subtask_to_payload,
     subtask_signature,
 )
 from ...pipeline.worker import SubTaskWorker
@@ -90,8 +91,19 @@ def _resolve_runtime_subtasks_use_main_model(params: dict[str, Any]) -> bool:
 
 
 def _resolve_dispatch_batch_size(state: MultiDispatchState) -> int:
-    params = dict(state.get("normalized_params") or {})
-    return resolve_concurrency_settings(params).max_concurrent
+    return resolve_concurrency_settings(_normalized_params(state)).max_concurrent
+
+
+def _normalized_params(state: MultiDispatchState) -> dict[str, Any]:
+    return dict(state.get("normalized_params") or {})
+
+
+def _dispatch_output_dir(state: MultiDispatchState) -> str:
+    return str(_normalized_params(state).get("output_dir") or "output")
+
+
+def _subtask_params(state: SubTaskFlowState) -> dict[str, Any]:
+    return dict(state.get("normalized_params") or {})
 
 
 def _resolve_subtask_status(result: dict[str, Any]):
@@ -123,6 +135,25 @@ def _build_dispatch_summary(plan: TaskPlan, subtask_results: list[SubTaskRuntime
     return build_dispatch_summary(plan, subtask_results)
 
 
+def _dispatch_state_payload(
+    *,
+    status: str,
+    task_plan: TaskPlan,
+    plan_knowledge: str,
+    subtask_results: list[SubTaskRuntimeState],
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        "status": status,
+        "task_plan": task_plan,
+        "plan_knowledge": plan_knowledge,
+        "subtask_results": subtask_results,
+        "summary": summary,
+    }
+    payload["dispatch_result"] = summary
+    return payload
+
+
 def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
     plan = state.get("task_plan")
     if not isinstance(plan, TaskPlan):
@@ -130,7 +161,7 @@ def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
     queue = list(state.get("dispatch_queue") or [])
     if not queue:
-        queue = [subtask.model_dump(mode="python") for subtask in plan.subtasks]
+        queue = [subtask_to_payload(subtask) for subtask in plan.subtasks]
     return {
         "dispatch_queue": queue,
         "current_batch": list(state.get("current_batch") or []),
@@ -152,7 +183,7 @@ def route_dispatch_batch(state: MultiDispatchState):
     batch = list(state.get("current_batch") or [])
     if not batch:
         return "complete_dispatch"
-    params = dict(state.get("normalized_params") or {})
+    params = _normalized_params(state)
     params["_thread_id"] = str(state.get("thread_id") or "")
     return [
         Send(
@@ -169,8 +200,8 @@ def route_dispatch_batch(state: MultiDispatchState):
 
 
 async def run_subtask_worker_node(state: SubTaskFlowState):
-    subtask = _restore_subtask(dict(state.get("subtask_payload") or {}))
-    params = dict(state.get("normalized_params") or {})
+    subtask = _restore_subtask(state.get("subtask_payload") or {})
+    params = _subtask_params(state)
     plan = state.get("task_plan")
     if subtask.max_pages is None and params.get("max_pages") is not None:
         subtask.max_pages = int(params["max_pages"])
@@ -197,11 +228,14 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
                 runtime_subtasks_use_main_model=_resolve_runtime_subtasks_use_main_model(params),
             )
             result = await worker.execute()
+            effective_subtask = _restore_subtask(
+                result.get("_effective_subtask") or result.get("effective_subtask") or subtask
+            )
             runtime_state = build_runtime_state(
-                _restore_subtask(result.get("effective_subtask") or subtask.model_dump(mode="python")),
+                effective_subtask,
                 status=_resolve_subtask_status(result),
                 error=str(result.get("error") or "")[:500],
-                result=result,
+                result=result.get("_pipeline_result") or result,
                 expand_request=dict(result.get("expand_request") or {}),
             )
             break
@@ -237,9 +271,16 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         plan=plan,
         expand_requests=list(state.get("round_expand_requests") or []),
         pending_queue=list(state.get("dispatch_queue") or []),
-        output_dir=str(dict(state.get("normalized_params") or {}).get("output_dir") or "output"),
+        output_dir=_dispatch_output_dir(state),
     )
     summary = _build_dispatch_summary(mutation.task_plan, accumulated)
+    dispatch_payload = _dispatch_state_payload(
+        status="ok",
+        task_plan=mutation.task_plan,
+        plan_knowledge=mutation.plan_knowledge,
+        subtask_results=accumulated,
+        summary=summary,
+    )
     return {
         "task_plan": mutation.task_plan,
         "plan_knowledge": mutation.plan_knowledge,
@@ -248,8 +289,9 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         "subtask_results": accumulated,
         "round_subtask_results": [],
         "round_expand_requests": [],
+        "dispatch_result": summary,
         "summary": summary,
-        "dispatch": {"status": "ok", "task_plan": mutation.task_plan, "plan_knowledge": mutation.plan_knowledge, "subtask_results": accumulated, "summary": summary},
+        "dispatch": dispatch_payload,
     }
 
 
@@ -268,20 +310,27 @@ def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
         plan=plan,
         expand_requests=[],
         pending_queue=list(state.get("dispatch_queue") or []),
-        output_dir=str(dict(state.get("normalized_params") or {}).get("output_dir") or "output"),
+        output_dir=_dispatch_output_dir(state),
     )
     result_items = list(state.get("subtask_results") or [])
     summary = _build_dispatch_summary(mutation.task_plan, result_items)
+    dispatch_payload = _dispatch_state_payload(
+        status="ok",
+        task_plan=mutation.task_plan,
+        plan_knowledge=mutation.plan_knowledge,
+        subtask_results=result_items,
+        summary=summary,
+    )
     return {
         "task_plan": mutation.task_plan,
         "plan_knowledge": mutation.plan_knowledge,
         "dispatch_result": summary,
-        "subtask_results": result_items,
         "summary": summary,
+        "subtask_results": result_items,
         "node_status": "ok",
         "node_error": None,
         "node_payload": {"dispatch_result": summary},
-        "dispatch": {"status": "ok", "task_plan": mutation.task_plan, "plan_knowledge": mutation.plan_knowledge, "dispatch_result": summary, "subtask_results": result_items, "summary": summary},
+        "dispatch": dispatch_payload,
         "error": None,
     }
 

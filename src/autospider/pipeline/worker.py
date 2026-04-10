@@ -15,10 +15,11 @@ from pathlib import Path
 
 from ..common.config import config
 from ..common.logger import get_logger
-from ..pipeline.types import ExecutionRequest, PipelineMode, SubtaskOutcomeType
 from ..domain.fields import FieldDefinition
 from ..domain.planning import SubTask, SubTaskMode, format_execution_brief
 from ..pipeline.helpers import build_execution_context
+from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
+from ..pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult, SubtaskOutcomeType
 from ..crawler.planner.runtime import RuntimeExpansionService
 from .runtime_controls import resolve_concurrency_settings
 
@@ -40,6 +41,16 @@ def _resolve_runtime_subtasks_use_main_model(raw_value: object | None) -> bool:
     if isinstance(raw_value, bool):
         return raw_value
     return str(raw_value).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _resolve_outcome_type(result: PipelineRunResult) -> str:
+    if result.summary.outcome_state == "no_data":
+        return SubtaskOutcomeType.NO_DATA.value
+    if result.error:
+        return SubtaskOutcomeType.SYSTEM_FAILURE.value
+    if result.summary.success_count <= 0:
+        return SubtaskOutcomeType.BUSINESS_FAILURE.value
+    return SubtaskOutcomeType.SUCCESS.value
 
 
 class SubTaskWorker:
@@ -212,7 +223,7 @@ class SubTaskWorker:
                 else None
             ),
             "journal_entries": journal_entries,
-            "effective_subtask": expanded.effective_subtask.model_dump(mode="python"),
+            "effective_subtask": expanded.effective_subtask,
         }
 
     async def execute(self) -> dict:
@@ -234,9 +245,7 @@ class SubTaskWorker:
         if self.subtask.mode == SubTaskMode.EXPAND:
             runtime_result = await self._expand_runtime_subtask()
             journal_entries = list(runtime_result.get("journal_entries") or [])
-            working_subtask = SubTask.model_validate(
-                runtime_result.get("effective_subtask") or self.subtask.model_dump(mode="python")
-            )
+            working_subtask = restore_subtask(runtime_result.get("effective_subtask") or self.subtask)
             if runtime_result.get("execution_state") == "expanded":
                 logger.info(
                     "[Worker:%s] 运行时扩树完成，返回 ExpandRequest",
@@ -247,7 +256,8 @@ class SubTaskWorker:
                     "outcome_type": SubtaskOutcomeType.EXPANDED.value,
                     "expand_request": runtime_result.get("expand_request"),
                     "journal_entries": journal_entries,
-                    "effective_subtask": working_subtask.model_dump(mode="python"),
+                    "effective_subtask": subtask_to_payload(working_subtask),
+                    "_effective_subtask": working_subtask,
                     "items_file": "",
                     "total_urls": 0,
                     "success_count": 0,
@@ -291,24 +301,21 @@ class SubTaskWorker:
             context.pipeline_mode.value,
             context.execution_id,
         )
-        result = await run_pipeline(context)
-        outcome_state = str(result.get("outcome_state") or "").strip().lower()
-        if outcome_state == "no_data":
-            result["outcome_type"] = SubtaskOutcomeType.NO_DATA.value
-        elif result.get("error"):
-            result["outcome_type"] = SubtaskOutcomeType.SYSTEM_FAILURE.value
-        elif int(result.get("success_count", 0) or 0) <= 0:
-            result["outcome_type"] = SubtaskOutcomeType.BUSINESS_FAILURE.value
-        else:
-            result["outcome_type"] = SubtaskOutcomeType.SUCCESS.value
+        pipeline_result = await run_pipeline(context)
+        result = pipeline_result.to_payload()
+        result["outcome_type"] = _resolve_outcome_type(pipeline_result)
+        pipeline_result = PipelineRunResult.from_raw(result)
 
         logger.info(
             "[Worker:%s] 执行完成: 采集 %d 条, 成功 %d 条",
             self.subtask.id,
-            result.get("total_urls", 0),
-            result.get("success_count", 0),
+            pipeline_result.summary.total_urls,
+            pipeline_result.summary.success_count,
         )
         result["journal_entries"] = journal_entries
-        result["effective_subtask"] = working_subtask.model_dump(mode="python")
+        pipeline_result = PipelineRunResult.from_raw(result)
+        result["effective_subtask"] = subtask_to_payload(working_subtask)
+        result["_effective_subtask"] = working_subtask
+        result["_pipeline_result"] = pipeline_result
         result["execution_brief_text"] = format_execution_brief(working_subtask.execution_brief)
         return result

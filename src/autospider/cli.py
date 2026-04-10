@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import threading
 from typing import Any
@@ -16,7 +15,7 @@ from rich.table import Table
 
 from .common.db.engine import init_db
 from .common.logger import get_logger
-from .domain.fields import FieldDefinition
+from .domain.fields import FieldDefinition, build_field_definitions, serialize_field_definitions
 from .graph import EntryMode, GraphInput, GraphRunner
 from .common.config import config
 
@@ -125,7 +124,7 @@ def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
 
 def _serialize_fields(fields: list[FieldDefinition]) -> list[dict]:
     """将字段定义序列化为可传输字典。"""
-    return [dataclasses.asdict(field) for field in fields]
+    return serialize_field_definitions(fields)
 
 
 def _log_graph_runtime(result: dict) -> None:
@@ -220,24 +219,13 @@ def _primary_interrupt_payload(result: dict) -> dict[str, Any] | None:
 
 def _field_definition_from_mapping(raw_field: dict[str, Any]) -> FieldDefinition:
     """将字典字段转换为 FieldDefinition。"""
-    return FieldDefinition(
-        name=str(raw_field.get("name") or ""),
-        description=str(raw_field.get("description") or ""),
-        required=bool(raw_field.get("required", True)),
-        data_type=str(raw_field.get("data_type") or "text"),
-        example=raw_field.get("example"),
-    )
+    return build_field_definitions([raw_field])[0]
 
 
 
 def _field_definitions_from_mappings(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
     """将字典字段列表转换为 FieldDefinition 列表。"""
-    fields: list[FieldDefinition] = []
-    for item in raw_fields:
-        if not isinstance(item, dict):
-            continue
-        fields.append(_field_definition_from_mapping(item))
-    return fields
+    return build_field_definitions(item for item in raw_fields if isinstance(item, dict))
 
 
 

@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...common.logger import get_logger
-from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
+from ...common.storage.collection_persistence import (
+    CollectionConfig,
+    ConfigPersistence,
+    load_collection_config,
+)
 from ...common.storage.idempotent_io import write_json_idempotent
 from ..collector import (
     URLCollectorResult,
@@ -80,8 +82,7 @@ class BatchCollector(BaseCollector):
         """预加载配置文件以获取基本信息"""
         if self.config_path.exists():
             try:
-                data = json.loads(self.config_path.read_text(encoding="utf-8"))
-                self.collection_config = CollectionConfig.from_dict(data)
+                self.collection_config = load_collection_config(self.config_path, strict=True)
                 self.list_url = self.collection_config.list_url
                 self.task_description = self.collection_config.task_description
                 self.nav_steps = self.collection_config.nav_steps
@@ -207,8 +208,7 @@ class BatchCollector(BaseCollector):
             return False
 
         try:
-            data = json.loads(self.config_path.read_text(encoding="utf-8"))
-            self.collection_config = CollectionConfig.from_dict(data)
+            self.collection_config = load_collection_config(self.config_path, strict=True)
 
             # 提取配置信息
             self.list_url = self.collection_config.list_url

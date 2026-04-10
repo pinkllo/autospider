@@ -12,7 +12,8 @@ from ..common.storage.idempotent_io import write_json_idempotent
 from ..domain.fields import FieldDefinition
 from .batch_xpath_extractor import BatchXPathExtractor
 from .field_extractor import FieldExtractor
-from .models import CommonFieldXPath, PageExtractionRecord
+from .field_config import field_rules_to_payload
+from .models import CommonFieldXPath, ExtractionConfig, FieldRule, PageExtractionRecord
 from .xpath_helpers import normalize_xpath_majority_key
 from .xpath_pattern import FieldXPathExtractor
 
@@ -40,6 +41,10 @@ def _record_to_dict(record: PageExtractionRecord) -> dict:
             for field in record.fields
         ],
     }
+
+
+def _serialize_records(records: list[PageExtractionRecord]) -> list[dict]:
+    return [_record_to_dict(record) for record in records]
 
 
 def _items_from_records(records: list[PageExtractionRecord]) -> list[dict]:
@@ -86,37 +91,24 @@ def _build_template_signature(record: PageExtractionRecord, fields: list[FieldDe
     return "|".join(parts)
 
 
-def _build_fields_config(
+def _build_field_rules(
     fields: list[FieldDefinition],
     common_xpaths: list[CommonFieldXPath],
-) -> list[dict]:
+) -> list[FieldRule]:
     xpath_map = {xpath.field_name: xpath for xpath in common_xpaths}
-    return [
-        {
-            "name": field.name,
-            "description": field.description,
-            "xpath": xpath_map[field.name].xpath_pattern if field.name in xpath_map else None,
-            "xpath_fallbacks": xpath_map[field.name].fallback_xpaths if field.name in xpath_map else [],
-            "xpath_validated": field.name in xpath_map,
-            "required": field.required,
-            "data_type": field.data_type,
-            "extraction_source": field.extraction_source,
-            "fixed_value": field.fixed_value,
-        }
-        for field in fields
-    ]
+    return [FieldRule.from_xpath(field, xpath_map.get(field.name)) for field in fields]
 
 
-def _required_rules_ready(fields_config: list[dict]) -> bool:
-    for field in fields_config:
-        if not bool(field.get("required", True)):
+def _required_rules_ready(field_rules: list[FieldRule]) -> bool:
+    for rule in field_rules:
+        if not rule.required:
             continue
-        if field.get("xpath"):
+        if rule.xpath:
             continue
-        source = str(field.get("extraction_source") or "").strip().lower()
+        source = str(rule.extraction_source or "").strip().lower()
         if source in {"constant", "subtask_context", "task_url"}:
             continue
-        if str(field.get("data_type") or "").strip().lower() == "url":
+        if str(rule.data_type or "").strip().lower() == "url":
             continue
         return False
     return True
@@ -159,31 +151,46 @@ def _records_match(
     return len(errors) == 0, errors
 
 
+def _build_xpath_result_payload(
+    extraction_config: ExtractionConfig,
+    final_records: list[PageExtractionRecord],
+) -> dict:
+    fields_config = field_rules_to_payload(extraction_config.fields)
+    return {
+        "fields": fields_config,
+        "records": _serialize_records(final_records),
+        "total_urls": len(final_records),
+        "success_count": sum(1 for record in final_records if record.success),
+    }
+
+
 def _save_outputs(
     *,
     output_dir: str,
     fields: list[FieldDefinition],
-    fields_config: list[dict],
+    extraction_config: ExtractionConfig,
     sample_records: list[PageExtractionRecord],
     validation_records: list[PageExtractionRecord],
     final_records: list[PageExtractionRecord],
     validation_failures: list[dict],
 ) -> None:
+    fields_config = field_rules_to_payload(extraction_config.fields)
+    xpath_result = _build_xpath_result_payload(extraction_config, final_records)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     write_json_idempotent(
         output_path / "extraction_config.json",
-        {"fields": fields_config, "created_at": ""},
+        extraction_config.to_payload(),
         volatile_keys=set(),
     )
 
     detail_payload = {
         "fields": [field.model_dump(mode="python") for field in fields],
         "common_fields": fields_config,
-        "sample_records": [_record_to_dict(record) for record in sample_records],
-        "validation_records": [_record_to_dict(record) for record in validation_records],
-        "records": [_record_to_dict(record) for record in final_records],
+        "sample_records": _serialize_records(sample_records),
+        "validation_records": _serialize_records(validation_records),
+        "records": xpath_result["records"],
         "validation_failures": validation_failures,
         "validation_success": not validation_failures and bool(fields_config),
         "total_urls_explored": len(sample_records),
@@ -225,7 +232,7 @@ async def run_field_pipeline(
         _save_outputs(
             output_dir=output_dir,
             fields=fields,
-            fields_config=[],
+            extraction_config=ExtractionConfig(),
             sample_records=[],
             validation_records=[],
             final_records=[],
@@ -254,7 +261,7 @@ async def run_field_pipeline(
     sample_records: list[PageExtractionRecord] = []
     validation_records: list[PageExtractionRecord] = []
     validation_failures: list[dict] = []
-    fields_config: list[dict] = []
+    extraction_config = ExtractionConfig()
     validated = False
     cursor = 0
 
@@ -280,13 +287,14 @@ async def run_field_pipeline(
             records=candidate_samples,
             field_names=[field.name for field in fields],
         )
-        candidate_fields_config = _build_fields_config(fields, common_xpaths)
-        if not _required_rules_ready(candidate_fields_config):
+        candidate_field_rules = _build_field_rules(fields, common_xpaths)
+        if not _required_rules_ready(candidate_field_rules):
             continue
+        candidate_extraction_config = ExtractionConfig(fields=tuple(candidate_field_rules))
 
         candidate_rule_extractor = BatchXPathExtractor(
             page=page,
-            fields_config=candidate_fields_config,
+            fields_config=candidate_extraction_config.fields,
             output_dir=output_dir,
             skill_runtime=skill_runtime,
         )
@@ -327,7 +335,7 @@ async def run_field_pipeline(
         validation_records = current_validation_records
 
         if validation_ok and len(current_validation_records) == validate_count:
-            fields_config = candidate_fields_config
+            extraction_config = candidate_extraction_config
             validated = True
             break
 
@@ -335,10 +343,11 @@ async def run_field_pipeline(
 
     final_records: list[PageExtractionRecord] = []
 
+    fields_config = field_rules_to_payload(extraction_config.fields)
     if run_xpath and validated and fields_config:
         rule_extractor = BatchXPathExtractor(
             page=page,
-            fields_config=fields_config,
+            fields_config=extraction_config.fields,
             output_dir=output_dir,
             skill_runtime=skill_runtime,
         )
@@ -359,18 +368,12 @@ async def run_field_pipeline(
         if record is not None:
             final_records.append(record)
 
-    success_count = sum(1 for record in final_records if record.success)
-    xpath_result = {
-        "fields": fields_config,
-        "records": [_record_to_dict(record) for record in final_records],
-        "total_urls": len(final_records),
-        "success_count": success_count,
-    }
+    xpath_result = _build_xpath_result_payload(extraction_config, final_records)
 
     _save_outputs(
         output_dir=output_dir,
         fields=fields,
-        fields_config=fields_config,
+        extraction_config=extraction_config,
         sample_records=sample_records,
         validation_records=validation_records,
         final_records=final_records,

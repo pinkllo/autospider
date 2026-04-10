@@ -2,15 +2,38 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from ..domain.planning import ExecutionBrief, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
 from ..domain.runtime import SubTaskRuntimeState
-from .types import SubtaskOutcomeType
+from .types import PipelineRunResult, PipelineRunSummary, SubtaskOutcomeType
 
 
-def restore_subtask(payload: dict[str, Any]) -> SubTask:
-    return SubTask.model_validate(dict(payload or {}))
+def _read_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def restore_execution_brief(payload: dict[str, Any] | ExecutionBrief | None) -> ExecutionBrief:
+    if isinstance(payload, ExecutionBrief):
+        return payload
+    return ExecutionBrief.model_validate(_read_mapping(payload))
+
+
+def restore_subtask(payload: dict[str, Any] | SubTask) -> SubTask:
+    if isinstance(payload, SubTask):
+        return payload
+    return SubTask.model_validate(_read_mapping(payload))
+
+
+def subtask_to_payload(subtask: SubTask) -> dict[str, Any]:
+    return subtask.model_dump(mode="python")
+
+
+def _coerce_pipeline_result(result: PipelineRunResult | dict[str, Any] | None) -> PipelineRunResult:
+    if isinstance(result, PipelineRunResult):
+        return result
+    return PipelineRunResult.from_raw(_read_mapping(result))
 
 
 def inherit_parent_nav_steps(payload: dict[str, Any], plan: TaskPlan) -> dict[str, Any]:
@@ -49,6 +72,28 @@ def _is_reliable(result: dict[str, Any] | None) -> bool:
     return durability_state == "durable"
 
 
+def _build_runtime_summary(run_result: PipelineRunResult) -> dict[str, Any]:
+    summary: PipelineRunSummary = run_result.summary
+    outcome_type = str(run_result.data.get("outcome_type") or "").strip().lower()
+    return {
+        "total_urls": summary.total_urls,
+        "success_count": summary.success_count,
+        "failed_count": summary.failed_count,
+        "success_rate": summary.success_rate,
+        "required_field_success_rate": summary.required_field_success_rate,
+        "validation_failure_count": summary.validation_failure_count,
+        "execution_state": summary.execution_state,
+        "outcome_state": summary.outcome_state,
+        "terminal_reason": summary.terminal_reason,
+        "promotion_state": summary.promotion_state.value,
+        "execution_id": summary.execution_id,
+        "items_file": summary.items_file,
+        "durability_state": summary.durability_state.value,
+        "durably_persisted": summary.durably_persisted,
+        "reliable_for_aggregation": _is_reliable({"summary": run_result.to_payload(), "outcome_type": outcome_type}),
+    }
+
+
 def resolve_subtask_status(result: dict[str, Any]) -> SubTaskStatus:
     outcome_type = str(result.get("outcome_type") or "").strip().lower()
     if outcome_type == SubtaskOutcomeType.EXPANDED.value:
@@ -82,28 +127,12 @@ def build_runtime_state(
     *,
     status: SubTaskStatus,
     error: str = "",
-    result: dict[str, Any] | None = None,
+    result: PipelineRunResult | dict[str, Any] | None = None,
     expand_request: dict[str, Any] | None = None,
 ) -> SubTaskRuntimeState:
-    run_result = dict(result or {})
-    outcome_type = str(run_result.get("outcome_type") or "").strip().lower()
-    summary = {
-        "total_urls": int(run_result.get("total_urls", 0) or 0),
-        "success_count": int(run_result.get("success_count", 0) or 0),
-        "failed_count": int(run_result.get("failed_count", 0) or 0),
-        "success_rate": float(run_result.get("success_rate", 0.0) or 0.0),
-        "required_field_success_rate": float(run_result.get("required_field_success_rate", 0.0) or 0.0),
-        "validation_failure_count": int(run_result.get("validation_failure_count", 0) or 0),
-        "execution_state": str(run_result.get("execution_state") or ""),
-        "outcome_state": str(run_result.get("outcome_state") or ""),
-        "terminal_reason": str(run_result.get("terminal_reason") or ""),
-        "promotion_state": str(run_result.get("promotion_state") or ""),
-        "execution_id": str(run_result.get("execution_id") or ""),
-        "items_file": str(run_result.get("items_file") or ""),
-        "durability_state": str(run_result.get("durability_state") or ""),
-        "durably_persisted": bool(run_result.get("durably_persisted")),
-        "reliable_for_aggregation": _is_reliable({"summary": run_result, "outcome_type": outcome_type}),
-    }
+    pipeline_result = _coerce_pipeline_result(result)
+    payload = pipeline_result.to_payload()
+    outcome_type = str(payload.get("outcome_type") or "").strip().lower()
     return SubTaskRuntimeState.model_validate(
         {
             "subtask_id": subtask.id,
@@ -114,7 +143,7 @@ def build_runtime_state(
             "variant_label": str(subtask.variant_label or ""),
             "task_description": subtask.task_description,
             "mode": str(subtask.mode.value),
-            "execution_brief": subtask.execution_brief.model_dump(mode="python"),
+            "execution_brief": restore_execution_brief(subtask.execution_brief).model_dump(mode="python"),
             "parent_id": str(subtask.parent_id or ""),
             "depth": int(subtask.depth or 0),
             "context": dict(subtask.context or {}),
@@ -122,14 +151,14 @@ def build_runtime_state(
             "outcome_type": outcome_type,
             "error": error,
             "retry_count": int(subtask.retry_count or 0),
-            "result_file": str(run_result.get("items_file") or subtask.result_file or ""),
-            "collected_count": int(run_result.get("total_urls", 0) or subtask.collected_count or 0),
-            "summary": summary,
-            "collection_config": dict(run_result.get("collection_config") or {}),
-            "extraction_config": dict(run_result.get("extraction_config") or {}),
-            "extraction_evidence": list(run_result.get("extraction_evidence") or []),
-            "validation_failures": list(run_result.get("validation_failures") or []),
-            "journal_entries": list(run_result.get("journal_entries") or []),
+            "result_file": str(payload.get("items_file") or subtask.result_file or ""),
+            "collected_count": int(payload.get("total_urls", 0) or subtask.collected_count or 0),
+            "summary": _build_runtime_summary(pipeline_result),
+            "collection_config": dict(pipeline_result.collection_config),
+            "extraction_config": dict(pipeline_result.extraction_config),
+            "extraction_evidence": list(pipeline_result.extraction_evidence),
+            "validation_failures": list(pipeline_result.validation_failures),
+            "journal_entries": list(payload.get("journal_entries") or []),
             "expand_request": dict(expand_request or {}),
         }
     )
@@ -148,7 +177,7 @@ def apply_runtime_state_to_plan(plan: TaskPlan, runtime_state: SubTaskRuntimeSta
         if runtime_state.mode:
             subtask.mode = SubTaskMode(runtime_state.mode)
         if runtime_state.execution_brief:
-            subtask.execution_brief = ExecutionBrief.model_validate(runtime_state.execution_brief)
+            subtask.execution_brief = restore_execution_brief(runtime_state.execution_brief)
         return
 
 

@@ -55,21 +55,30 @@ def _normalize_host(url: str) -> str:
     return host.rstrip(".")
 
 
-def _normalize_task_context(value: Any) -> Any:
+def normalize_experience_context(value: Any) -> Any:
     if isinstance(value, dict):
-        return {str(k): _normalize_task_context(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+        return {str(k): normalize_experience_context(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
     if isinstance(value, list):
-        return [_normalize_task_context(item) for item in value]
+        return [normalize_experience_context(item) for item in value]
     if hasattr(value, "model_dump") and callable(value.model_dump):
-        return _normalize_task_context(value.model_dump(mode="python"))
+        return normalize_experience_context(value.model_dump(mode="python"))
     if hasattr(value, "__dict__") and not isinstance(value, (str, bytes)):
         try:
-            return _normalize_task_context(asdict(value))
+            return normalize_experience_context(asdict(value))
         except Exception:
-            pass
+            attributes = {
+                key: current
+                for key, current in vars(value).items()
+                if not key.startswith("_")
+            }
+            return normalize_experience_context(attributes)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _normalize_task_context(value: Any) -> Any:
+    return normalize_experience_context(value)
 
 
 def _serialize_task_context(task_context: dict[str, Any] | None) -> str:

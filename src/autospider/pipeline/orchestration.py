@@ -15,6 +15,18 @@ from ..domain.fields import FieldDefinition
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
+
+
+@dataclass(slots=True)
+class PipelineRuntimeState:
+    collection_config: dict[str, Any] = field(default_factory=dict)
+    extraction_config: dict[str, Any] = field(default_factory=dict)
+    validation_failures: list[dict[str, Any]] = field(default_factory=list)
+    extraction_evidence: list[dict[str, Any]] = field(default_factory=list)
+    error: str | None = None
+    terminal_reason: str = ""
+
+
 @dataclass(slots=True)
 class PipelineSessionBundle:
     list_session: Any
@@ -59,16 +71,7 @@ class PipelineRuntimeContext:
     execution_id: str = ""
     resume_mode: str = "fresh"
     global_browser_budget: int | None = None
-    state: dict[str, object] = field(
-        default_factory=lambda: {
-            "collection_config": {},
-            "extraction_config": {},
-            "validation_failures": [],
-            "extraction_evidence": [],
-            "error": None,
-            "terminal_reason": "",
-        }
-    )
+    runtime_state: PipelineRuntimeState = field(default_factory=PipelineRuntimeState)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +79,7 @@ class PipelineRuntimeDependencies:
     browser_session_factory: Callable[..., Any]
     collector_cls: type
     detail_page_worker_cls: type
-    set_state_error: Callable[[dict[str, object], str], None]
+    set_state_error: Callable[[PipelineRuntimeState, str], None]
     process_task: Callable[..., Awaitable[None]]
 
 
@@ -111,7 +114,7 @@ class ProducerService:
             common_detail_xpath = getattr(collector, "common_detail_xpath", None)
             if common_detail_xpath is not None:
                 common_detail_xpath = str(common_detail_xpath).strip() or None
-            self.context.state["collection_config"] = {
+            self.context.runtime_state.collection_config = {
                 "nav_steps": list(getattr(collector, "nav_steps", []) or []),
                 "common_detail_xpath": common_detail_xpath,
                 "pagination_xpath": (
@@ -135,8 +138,8 @@ class ProducerService:
         except BrowserInterventionRequired:
             raise
         except Exception as exc:  # noqa: BLE001
-            self.deps.set_state_error(self.context.state, f"producer_error: {exc}")
-            self.context.state["terminal_reason"] = "producer_error"
+            self.deps.set_state_error(self.context.runtime_state, f"producer_error: {exc}")
+            self.context.runtime_state.terminal_reason = "producer_error"
             await self.context.channel.close_with_error(f"producer_error: {exc}")
             logger.info("[Pipeline] Producer failed: %s", exc)
 
@@ -228,7 +231,7 @@ class ConsumerPool:
                         execution_id=self.context.execution_id,
                         run_records=self.context.run_records,
                         summary_lock=summary_lock,
-                        state=self.context.state,
+                        state=self.context.runtime_state,
                         tracker=self.context.tracker,
                     )
                 finally:

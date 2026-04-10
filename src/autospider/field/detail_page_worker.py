@@ -11,7 +11,8 @@ from autospider.domain.fields import FieldDefinition
 
 from .batch_xpath_extractor import BatchXPathExtractor
 from .field_extractor import FieldExtractor
-from .models import PageExtractionRecord
+from .field_config import ensure_extraction_config
+from .models import ExtractionConfig, FieldRule, PageExtractionRecord
 
 logger = get_logger(__name__)
 
@@ -43,16 +44,20 @@ class DetailPageWorker:
         self.xpath_write_service = xpath_write_service or FieldXPathWriteService()
 
     async def extract(self, url: str) -> DetailPageWorkerResult:
-        fields_config = self.xpath_query_service.build_fields_config(url, self.fields)
-        extraction_config = {"fields": fields_config}
-        mode = "xpath" if self._has_rule_candidates(fields_config) else "llm"
+        extraction_config = ensure_extraction_config(
+            {"fields": self.xpath_query_service.build_fields_config(url, self.fields)}
+        )
+        mode = "xpath" if self._has_rule_candidates(extraction_config.fields) else "llm"
         logger.info("[DetailWorker] 开始处理: %s | mode=%s", url, mode)
-        if self._has_rule_candidates(fields_config):
-            xpath_record = await self._extract_with_xpath(url, fields_config)
+        if self._has_rule_candidates(extraction_config.fields):
+            xpath_record = await self._extract_with_xpath(url, extraction_config)
             if xpath_record.success:
                 self.xpath_write_service.record(url, xpath_record, success=True)
                 logger.info("[DetailWorker] 处理完成: %s | mode=xpath | success=%s", url, xpath_record.success)
-                return DetailPageWorkerResult(record=xpath_record, extraction_config=extraction_config)
+                return DetailPageWorkerResult(
+                    record=xpath_record,
+                    extraction_config=extraction_config.to_payload(),
+                )
             self.xpath_write_service.record(url, xpath_record, success=False)
             logger.info("[DetailWorker] XPath 未完成命中，回退 LLM: %s", url)
 
@@ -60,18 +65,19 @@ class DetailPageWorker:
         if any(field.value is not None for field in list(llm_record.fields or [])):
             self.xpath_write_service.record(url, llm_record, success=True)
         logger.info("[DetailWorker] 处理完成: %s | mode=llm | success=%s", url, llm_record.success)
-        return DetailPageWorkerResult(record=llm_record, extraction_config=extraction_config)
+        return DetailPageWorkerResult(record=llm_record, extraction_config=extraction_config.to_payload())
 
-    def _has_rule_candidates(self, fields_config: list[dict]) -> bool:
-        for field in fields_config:
-            if str(field.get("xpath") or "").strip():
-                return True
-        return False
+    def _has_rule_candidates(self, field_rules: tuple[FieldRule, ...]) -> bool:
+        return any(rule.has_rule_candidate() for rule in field_rules)
 
-    async def _extract_with_xpath(self, url: str, fields_config: list[dict]) -> PageExtractionRecord:
+    async def _extract_with_xpath(
+        self,
+        url: str,
+        extraction_config: ExtractionConfig,
+    ) -> PageExtractionRecord:
         extractor = BatchXPathExtractor(
             page=self.page,
-            fields_config=fields_config,
+            fields_config=extraction_config.fields,
             output_dir=self.output_dir,
             skill_runtime=self.skill_runtime,
         )

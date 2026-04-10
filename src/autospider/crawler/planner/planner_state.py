@@ -12,6 +12,14 @@ logger = get_logger(__name__)
 _ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
 
 
+def normalize_planner_nav_step(step: dict[str, Any]) -> dict[str, Any]:
+    return PlannerPageState(page=None).stable_nav_step_payload(dict(step or {}))
+
+
+def normalize_planner_nav_steps(nav_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return PlannerPageState(page=None).normalize_nav_steps(nav_steps)
+
+
 class PlannerPageState:
     """Encapsulates planner page state normalization and replay."""
 

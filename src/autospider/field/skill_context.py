@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from ..common.experience import SkillRuntime
 from ..domain.fields import FieldDefinition
-from .field_config import field_to_payload
+from .field_config import ensure_field_definition, field_to_payload
 
 
 def _serialize_selected_skills(selected: Sequence[Any]) -> list[dict[str, str]]:
@@ -21,7 +21,7 @@ def _serialize_selected_skills(selected: Sequence[Any]) -> list[dict[str, str]]:
 
 
 def build_field_task_context(
-    fields: Sequence[FieldDefinition | Mapping[str, Any]],
+    fields: Sequence[FieldDefinition],
 ) -> dict[str, list[dict[str, Any]]]:
     return {"fields": [field_to_payload(field) for field in fields]}
 
@@ -30,7 +30,7 @@ async def load_field_skill_context(
     skill_runtime: SkillRuntime,
     *,
     url: str,
-    fields: Sequence[FieldDefinition | Mapping[str, Any]],
+    fields: Sequence[FieldDefinition],
     llm: Any = None,
     phase: str = "field_extractor",
     preselected_skills: Sequence[dict[str, str]] | None = None,
@@ -38,7 +38,7 @@ async def load_field_skill_context(
     selected = await skill_runtime.get_or_select(
         phase=phase,
         url=url,
-        task_context=build_field_task_context(fields),
+        task_context=build_field_task_context([ensure_field_definition(field) for field in fields]),
         llm=llm,
         preselected_skills=preselected_skills,
     )

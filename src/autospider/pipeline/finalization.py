@@ -21,7 +21,7 @@ from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_
 
 if TYPE_CHECKING:
     from ..domain.fields import FieldDefinition
-    from .orchestration import PipelineSessionBundle
+    from .orchestration import PipelineRuntimeState, PipelineSessionBundle
     from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
@@ -169,7 +169,7 @@ def classify_pipeline_result(
 
 def should_promote_skill(
     *,
-    state: dict[str, object],
+    state_error: object,
     summary: dict,
     validation_failures: list[dict],
 ) -> bool:
@@ -179,7 +179,7 @@ def should_promote_skill(
     classified = classify_pipeline_result(
         total_urls=int(summary.get("total_urls", 0) or 0),
         success_count=int(summary.get("success_count", 0) or 0),
-        state_error=state.get("error"),
+        state_error=state_error,
         validation_failures=validation_failures,
     )
     return bool(classified.get("promotion_state") == "reusable")
@@ -231,21 +231,10 @@ def _stringify_context_map(raw_context: dict[str, Any] | None) -> dict[str, str]
     return normalized
 
 
-def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | None:
-    if not should_promote_skill(
-        state=context.state,
-        summary=context.summary,
-        validation_failures=context.validation_failures,
-    ):
-        logger.info(
-            "[Pipeline] 跳过 Skill 晋升: promotion_state=%s, success=%s/%s",
-            str(context.summary.get("promotion_state") or ""),
-            int(context.summary.get("success_count", 0) or 0),
-            int(context.summary.get("total_urls", 0) or 0),
-        )
-        return None
-
-    payload = SkillSedimentationPayload(
+def _build_skill_sedimentation_payload(
+    context: "PipelineFinalizationContext",
+) -> SkillSedimentationPayload:
+    return SkillSedimentationPayload(
         list_url=context.list_url,
         task_description=context.task_description,
         fields=[field.model_dump(mode="python") for field in context.fields],
@@ -255,15 +244,33 @@ def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | Non
             variant_label=str(context.variant_label or ""),
             context=_stringify_context_map(context.execution_brief),
         ),
-        collection_config=dict(context.collection_config or {}),
-        extraction_config=dict(context.extraction_config or {}),
-        extraction_evidence=list(context.state.get("extraction_evidence") or []),
+        collection_config=dict(context.runtime_state.collection_config or {}),
+        extraction_config=dict(context.runtime_state.extraction_config or {}),
+        extraction_evidence=list(context.runtime_state.extraction_evidence or []),
         summary=dict(context.summary or {}),
-        validation_failures=list(context.validation_failures or []),
+        validation_failures=list(context.runtime_state.validation_failures or []),
         plan_knowledge=str(context.plan_knowledge or ""),
         status="validated",
     )
-    promoted_path = SkillSedimenter().sediment_from_pipeline_result(payload)
+
+
+def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | None:
+    if not should_promote_skill(
+        state_error=context.runtime_state.error,
+        summary=context.summary,
+        validation_failures=context.runtime_state.validation_failures,
+    ):
+        logger.info(
+            "[Pipeline] 跳过 Skill 晋升: promotion_state=%s, success=%s/%s",
+            str(context.summary.get("promotion_state") or ""),
+            int(context.summary.get("success_count", 0) or 0),
+            int(context.summary.get("total_urls", 0) or 0),
+        )
+        return None
+
+    promoted_path = SkillSedimenter().sediment_from_pipeline_result(
+        _build_skill_sedimentation_payload(context)
+    )
     if promoted_path is None:
         logger.warning(
             "[Pipeline] Skill 晋升未生成有效结果: list_url=%s, task=%s",
@@ -449,17 +456,18 @@ def _coerce_field_names(fields: list["FieldDefinition"]) -> list[str]:
     return names
 
 
-def persist_pipeline_records(context: "PipelineFinalizationContext", records: dict[str, dict]) -> None:
-    """将现版本运行结果持久化到 PostgreSQL。"""
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository, TaskRunPayload
-    from ..common.storage.task_run_query_service import invalidate_task_cache, normalize_url
+def _build_task_run_payload(
+    context: "PipelineFinalizationContext",
+    records: dict[str, dict],
+):
+    from ..common.db.repositories import TaskRunPayload
+    from ..common.storage.task_run_query_service import normalize_url
 
     normalized_url = normalize_url(context.list_url)
     if not normalized_url:
-        return
+        return None
 
-    payload = TaskRunPayload(
+    return TaskRunPayload(
         normalized_url=normalized_url,
         original_url=context.list_url,
         page_state_signature=str(context.page_state_signature or ""),
@@ -481,14 +489,26 @@ def persist_pipeline_records(context: "PipelineFinalizationContext", records: di
         success_rate=float(context.summary.get("success_rate", 0.0) or 0.0),
         error_message=str(context.summary.get("error") or ""),
         summary_json=dict(context.summary or {}),
-        collection_config=dict(context.collection_config or {}),
-        extraction_config=dict(context.extraction_config or {}),
+        collection_config=dict(context.runtime_state.collection_config or {}),
+        extraction_config=dict(context.runtime_state.extraction_config or {}),
         plan_knowledge=str(context.plan_knowledge or ""),
         task_plan=dict(context.task_plan or {}),
         plan_journal=list(context.plan_journal or []),
         committed_records=list(records.values()),
-        validation_failures=list(context.validation_failures or []),
+        validation_failures=list(context.runtime_state.validation_failures or []),
     )
+
+
+def persist_pipeline_records(context: "PipelineFinalizationContext", records: dict[str, dict]) -> None:
+    """将现版本运行结果持久化到 PostgreSQL。"""
+    from ..common.db.engine import session_scope
+    from ..common.db.repositories import TaskRepository
+    from ..common.storage.task_run_query_service import invalidate_task_cache
+
+    payload = _build_task_run_payload(context, records)
+    if payload is None:
+        return
+
     with session_scope() as session:
         repo = TaskRepository(session)
         repo.save_run(payload)
@@ -513,10 +533,7 @@ class PipelineFinalizationContext:
     staging_summary_path: Path
     committed_records: dict[str, dict[str, Any]]
     summary: dict[str, Any]
-    state: dict[str, object]
-    collection_config: dict[str, Any]
-    extraction_config: dict[str, Any]
-    validation_failures: list[dict[str, Any]]
+    runtime_state: "PipelineRuntimeState"
     plan_knowledge: str
     task_plan: dict[str, Any]
     plan_journal: list[dict[str, Any]]
@@ -540,8 +557,8 @@ class PipelineFinalizer:
 
     async def finalize(self, context: PipelineFinalizationContext) -> None:
         try:
-            if context.state.get("error"):
-                context.summary["error"] = context.state.get("error")
+            if context.runtime_state.error:
+                context.summary["error"] = context.runtime_state.error
 
             committed_records = dict(context.committed_records)
             committed_summary = normalize_record_summary(
@@ -562,11 +579,11 @@ class PipelineFinalizer:
                 self._deps.classify_pipeline_result(
                     total_urls=context.summary["total_urls"],
                     success_count=context.summary["success_count"],
-                    state_error=context.state.get("error"),
-                    validation_failures=context.validation_failures,
+                    state_error=context.runtime_state.error,
+                    validation_failures=context.runtime_state.validation_failures,
                     terminal_reason=str(
                         context.summary.get("terminal_reason")
-                        or context.state.get("terminal_reason")
+                        or context.runtime_state.terminal_reason
                         or ""
                     ),
                 )

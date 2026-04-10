@@ -2,9 +2,117 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
-from ..domain.fields import FieldDefinition
+from ..domain.fields import FieldDefinition, build_field_definitions
+
+
+def _normalize_xpath_fallbacks(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    normalized: list[str] = []
+    for item in value:
+        xpath = str(item or "").strip()
+        if xpath:
+            normalized.append(xpath)
+    return tuple(normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class FieldRule:
+    """字段提取规则的内部规范类型。"""
+
+    field: FieldDefinition
+    xpath: str | None = None
+    xpath_fallbacks: tuple[str, ...] = ()
+    xpath_validated: bool = False
+
+    @property
+    def name(self) -> str:
+        return self.field.name
+
+    @property
+    def description(self) -> str:
+        return self.field.description
+
+    @property
+    def required(self) -> bool:
+        return self.field.required
+
+    @property
+    def data_type(self) -> str:
+        return self.field.data_type
+
+    @property
+    def extraction_source(self) -> str | None:
+        return self.field.extraction_source
+
+    @property
+    def fixed_value(self) -> str | None:
+        return self.field.fixed_value
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "FieldRule":
+        xpath = str(payload.get("xpath") or "").strip() or None
+        fallbacks = _normalize_xpath_fallbacks(payload.get("xpath_fallbacks"))
+        field = build_field_definitions([payload])[0]
+        return cls(
+            field=field,
+            xpath=xpath,
+            xpath_fallbacks=fallbacks,
+            xpath_validated=bool(payload.get("xpath_validated", xpath is not None)),
+        )
+
+    @classmethod
+    def from_xpath(
+        cls,
+        field: FieldDefinition,
+        common_xpath: "CommonFieldXPath | None" = None,
+    ) -> "FieldRule":
+        if common_xpath is None:
+            return cls(field=field)
+        return cls(
+            field=field,
+            xpath=str(common_xpath.xpath_pattern or "").strip() or None,
+            xpath_fallbacks=_normalize_xpath_fallbacks(common_xpath.fallback_xpaths),
+            xpath_validated=bool(common_xpath.validated),
+        )
+
+    def has_rule_candidate(self) -> bool:
+        return bool(self.xpath or self.xpath_fallbacks)
+
+    def to_payload(self) -> dict[str, Any]:
+        payload = self.field.to_payload()
+        payload["xpath"] = self.xpath
+        payload["xpath_fallbacks"] = list(self.xpath_fallbacks)
+        payload["xpath_validated"] = self.xpath_validated
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionConfig:
+    """字段提取配置的内部规范类型。"""
+
+    fields: tuple[FieldRule, ...] = ()
+    created_at: str = ""
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "ExtractionConfig":
+        raw_fields = payload.get("fields")
+        fields: list[FieldRule] = []
+        if isinstance(raw_fields, Sequence) and not isinstance(raw_fields, (str, bytes)):
+            for item in raw_fields:
+                if isinstance(item, Mapping):
+                    fields.append(FieldRule.from_payload(item))
+        return cls(fields=tuple(fields), created_at=str(payload.get("created_at") or ""))
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "fields": [rule.to_payload() for rule in self.fields],
+            "created_at": self.created_at,
+        }
 
 
 @dataclass
@@ -88,36 +196,22 @@ class BatchExtractionResult:
                 return xpath_info.xpath_pattern
         return None
 
-    def to_extraction_config(self) -> dict:
-        """转换为提取配置（可用于批量爬取）"""
+    def to_extraction_config_model(self) -> ExtractionConfig:
+        """转换为提取配置模型（可用于批量爬取）"""
         validation_available = self.total_urls_validated > 0
         xpath_map = {x.field_name: x for x in self.common_xpaths}
-        return {
-            "fields": [
-                {
-                    "name": f.name,
-                    "description": f.description,
-                    "xpath": (
-                        xpath_map[f.name].xpath_pattern
-                        if f.name in xpath_map
-                        and (not validation_available or xpath_map[f.name].validated)
-                        else None
-                    ),
-                    "xpath_fallbacks": (
-                        xpath_map[f.name].fallback_xpaths
-                        if f.name in xpath_map
-                        and (not validation_available or xpath_map[f.name].validated)
-                        else []
-                    ),
-                    "xpath_validated": (
-                        xpath_map[f.name].validated if f.name in xpath_map else False
-                    ),
-                    "required": f.required,
-                    "data_type": f.data_type,
-                    "extraction_source": f.extraction_source,
-                    "fixed_value": f.fixed_value,
-                }
-                for f in self.fields
-            ],
-            "created_at": self.created_at,
-        }
+        rules = [
+            FieldRule.from_xpath(
+                f,
+                xpath_map.get(f.name)
+                if f.name in xpath_map
+                and (not validation_available or xpath_map[f.name].validated)
+                else None,
+            )
+            for f in self.fields
+        ]
+        return ExtractionConfig(fields=tuple(rules), created_at=self.created_at)
+
+    def to_extraction_config(self) -> dict:
+        """转换为提取配置（可用于批量爬取）"""
+        return self.to_extraction_config_model().to_payload()

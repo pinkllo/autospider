@@ -56,3 +56,8 @@ class GraphResult(BaseModel):
     checkpoint_id: str = ""
     next_nodes: list[str] = Field(default_factory=list)
     interrupts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+GraphInput.model_rebuild()
+NodeResult.model_rebuild()
+GraphResult.model_rebuild()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,8 +11,12 @@ from autospider.common.logger import get_logger
 
 from ..common.config import config
 from ..common.storage.idempotent_io import write_json_idempotent
-from .field_config import build_field_xpath_chain, resolve_non_xpath_field_value
-from .models import FieldExtractionResult, PageExtractionRecord
+from .field_config import (
+    build_rule_xpath_chain,
+    ensure_field_rules,
+    resolve_field_rule_value,
+)
+from .models import ExtractionConfig, FieldExtractionResult, FieldRule, PageExtractionRecord
 from .value_helpers import looks_like_date, looks_like_number, looks_like_url
 
 if TYPE_CHECKING:
@@ -27,22 +32,23 @@ class BatchXPathExtractor:
     def __init__(
         self,
         page: "Page",
-        fields_config: list[dict],
+        fields_config: Sequence[FieldRule | Mapping[str, object]],
         output_dir: str = "output",
         timeout_ms: int = 5000,
         skill_runtime: object | None = None,
     ):
         self.page = page
-        self.fields_config = list(fields_config or [])
+        self.field_rules = ensure_field_rules(fields_config)
+        self.fields_config = ExtractionConfig(fields=tuple(self.field_rules)).to_payload()["fields"]
         self.output_dir = Path(output_dir)
         self.timeout_ms = timeout_ms
         self.skill_runtime = skill_runtime
         self.page_load_delay = config.url_collector.page_load_delay
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.required_fields = {
-            str(field.get("name") or ""): bool(field.get("required", True))
-            for field in self.fields_config
-            if isinstance(field, dict)
+            rule.name: rule.required
+            for rule in self.field_rules
+            if rule.name
         }
 
     async def run(self, urls: list[str]) -> dict:
@@ -57,7 +63,7 @@ class BatchXPathExtractor:
 
         logger.info(f"\n{'=' * 60}")
         logger.info("[BatchXPathExtractor] 开始规则批量提取")
-        logger.info(f"[BatchXPathExtractor] 目标字段: {[f.get('name') for f in self.fields_config]}")
+        logger.info(f"[BatchXPathExtractor] 目标字段: {[rule.name for rule in self.field_rules]}")
         logger.info(f"[BatchXPathExtractor] URL 数量: {len(unique_urls)}")
         logger.info(f"{'=' * 60}\n")
 
@@ -78,11 +84,11 @@ class BatchXPathExtractor:
         try:
             await self._safe_goto(url)
         except Exception as exc:  # noqa: BLE001
-            for field in self.fields_config:
+            for rule in self.field_rules:
                 record.fields.append(
                     FieldExtractionResult(
-                        field_name=str(field.get("name") or ""),
-                        xpath=str(field.get("xpath") or "") or None,
+                        field_name=rule.name,
+                        xpath=rule.xpath,
                         extraction_method="xpath",
                         error=f"页面加载失败: {exc}",
                     )
@@ -90,9 +96,9 @@ class BatchXPathExtractor:
             record.success = False
             return record
 
-        for field in self.fields_config:
-            name = str(field.get("name") or "")
-            xpath_chain = self._build_xpath_chain(field)
+        for rule in self.field_rules:
+            name = rule.name
+            xpath_chain = self._build_xpath_chain(rule)
             primary_xpath = xpath_chain[0] if xpath_chain else None
             result = FieldExtractionResult(
                 field_name=name,
@@ -101,7 +107,7 @@ class BatchXPathExtractor:
             )
 
             if not xpath_chain:
-                fill_value, fill_method = self._resolve_non_xpath_field_value(field, url=url)
+                fill_value, fill_method = self._resolve_non_xpath_field_value(rule, url=url)
                 if fill_method:
                     result.value = fill_value
                     result.confidence = 1.0
@@ -116,12 +122,12 @@ class BatchXPathExtractor:
                 try:
                     await self._ensure_page()
                     locator = self.page.locator(f"xpath={xpath_candidate}")
-                    value, error = await self._extract_field_value(locator, field)
+                    value, error = await self._extract_field_value(locator, rule)
                 except Exception as exc:  # noqa: BLE001
                     if self._is_closed_error(exc):
                         await self._recover_and_reload(url)
                         locator = self.page.locator(f"xpath={xpath_candidate}")
-                        value, error = await self._extract_field_value(locator, field)
+                        value, error = await self._extract_field_value(locator, rule)
                     else:
                         value, error = None, f"XPath 提取失败: {exc}"
 
@@ -153,7 +159,11 @@ class BatchXPathExtractor:
             if required
         )
 
-    async def _extract_field_value(self, locator, field: dict) -> tuple[str | None, str | None]:
+    async def _extract_field_value(
+        self,
+        locator,
+        rule: FieldRule,
+    ) -> tuple[str | None, str | None]:
         try:
             count = await locator.count()
         except Exception as exc:  # noqa: BLE001
@@ -162,7 +172,7 @@ class BatchXPathExtractor:
         if count <= 0:
             return None, "XPath 未匹配到元素"
 
-        data_type = str(field.get("data_type") or "text").lower()
+        data_type = str(rule.data_type or "text").lower()
         prefer_url = self._is_url_type(data_type)
         max_candidates = min(count, 8)
 
@@ -248,11 +258,16 @@ class BatchXPathExtractor:
     def _is_url_type(self, data_type: str) -> bool:
         return data_type == "url"
 
-    def _build_xpath_chain(self, field: dict) -> list[str]:
-        return build_field_xpath_chain(field)
+    def _build_xpath_chain(self, rule: FieldRule) -> list[str]:
+        return build_rule_xpath_chain(rule)
 
-    def _resolve_non_xpath_field_value(self, field: dict, *, url: str) -> tuple[str | None, str | None]:
-        return resolve_non_xpath_field_value(field, url=url)
+    def _resolve_non_xpath_field_value(
+        self,
+        rule: FieldRule,
+        *,
+        url: str,
+    ) -> tuple[str | None, str | None]:
+        return resolve_field_rule_value(rule, url=url)
 
     async def _safe_goto(self, url: str) -> None:
         await self._ensure_page()
@@ -359,7 +374,7 @@ class BatchXPathExtractor:
 async def batch_extract_fields_from_urls(
     page: "Page",
     urls: list[str],
-    fields_config: list[dict],
+    fields_config: Sequence[FieldRule | Mapping[str, object]],
     output_dir: str = "output",
     timeout_ms: int = 5000,
 ) -> dict:

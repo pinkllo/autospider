@@ -24,6 +24,10 @@ from .nodes.entry_nodes import (
 )
 from .nodes.shared_nodes import build_artifact_index, build_summary, finalize_result
 from .state import GraphState
+from .state_access import (
+    get_conversation_state,
+    get_stage_status,
+)
 from .subgraphs import build_multi_dispatch_subgraph
 
 
@@ -46,16 +50,7 @@ def resolve_node_outcome(state: dict[str, Any]) -> str:
     """根据 node_status 选择图后续流向。"""
     if state.get("error"):
         return "error"
-    planning = dict(state.get("planning") or {})
-    dispatch = dict(state.get("dispatch") or {})
-    result = dict(state.get("result") or {})
-    stage_status = str(
-        planning.get("status")
-        or dispatch.get("status")
-        or result.get("status")
-        or state.get("node_status")
-        or ""
-    )
+    stage_status = get_stage_status(state)
     if stage_status == "ok":
         return "ok"
     return "error"
@@ -67,7 +62,7 @@ def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
     if state.get("error"):
         return "error"
 
-    conversation = dict(state.get("conversation") or {})
+    conversation = get_conversation_state(state)
     flow_state = str(conversation.get("flow_state") or "")
     if flow_state == "needs_input":
         return "chat_collect_user_input"
@@ -82,7 +77,7 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
     if state.get("error"):
         return "error"
 
-    conversation = dict(state.get("conversation") or {})
+    conversation = get_conversation_state(state)
     review_state = str(conversation.get("review_state") or "")
     if review_state == "approved":
         return "chat_prepare_execution_handoff"

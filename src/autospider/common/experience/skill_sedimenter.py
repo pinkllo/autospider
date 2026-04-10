@@ -38,6 +38,9 @@ class SkillPromotionContext:
     variant_label: str = ""
     context: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "context", normalize_string_map(self.context, drop_empty=False))
+
 
 @dataclass(frozen=True, slots=True)
 class SkillSedimentationPayload:

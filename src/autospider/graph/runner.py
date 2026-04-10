@@ -10,6 +10,7 @@ from langgraph.types import Command
 from ..common.config import config
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
+from .state_access import select_artifacts, select_error, select_result_state, select_summary
 from .types import GraphError, GraphInput, GraphResult
 
 
@@ -101,7 +102,7 @@ class GraphRunner:
         snapshot_values = dict(getattr(snapshot, "values", {}) or {})
         snapshot_config = dict(getattr(snapshot, "config", {}) or {})
 
-        typed_error = dict(final_state.get("error") or snapshot_values.get("error") or {})
+        typed_error = select_error(final_state, snapshot_values=snapshot_values)
         error_code = str(typed_error.get("code") or final_state.get("error_code") or snapshot_values.get("error_code") or "")
         error_message = str(
             typed_error.get("message") or final_state.get("error_message") or snapshot_values.get("error_message") or ""
@@ -117,8 +118,8 @@ class GraphRunner:
         elif status not in {"success", "partial_success", "failed", "no_data"}:
             status = "failed" if error else "success"
 
-        result_state = dict(final_state.get("result") or snapshot_values.get("result") or {})
-        summary = dict(result_state.get("summary") or final_state.get("summary") or snapshot_values.get("summary") or {})
+        result_state = select_result_state(final_state) or select_result_state(snapshot_values)
+        summary = select_summary(final_state, snapshot_values=snapshot_values)
         if thread_id:
             summary.setdefault("thread_id", thread_id)
 
@@ -137,7 +138,7 @@ class GraphRunner:
             status=status,  # type: ignore[arg-type]
             entry_mode=entry_mode,  # type: ignore[arg-type]
             summary=summary,
-            artifacts=list(result_state.get("artifacts") or final_state.get("artifacts") or snapshot_values.get("artifacts") or []),
+            artifacts=select_artifacts(final_state, snapshot_values=snapshot_values),
             error=error,
             data=dict(result_state.get("data") or final_state.get("result_context") or snapshot_values.get("result_context") or {}),
             thread_id=thread_id,

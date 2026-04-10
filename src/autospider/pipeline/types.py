@@ -191,6 +191,66 @@ class PipelineRunSummary(BaseModel):
         )
 
 
+class PipelineRunResult(BaseModel):
+    summary: PipelineRunSummary = Field(default_factory=PipelineRunSummary)
+    data: dict[str, Any] = Field(default_factory=dict)
+    collection_config: dict[str, Any] = Field(default_factory=dict)
+    extraction_config: dict[str, Any] = Field(default_factory=dict)
+    validation_failures: list[dict[str, Any]] = Field(default_factory=list)
+    extraction_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    committed_records: list[dict[str, Any]] = Field(default_factory=list)
+    error: str = ""
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any] | None, *, summary_file: str = "") -> "PipelineRunResult":
+        payload = dict(raw or {})
+        summary = PipelineRunSummary.from_raw(payload, summary_file=summary_file)
+        payload["items_file"] = summary.items_file
+        payload["summary_file"] = summary.summary_file
+        payload["promotion_state"] = summary.promotion_state.value
+        payload["durability_state"] = summary.durability_state.value
+        payload["durably_persisted"] = summary.durably_persisted
+        return cls(
+            summary=summary,
+            data=payload,
+            collection_config=dict(payload.get("collection_config") or {}),
+            extraction_config=dict(payload.get("extraction_config") or {}),
+            validation_failures=list(payload.get("validation_failures") or []),
+            extraction_evidence=list(payload.get("extraction_evidence") or []),
+            committed_records=list(payload.get("committed_records") or []),
+            error=str(payload.get("error") or ""),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        payload = dict(self.data)
+        payload.update(
+            {
+                "total_urls": self.summary.total_urls,
+                "success_count": self.summary.success_count,
+                "failed_count": self.summary.failed_count,
+                "success_rate": self.summary.success_rate,
+                "required_field_success_rate": self.summary.required_field_success_rate,
+                "validation_failure_count": self.summary.validation_failure_count,
+                "execution_state": self.summary.execution_state,
+                "outcome_state": self.summary.outcome_state,
+                "terminal_reason": self.summary.terminal_reason,
+                "promotion_state": self.summary.promotion_state.value,
+                "items_file": self.summary.items_file,
+                "summary_file": self.summary.summary_file,
+                "execution_id": self.summary.execution_id,
+                "durability_state": self.summary.durability_state.value,
+                "durably_persisted": self.summary.durably_persisted,
+                "collection_config": dict(self.collection_config),
+                "extraction_config": dict(self.extraction_config),
+                "validation_failures": list(self.validation_failures),
+                "extraction_evidence": list(self.extraction_evidence),
+                "committed_records": list(self.committed_records),
+                "error": self.error,
+            }
+        )
+        return payload
+
+
 class SubtaskRunSummary(BaseModel):
     id: str
     name: str
@@ -318,4 +378,3 @@ class AggregationOutcome:
     merged_file: str
     summary_file: str
     failure_reasons: tuple[str, ...] = ()
-

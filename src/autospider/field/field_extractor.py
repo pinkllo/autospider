@@ -30,7 +30,7 @@ from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
 from ..domain.fields import FieldDefinition
 
-from .field_config import resolve_non_xpath_field_value
+from .field_config import resolve_field_definition_value
 from .models import (
     FieldExtractionResult,
     PageExtractionRecord,
@@ -248,7 +248,7 @@ class FieldExtractor:
         """
         result = FieldExtractionResult(field_name=field.name)
 
-        fill_value, fill_method = resolve_non_xpath_field_value(
+        fill_value, fill_method = resolve_field_definition_value(
             field,
             url=self.page.url,
             infer_url_field_from_shape=False,

@@ -12,7 +12,7 @@ from ..common.channel.base import URLChannel, URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
 from ..common.experience import SkillRuntime
-from .types import ExecutionContext, PipelineMode, TaskIdentity
+from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
@@ -38,6 +38,7 @@ from .finalization import (
 from .orchestration import (
     PipelineRuntimeContext,
     PipelineRuntimeDependencies,
+    PipelineRuntimeState,
     PipelineSessionBundle,
     create_pipeline_services,
 )
@@ -65,12 +66,12 @@ def _classify_pipeline_result(
 
 def _should_promote_skill(
     *,
-    state: dict[str, object],
+    state_error: object,
     summary: dict,
     validation_failures: list[dict],
 ) -> bool:
     return _should_promote_skill_impl(
-        state=state,
+        state_error=state_error,
         summary=summary,
         validation_failures=validation_failures,
     )
@@ -341,13 +342,13 @@ def _merge_extraction_configs(existing: dict[str, Any], incoming: dict[str, Any]
     return {"fields": [merged_fields[name] for name in ordered_names if name in merged_fields]}
 
 
-def _set_state_error(state: dict[str, object], error: str) -> None:
-    if not state.get("error"):
-        state["error"] = error
+def _set_state_error(state: PipelineRuntimeState, error: str) -> None:
+    if not state.error:
+        state.error = error
 
 
 def _record_extraction_evidence(
-    state: dict[str, object] | None,
+    state: PipelineRuntimeState | None,
     *,
     url: str,
     extraction_config: dict[str, Any],
@@ -355,17 +356,15 @@ def _record_extraction_evidence(
 ) -> None:
     if state is None:
         return
-    evidence = list(state.get("extraction_evidence") or [])
-    evidence.append(
+    state.extraction_evidence.append(
         {
             "url": url,
             "success": bool(success),
             "extraction_config": dict(extraction_config or {}),
         }
     )
-    state["extraction_evidence"] = evidence
-    state["extraction_config"] = _merge_extraction_configs(
-        dict(state.get("extraction_config") or {}),
+    state.extraction_config = _merge_extraction_configs(
+        dict(state.extraction_config or {}),
         dict(extraction_config or {}),
     )
 
@@ -385,7 +384,15 @@ def _resolve_run_redis_key_prefix(
     return f"{base_prefix}:run:{execution_id}"
 
 
-async def run_pipeline(context: ExecutionContext) -> dict:
+def _build_pipeline_run_result(
+    summary: dict[str, Any],
+    *,
+    summary_file: Path,
+) -> PipelineRunResult:
+    return PipelineRunResult.from_raw(summary, summary_file=str(summary_file))
+
+
+async def run_pipeline(context: ExecutionContext) -> PipelineRunResult:
     request = context.request
     list_url = request.list_url
     task_description = request.task_description
@@ -581,10 +588,7 @@ async def run_pipeline(context: ExecutionContext) -> dict:
                     staging_summary_path=staging_summary_path,
                     committed_records=_load_persisted_run_records(resolved_execution_id),
                     summary=summary,
-                    state=runtime_context.state,
-                    collection_config=dict(runtime_context.state.get("collection_config") or {}),
-                    extraction_config=dict(runtime_context.state.get("extraction_config") or {}),
-                    validation_failures=list(runtime_context.state.get("validation_failures") or []),
+                    runtime_state=runtime_context.runtime_state,
                     plan_knowledge=runtime_context.plan_knowledge,
                     task_plan=dict(runtime_context.task_plan_snapshot or {}),
                     plan_journal=list(runtime_context.plan_journal or []),
@@ -595,11 +599,11 @@ async def run_pipeline(context: ExecutionContext) -> dict:
         finally:
             await channel.close()
 
-    summary["collection_config"] = dict(runtime_context.state.get("collection_config") or {})
-    summary["extraction_config"] = dict(runtime_context.state.get("extraction_config") or {})
-    summary["extraction_evidence"] = list(runtime_context.state.get("extraction_evidence") or [])
-    summary["validation_failures"] = list(runtime_context.state.get("validation_failures") or [])
-    return summary
+    summary["collection_config"] = dict(runtime_context.runtime_state.collection_config or {})
+    summary["extraction_config"] = dict(runtime_context.runtime_state.extraction_config or {})
+    summary["extraction_evidence"] = list(runtime_context.runtime_state.extraction_evidence or [])
+    summary["validation_failures"] = list(runtime_context.runtime_state.validation_failures or [])
+    return _build_pipeline_run_result(summary, summary_file=summary_path)
 
 
 async def _process_task(
@@ -607,7 +611,7 @@ async def _process_task(
     task: URLTask,
     run_records: dict[str, dict],
     summary_lock: asyncio.Lock,
-    state: dict[str, object] | None = None,
+    state: PipelineRuntimeState | None = None,
     tracker: TaskProgressTracker | None = None,
     execution_id: str = "",
 ) -> None:
@@ -657,7 +661,7 @@ async def _process_task(
     except Exception as exc:  # noqa: BLE001
         if state is not None:
             _set_state_error(state, f"extractor_system_error: {exc}")
-            state["terminal_reason"] = "extractor_system_error"
+            state.terminal_reason = "extractor_system_error"
         run_record = _fail_persisted_item(
             execution_id=execution_id,
             url=url,

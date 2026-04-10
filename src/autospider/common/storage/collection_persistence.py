@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from autospider.common.logger import get_logger
@@ -55,12 +56,12 @@ class CollectionConfig:
     created_at: str = ""
     updated_at: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_storage_record(self) -> dict[str, Any]:
         return {
-            "nav_steps": self.nav_steps,
+            "nav_steps": [dict(step) for step in self.nav_steps if isinstance(step, dict)],
             "common_detail_xpath": self.common_detail_xpath,
             "pagination_xpath": self.pagination_xpath,
-            "jump_widget_xpath": self.jump_widget_xpath,
+            "jump_widget_xpath": dict(self.jump_widget_xpath) if self.jump_widget_xpath else None,
             "list_url": self.list_url,
             "anchor_url": self.anchor_url,
             "page_state_signature": self.page_state_signature,
@@ -71,16 +72,24 @@ class CollectionConfig:
         }
 
     def to_payload(self) -> dict[str, Any]:
-        data = self.to_dict()
+        data = self.to_storage_record()
         return {field: data[field] for field in _CONFIG_PAYLOAD_FIELDS}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CollectionConfig":
+    def from_storage_record(cls, data: Mapping[str, Any]) -> "CollectionConfig":
         return cls(
-            nav_steps=data.get("nav_steps", []),
+            nav_steps=[
+                dict(step)
+                for step in list(data.get("nav_steps") or [])
+                if isinstance(step, Mapping)
+            ],
             common_detail_xpath=data.get("common_detail_xpath"),
             pagination_xpath=data.get("pagination_xpath"),
-            jump_widget_xpath=data.get("jump_widget_xpath"),
+            jump_widget_xpath=(
+                dict(data.get("jump_widget_xpath"))
+                if isinstance(data.get("jump_widget_xpath"), Mapping)
+                else None
+            ),
             list_url=data.get("list_url", ""),
             anchor_url=data.get("anchor_url", ""),
             page_state_signature=data.get("page_state_signature", ""),
@@ -90,6 +99,14 @@ class CollectionConfig:
             updated_at=data.get("updated_at", ""),
         )
 
+    @classmethod
+    def from_payload(cls, data: Mapping[str, Any]) -> "CollectionConfig":
+        return cls.from_storage_record(data)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "CollectionConfig":
+        return cls.from_storage_record(data)
+
 
 class ConfigPersistence:
     def __init__(self, config_dir: str | Path = "output"):
@@ -98,13 +115,17 @@ class ConfigPersistence:
         self.config_file = self.config_dir / "collection_config.json"
 
     def save(self, config: CollectionConfig) -> None:
-        data = config.to_dict()
+        now = datetime.now().isoformat()
+        if not str(config.created_at or "").strip():
+            config.created_at = now
+        config.updated_at = now
+        data = config.to_storage_record()
         persisted = write_json_idempotent(
             self.config_file,
             data,
             identity_keys=("list_url", "page_state_signature", "anchor_url", "variant_label", "task_description"),
         )
-        normalized = CollectionConfig.from_dict(dict(persisted or data))
+        normalized = CollectionConfig.from_storage_record(persisted or data)
         config.created_at = normalized.created_at
         config.updated_at = normalized.updated_at
         logger.info("[持久化] 配置已保存到: %s", self.config_file)
@@ -117,7 +138,7 @@ class ConfigPersistence:
             data = load_json(self.config_file)
             if data is None:
                 raise ValueError(f"配置文件内容无效: {self.config_file}")
-            config = CollectionConfig.from_dict(data)
+            config = CollectionConfig.from_storage_record(data)
             logger.info("[持久化] 配置已加载: %s", self.config_file)
             return config
         except Exception as exc:
@@ -140,7 +161,7 @@ class CollectionProgress:
     consecutive_success_pages: int = 0
     last_updated: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_storage_record(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "pause_reason": self.pause_reason,
@@ -154,11 +175,11 @@ class CollectionProgress:
         }
 
     def to_payload(self) -> dict[str, Any]:
-        data = self.to_dict()
+        data = self.to_storage_record()
         return {field: data[field] for field in _PROGRESS_PAYLOAD_FIELDS}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CollectionProgress":
+    def from_storage_record(cls, data: Mapping[str, Any]) -> "CollectionProgress":
         return cls(
             status=data.get("status", "RUNNING"),
             pause_reason=data.get("pause_reason"),
@@ -171,6 +192,14 @@ class CollectionProgress:
             last_updated=data.get("last_updated", ""),
         )
 
+    @classmethod
+    def from_payload(cls, data: Mapping[str, Any]) -> "CollectionProgress":
+        return cls.from_storage_record(data)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "CollectionProgress":
+        return cls.from_storage_record(data)
+
 
 class ProgressPersistence:
     def __init__(self, output_dir: str | Path = "output"):
@@ -180,14 +209,14 @@ class ProgressPersistence:
 
     def save_progress(self, progress: CollectionProgress) -> None:
         progress.last_updated = datetime.now().isoformat()
-        data = progress.to_dict()
+        data = progress.to_storage_record()
         persisted = write_json_idempotent(
             self.progress_file,
             data,
             identity_keys=("list_url", "task_description"),
             volatile_keys={"last_updated"},
         )
-        normalized = CollectionProgress.from_dict(dict(persisted or data))
+        normalized = CollectionProgress.from_storage_record(persisted or data)
         progress.last_updated = normalized.last_updated
 
     def load_progress(self) -> CollectionProgress | None:
@@ -197,7 +226,7 @@ class ProgressPersistence:
             data = load_json(self.progress_file)
             if data is None:
                 raise ValueError(f"进度文件内容无效: {self.progress_file}")
-            return CollectionProgress.from_dict(data)
+            return CollectionProgress.from_storage_record(data)
         except Exception as exc:
             logger.error("[进度] 加载进度失败: %s", exc)
             raise RuntimeError(f"failed_to_load_collection_progress: {self.progress_file}") from exc
@@ -224,4 +253,20 @@ def load_collection_config(config_path: str | Path, *, strict: bool = True) -> C
         if not strict:
             return None
         raise CollectionConfigLoadError(f"collection config payload must be an object: {path}")
-    return CollectionConfig.from_dict(data)
+    return CollectionConfig.from_storage_record(data)
+
+
+def coerce_collection_config(
+    value: CollectionConfig | Mapping[str, Any] | None,
+) -> CollectionConfig:
+    if isinstance(value, CollectionConfig):
+        return value
+    return CollectionConfig.from_mapping(value or {})
+
+
+def coerce_collection_progress(
+    value: CollectionProgress | Mapping[str, Any] | None,
+) -> CollectionProgress:
+    if isinstance(value, CollectionProgress):
+        return value
+    return CollectionProgress.from_mapping(value or {})

@@ -2,32 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from ..common.config import config
-from ..common.storage.collection_persistence import CollectionConfig
+from ..common.storage.collection_persistence import CollectionConfig, coerce_collection_config
 from ..common.storage.idempotent_io import write_json_idempotent
-from ..domain.fields import FieldDefinition
+from ..domain.fields import FieldDefinition, build_field_definitions as build_domain_field_definitions
 from .runtime_controls import resolve_concurrency_settings
 from .types import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 
 
-def build_field_definitions(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
-    fields: list[FieldDefinition] = []
-    for raw in raw_fields:
-        if not isinstance(raw, dict):
-            continue
-        fields.append(
-            FieldDefinition(
-                name=str(raw.get("name") or ""),
-                description=str(raw.get("description") or ""),
-                required=bool(raw.get("required", True)),
-                data_type=str(raw.get("data_type") or "text"),
-                example=raw.get("example"),
-            )
-        )
-    return fields
+def build_field_definitions(raw_fields: list[Mapping[str, Any]]) -> list[FieldDefinition]:
+    return build_domain_field_definitions(raw_fields)
 
 
 def build_artifact(label: str, path: str | Path) -> dict[str, str]:
@@ -105,11 +93,14 @@ def build_execution_context(
     )
 
 
-def materialize_collection_config(output_dir: str | Path, collection_config: dict[str, Any]) -> Path:
+def materialize_collection_config(
+    output_dir: str | Path,
+    collection_config: CollectionConfig | Mapping[str, Any],
+) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     config_path = output_path / "collection_config.json"
-    normalized = CollectionConfig.from_dict(dict(collection_config or {})).to_dict()
+    normalized = coerce_collection_config(collection_config).to_storage_record()
     write_json_idempotent(
         config_path,
         normalized,
@@ -127,4 +118,3 @@ def serialize_xpath_result(raw_result: Any) -> dict[str, Any] | None:
         "total_urls": int(raw_result.get("total_urls", 0) or 0),
         "success_count": int(raw_result.get("success_count", 0) or 0),
     }
-

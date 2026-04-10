@@ -24,6 +24,14 @@ from ...crawler.planner import TaskPlanner
 from ...domain.planning import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
 from ...field import run_field_pipeline
+from ..state_access import (
+    collection_config as select_collection_config,
+    collected_urls as select_collected_urls,
+    dispatch_summary as select_dispatch_summary,
+    request_params as select_request_params,
+    subtask_results as select_subtask_results,
+    task_plan as select_task_plan,
+)
 from ...pipeline.aggregator import ResultAggregator
 from ...pipeline.helpers import (
     build_artifact,
@@ -34,7 +42,7 @@ from ...pipeline.helpers import (
     serialize_xpath_result,
 )
 from ...pipeline.runner import run_pipeline
-from ...pipeline.types import AggregationFailure, AggregationReport, PipelineRunSummary
+from ...pipeline.types import AggregationFailure, AggregationReport, PipelineRunResult
 
 RETRY_DELAYS = (1.0, 2.0)
 
@@ -44,17 +52,19 @@ def _ok(
     artifacts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     resolved_payload = payload or {}
+    resolved_artifacts = artifacts or []
+    result_payload = {
+        "status": "ok",
+        "data": resolved_payload,
+        "artifacts": resolved_artifacts,
+    }
     return {
         "node_status": "ok",
         "node_payload": resolved_payload,
         "result_context": resolved_payload,
-        "node_artifacts": artifacts or [],
+        "node_artifacts": resolved_artifacts,
         "node_error": None,
-        "result": {
-            "status": "ok",
-            "data": resolved_payload,
-            "artifacts": artifacts or [],
-        },
+        "result": result_payload,
         "error": None,
     }
 
@@ -198,30 +208,29 @@ async def _plan_request(request) -> dict[str, Any]:
 async def _run_pipeline_request(request) -> dict[str, Any]:
     fields = build_field_definitions(list(request.fields or []))
     context = build_execution_context(request, fields=fields)
-    result = await run_pipeline(context)
-    summary_file = Path(request.output_dir) / "pipeline_summary.json"
-    pipeline_result = PipelineRunSummary.from_raw(result, summary_file=str(summary_file))
+    pipeline_result = await run_pipeline(context)
+    summary_payload = pipeline_result.summary
     artifacts: list[dict[str, str]] = []
-    if pipeline_result.items_file:
-        artifacts.append(build_artifact("pipeline_items", pipeline_result.items_file))
-    artifacts.append(build_artifact("pipeline_summary", summary_file))
+    if summary_payload.items_file:
+        artifacts.append(build_artifact("pipeline_items", summary_payload.items_file))
+    artifacts.append(build_artifact("pipeline_summary", summary_payload.summary_file))
     summary = {
-        "total_urls": pipeline_result.total_urls,
-        "success_count": pipeline_result.success_count,
-        "failed_count": pipeline_result.failed_count,
-        "success_rate": pipeline_result.success_rate,
-        "required_field_success_rate": pipeline_result.required_field_success_rate,
-        "validation_failure_count": pipeline_result.validation_failure_count,
-        "execution_state": pipeline_result.execution_state,
-        "outcome_state": pipeline_result.outcome_state,
-        "terminal_reason": pipeline_result.terminal_reason,
-        "promotion_state": pipeline_result.promotion_state.value,
-        "execution_id": pipeline_result.execution_id,
-        "items_file": pipeline_result.items_file,
-        "durability_state": pipeline_result.durability_state.value,
-        "durably_persisted": pipeline_result.durably_persisted,
+        "total_urls": summary_payload.total_urls,
+        "success_count": summary_payload.success_count,
+        "failed_count": summary_payload.failed_count,
+        "success_rate": summary_payload.success_rate,
+        "required_field_success_rate": summary_payload.required_field_success_rate,
+        "validation_failure_count": summary_payload.validation_failure_count,
+        "execution_state": summary_payload.execution_state,
+        "outcome_state": summary_payload.outcome_state,
+        "terminal_reason": summary_payload.terminal_reason,
+        "promotion_state": summary_payload.promotion_state.value,
+        "execution_id": summary_payload.execution_id,
+        "items_file": summary_payload.items_file,
+        "durability_state": summary_payload.durability_state.value,
+        "durably_persisted": summary_payload.durably_persisted,
     }
-    payload = pipeline_result.model_dump(mode="python")
+    payload = pipeline_result.to_payload()
     return {
         "pipeline_result": payload,
         "summary": summary,
@@ -277,7 +286,7 @@ async def _generate_config_request(request) -> dict[str, Any]:
             selected_skills=list(request.selected_skills or []),
         )
     output_dir = Path(request.output_dir)
-    payload = CollectionConfig.from_dict(config_result.to_dict()).to_payload()
+    payload = config_result.to_payload()
     return {
         "data": {"collection_config": payload},
         "summary": {
@@ -398,7 +407,7 @@ def _aggregate_results(
 
 
 async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
@@ -426,7 +435,7 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
@@ -447,7 +456,7 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
@@ -467,9 +476,9 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
-    collection_config = dict(state.get("collection_config") or {})
+    collection_config = select_collection_config(state)
 
     async def _runner() -> dict[str, Any]:
         try:
@@ -490,9 +499,9 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
-    collected_urls = list(state.get("collected_urls") or [])
+    collected_urls = select_collected_urls(state)
 
     async def _runner() -> dict[str, Any]:
         try:
@@ -512,7 +521,7 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
+    params = select_request_params(state)
     request = build_execution_request(params, thread_id=_thread_id(state))
 
     async def _runner() -> dict[str, Any]:
@@ -550,14 +559,14 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def aggregate_node(state: dict[str, Any]) -> dict[str, Any]:
-    params = dict(state.get("normalized_params") or state.get("cli_args") or {})
-    task_plan = state.get("task_plan")
+    params = select_request_params(state)
+    task_plan = select_task_plan(state)
     if not isinstance(task_plan, TaskPlan):
         return _fatal("missing_task_plan", "缺少任务计划，无法聚合结果")
     request = build_execution_request(params, thread_id=_thread_id(state))
     context = build_execution_context(request)
-    dispatch_summary = dict(state.get("summary") or {})
-    subtask_results = list(state.get("subtask_results") or [])
+    dispatch_summary = select_dispatch_summary(state)
+    subtask_results = select_subtask_results(state)
 
     try:
         result = _aggregate_results(context, task_plan, subtask_results)
