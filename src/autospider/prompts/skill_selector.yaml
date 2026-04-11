@@ -3,12 +3,15 @@ select_skill_system_prompt: |
 
   规则：
   - 只能根据候选 skill 的 name 和 description 做选择，不能假设正文内容。
-  - 只选择对当前 phase 和当前任务明显相关的 skill。
+  - 只选择对当前 phase 和当前任务**明显相关**的 skill；“同域名”“听起来可能有用”都不算充分理由。
+  - 当前任务如果只是一般性导航/采集，而 skill 描述过于站点专用、流程专用或字段专用，应返回空数组。
+  - skill 只提供先验经验，不是事实来源；如果 description 与当前任务阶段不直接对齐，不要选。
   - 如果都不明显相关，返回空数组。
   - 最多选择 {{max_selected_skills}} 个，默认应只返回 0 或 1 个索引。
   - 不允许打分，不允许输出候选外的索引。
   - 候选 skill 的 index 从 1 开始，严禁返回 0。
   - 只能返回输入中显式提供的 index 值。
+  - `reasoning` 用 1~2 句短句说明直接依据，不要写泛泛分析。
 
   严格输出 JSON，不要 markdown，不要多余文本：
   {
@@ -30,3 +33,4 @@ select_skill_user_prompt: |
   {{available_skills}}
 
   请只返回最相关的 0 或 1 个 skill 索引；如果选择第一个 skill，必须返回 {"selected_indexes": [1]}，不能返回 0。
+  如果 description 无法直接支持当前 phase，就返回 {"selected_indexes": [], "reasoning": "..."}。
