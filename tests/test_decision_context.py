@@ -111,6 +111,28 @@ def test_build_decision_context_prefers_world_request_params_over_world_model_sn
     assert context["success_criteria"]["target_url_count"] == 12
 
 
+def test_build_decision_context_ignores_adapter_injected_legacy_request_params_when_world_model_exists() -> None:
+    state = {
+        "normalized_params": {"keyword": "legacy-only"},
+        "world": {
+            "world_model": {
+                "request_params": {"target_url_count": 8},
+                "page_models": {
+                    "entry": {
+                        "page_id": "entry",
+                        "page_type": "list_page",
+                    }
+                },
+                "failure_records": [],
+            }
+        },
+    }
+
+    context = build_decision_context(state, page_id="entry")
+
+    assert context["success_criteria"]["target_url_count"] == 8
+
+
 def test_build_decision_context_parses_string_false_for_recovery_policy() -> None:
     context = build_decision_context(
         {

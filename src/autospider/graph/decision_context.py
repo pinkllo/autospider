@@ -22,7 +22,6 @@ from .world_model import (
 )
 
 DEFAULT_FAILURE_WINDOW = 3
-MISSING = object()
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off", ""}
@@ -70,18 +69,31 @@ def _coerce_recovery_policy(value: Any) -> RecoveryDirective:
 def _resolve_request_params_source(
     *,
     raw_workflow: Mapping[str, Any] | None,
-    world: Mapping[str, Any],
     raw_world_model: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
     raw_world = dict(raw_workflow.get("world") or {}) if isinstance(raw_workflow, Mapping) else {}
     if "request_params" in raw_world:
         request_params = raw_world.get("request_params")
         return request_params if isinstance(request_params, Mapping) else None
-    request_params = world.get("request_params", MISSING)
-    if isinstance(request_params, Mapping) and request_params:
+    request_params = raw_world_model.get("request_params")
+    if isinstance(request_params, Mapping):
         return request_params
-    fallback = raw_world_model.get("request_params")
-    return fallback if isinstance(fallback, Mapping) else None
+    return _resolve_legacy_request_params(raw_workflow)
+
+
+def _resolve_legacy_request_params(raw_workflow: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if not isinstance(raw_workflow, Mapping):
+        return None
+    conversation = raw_workflow.get("conversation")
+    if isinstance(conversation, Mapping):
+        params = conversation.get("normalized_params")
+        if isinstance(params, Mapping):
+            return params
+    for key in ("normalized_params", "cli_args"):
+        params = raw_workflow.get(key)
+        if isinstance(params, Mapping):
+            return params
+    return None
 
 
 def _coerce_world_model(
@@ -96,7 +108,6 @@ def _coerce_world_model(
     if isinstance(raw_world_model, Mapping):
         request_params = _resolve_request_params_source(
             raw_workflow=raw_workflow,
-            world=world,
             raw_world_model=raw_world_model,
         )
         return build_initial_world_model(
