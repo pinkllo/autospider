@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 from ...common.browser import ActionExecutor
@@ -27,6 +28,39 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _format_navigation_decision_context(decision_context: dict[str, object] | None) -> str:
+    if not decision_context:
+        return "无"
+    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def build_navigation_task_plan(
+    *,
+    task_description: str,
+    execution_brief: dict | None = None,
+    decision_context: dict[str, object] | None = None,
+) -> str:
+    sections = [
+        "任务分析: 你需要先在列表页进行筛选操作，达到以下目标：",
+        str(task_description or ""),
+        "",
+        "执行简报:",
+        format_execution_brief(execution_brief),
+        "",
+        "决策上下文:",
+        _format_navigation_decision_context(decision_context),
+        "",
+        "执行步骤:",
+        "1. 观察页面上的筛选条件（标签、下拉框、勾选框等）",
+        "2. 根据任务描述和决策上下文，点击相关的筛选条件",
+        "3. 等待页面刷新显示筛选后的结果",
+        "4. 当筛选条件都已选择完成后，使用 done 动作",
+        "",
+        "成功标准: 页面显示符合任务描述的筛选结果列表",
+    ]
+    return "\n".join(sections)
+
+
 class NavigationHandler:
     """导航处理器，负责导航阶段的筛选操作和步骤重放"""
 
@@ -37,6 +71,7 @@ class NavigationHandler:
         task_description: str,
         max_nav_steps: int,
         execution_brief: dict | None = None,
+        decision_context: dict | None = None,
         decider: "LLMDecider" = None,
         screenshots_dir: "Path" = None,
     ):
@@ -45,6 +80,7 @@ class NavigationHandler:
         self.task_description = task_description
         self.max_nav_steps = max_nav_steps
         self.execution_brief = dict(execution_brief or {})
+        self.decision_context = dict(decision_context or {})
         self.decider = decider
         self.screenshots_dir = screenshots_dir
         self.executor: ActionExecutor | None = None
@@ -65,19 +101,11 @@ class NavigationHandler:
             self.executor = ActionExecutor(self.page)
 
         # 设置决策器的任务计划
-        self.decider.task_plan = f"""任务分析: 你需要先在列表页进行筛选操作，达到以下目标：
-{self.task_description}
-
-执行简报:
-{format_execution_brief(self.execution_brief)}
-
-执行步骤:
-1. 观察页面上的筛选条件（标签、下拉框、勾选框等）
-2. 根据任务描述，点击相关的筛选条件
-3. 等待页面刷新显示筛选后的结果
-4. 当筛选条件都已选择完成后，使用 done 动作
-
-成功标准: 页面显示符合任务描述的筛选结果列表"""
+        self.decider.task_plan = build_navigation_task_plan(
+            task_description=self.task_description,
+            execution_brief=self.execution_brief,
+            decision_context=self.decision_context,
+        )
 
         nav_step = 0
         filter_done = False

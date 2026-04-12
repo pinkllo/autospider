@@ -199,12 +199,23 @@ class SubTaskWorker:
         if self.world_snapshot and self.control_snapshot:
             return build_decision_context(
                 {
-                    "world": dict(self.world_snapshot),
+                    "world": self._build_runtime_world_snapshot(),
                     "control": dict(self.control_snapshot),
                 },
                 page_id=str(subtask.plan_node_id or ""),
             )
         return dict(self.decision_context or {})
+
+    def _build_runtime_world_snapshot(self) -> dict:
+        world = dict(self.world_snapshot or {})
+        runtime_failures = [dict(item) for item in list(self.failure_records or [])]
+        world["failure_records"] = runtime_failures
+        raw_world_model = world.get("world_model")
+        if isinstance(raw_world_model, dict):
+            world_model = dict(raw_world_model)
+            world_model["failure_records"] = runtime_failures
+            world["world_model"] = world_model
+        return world
 
     def _normalize_runtime_journal_entries(self, entries: tuple[dict[str, str], ...]) -> list[dict]:
         created_at = datetime.now().isoformat(timespec="seconds")

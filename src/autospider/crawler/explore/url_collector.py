@@ -208,6 +208,7 @@ class URLCollector(BaseCollector):
             max_nav_steps=self.max_nav_steps,
             decider=self.decider,
             execution_brief=self.execution_brief,
+            decision_context=self.decision_context,
             screenshots_dir=self.screenshots_dir,
         )
 

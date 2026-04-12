@@ -22,6 +22,7 @@ from .world_model import (
 )
 
 DEFAULT_FAILURE_WINDOW = 3
+MISSING = object()
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off", ""}
@@ -66,15 +67,38 @@ def _coerce_recovery_policy(value: Any) -> RecoveryDirective:
     )
 
 
-def _coerce_world_model(workflow: Mapping[str, Any]) -> WorldModel:
+def _resolve_request_params_source(
+    *,
+    raw_workflow: Mapping[str, Any] | None,
+    world: Mapping[str, Any],
+    raw_world_model: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    raw_world = dict(raw_workflow.get("world") or {}) if isinstance(raw_workflow, Mapping) else {}
+    if "request_params" in raw_world:
+        request_params = raw_world.get("request_params")
+        return request_params if isinstance(request_params, Mapping) else None
+    request_params = world.get("request_params", MISSING)
+    if isinstance(request_params, Mapping) and request_params:
+        return request_params
+    fallback = raw_world_model.get("request_params")
+    return fallback if isinstance(fallback, Mapping) else None
+
+
+def _coerce_world_model(
+    workflow: Mapping[str, Any],
+    *,
+    raw_workflow: Mapping[str, Any] | None = None,
+) -> WorldModel:
     world = dict(workflow.get("world") or {})
     raw_world_model = world.get("world_model")
     if isinstance(raw_world_model, WorldModel):
         return raw_world_model
     if isinstance(raw_world_model, Mapping):
-        request_params = raw_world_model.get("request_params")
-        if not isinstance(request_params, Mapping):
-            request_params = world.get("request_params")
+        request_params = _resolve_request_params_source(
+            raw_workflow=raw_workflow,
+            world=world,
+            raw_world_model=raw_world_model,
+        )
         return build_initial_world_model(
             request_params=request_params,
             page_models=raw_world_model.get("page_models"),
@@ -193,7 +217,7 @@ def build_decision_context(
     page_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_workflow = coerce_workflow_state(workflow)
-    world_model = _coerce_world_model(normalized_workflow)
+    world_model = _coerce_world_model(normalized_workflow, raw_workflow=workflow)
     world = dict(normalized_workflow.get("world") or {})
     control = dict(normalized_workflow.get("control") or {})
     current_plan = _coerce_current_plan(control.get("current_plan"))

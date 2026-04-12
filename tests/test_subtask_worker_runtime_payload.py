@@ -81,17 +81,35 @@ async def test_subtask_worker_execute_builds_execution_request_from_runtime_payl
                     "metadata": {"observations": "采购公告列表页"},
                 }
             },
-            "failure_records": [],
+            "failure_records": [
+                {
+                    "page_id": "node_002",
+                    "category": "navigation",
+                    "detail": "snapshot-timeout",
+                }
+            ],
             "success_criteria": {"target_url_count": 8},
         },
-        "failure_records": [{"page_id": "node_002", "category": "navigation", "detail": "timeout"}],
+        "failure_records": [
+            {
+                "page_id": "node_002",
+                "category": "navigation",
+                "detail": "snapshot-timeout",
+            }
+        ],
     }
     worker.control_snapshot = {
         "current_plan": {"goal": "采集采购公告详情页", "page_id": "node_001", "stage": "planning_seeded"},
         "dispatch_policy": {"strategy": "parallel", "max_concurrency": 2},
         "recovery_policy": {"max_retries": 2, "fail_fast": True},
     }
-    worker.failure_records = [{"page_id": "node_002", "category": "navigation", "detail": "timeout"}]
+    worker.failure_records = [
+        {
+            "page_id": "node_002",
+            "category": "navigation",
+            "detail": "runtime-dom-changed",
+        }
+    ]
 
     await worker.execute()
 
@@ -101,3 +119,11 @@ async def test_subtask_worker_execute_builds_execution_request_from_runtime_payl
     assert request.failure_records == worker.failure_records
     assert request.decision_context["page_model"]["page_type"] == "list_page"
     assert request.decision_context["page_model"]["metadata"]["observations"] == "采购公告列表页"
+    assert request.decision_context["recent_failures"] == [
+        {
+            "page_id": "node_002",
+            "category": "navigation",
+            "detail": "runtime-dom-changed",
+            "metadata": {},
+        }
+    ]
