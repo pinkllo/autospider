@@ -688,7 +688,11 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             "task_plan": task_plan,
             "plan_knowledge": str(result.get("plan_knowledge") or ""),
             "world": dict(result.get("world") or {}),
-            "control": dict(result.get("control") or {}),
+            "control": {
+                **dict(result.get("control") or {}),
+                "task_plan": task_plan,
+                "stage_status": "ok",
+            },
             "normalized_params": dict(result.get("request_params") or {}),
             "summary": dict(result.get("summary") or {}),
             "planning": {

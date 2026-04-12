@@ -302,6 +302,14 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         "dispatch_queue": list(mutation.dispatch_queue),
         "current_batch": [],
         "subtask_results": accumulated,
+        "execution": {
+            "subtask_results": accumulated,
+            "dispatch_summary": summary,
+        },
+        "control": {
+            "task_plan": mutation.task_plan,
+            "stage_status": "ok",
+        },
         "round_subtask_results": [],
         "round_expand_requests": [],
         "dispatch_result": summary,
@@ -342,6 +350,14 @@ def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
         "dispatch_result": summary,
         "summary": summary,
         "subtask_results": result_items,
+        "execution": {
+            "subtask_results": result_items,
+            "dispatch_summary": summary,
+        },
+        "control": {
+            "task_plan": mutation.task_plan,
+            "stage_status": "ok",
+        },
         "node_status": "ok",
         "node_error": None,
         "node_payload": {"dispatch_result": summary},

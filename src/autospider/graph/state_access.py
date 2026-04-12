@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .workflow_access import coerce_workflow_state, current_plan, final_error
+from .workflow_access import coerce_workflow_state, final_error
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -126,38 +126,22 @@ def collected_urls(state: Mapping[str, Any] | None) -> list[str]:
 
 
 def task_plan(state: Mapping[str, Any] | None) -> Any:
-    return current_plan(state)
+    graph_state = _as_dict(state)
+    explicit_control = _as_dict(graph_state.get("control")) if "control" in graph_state else {}
+    if "task_plan" in explicit_control:
+        return explicit_control.get("task_plan")
+    workflow = coerce_workflow_state(state)
+    return _as_dict(workflow.get("control")).get("task_plan")
 
 
 def dispatch_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    workflow = coerce_workflow_state(state)
-    execution = _as_dict(workflow.get("execution"))
-    if "dispatch_summary" in execution:
-        return _as_dict(execution.get("dispatch_summary"))
-    graph_state = _as_dict(state)
-    dispatch = dispatch_state(graph_state)
-    merged = _merge_mappings(
-        graph_state.get("dispatch_result"),
-        dispatch.get("dispatch_result"),
-        dispatch.get("summary"),
-    )
-    if merged:
-        return merged
-    root_summary = _as_dict(graph_state.get("summary"))
-    if _looks_like_dispatch_summary(root_summary):
-        return root_summary
-    return {}
+    execution = _as_dict(_as_dict(state).get("execution"))
+    return _as_dict(execution.get("dispatch_summary"))
 
 
 def subtask_results(state: Mapping[str, Any] | None) -> list[Any]:
-    workflow = coerce_workflow_state(state)
-    execution = _as_dict(workflow.get("execution"))
-    if "subtask_results" in execution:
-        return _as_list(execution.get("subtask_results"))
-    dispatch = dispatch_state(state).get("subtask_results")
-    if isinstance(dispatch, list) and dispatch:
-        return list(dispatch)
-    return _as_list(_as_dict(state).get("subtask_results"))
+    execution = _as_dict(_as_dict(state).get("execution"))
+    return _as_list(execution.get("subtask_results"))
 
 
 def get_conversation_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -265,8 +249,10 @@ def select_error(
 
 def get_stage_status(state: Mapping[str, Any] | None) -> str:
     graph_state = _as_dict(state)
+    control = _as_dict(graph_state.get("control"))
     return str(
-        planning_state(graph_state).get("status")
+        control.get("stage_status")
+        or planning_state(graph_state).get("status")
         or dispatch_state(graph_state).get("status")
         or result_state(graph_state).get("status")
         or graph_state.get("node_status")

@@ -28,11 +28,12 @@ from autospider.graph.state_access import (
 )
 
 
-def test_dispatch_summary_reads_root_dispatch_result() -> None:
+def test_dispatch_summary_reads_only_execution_namespace() -> None:
     state = {
-        "dispatch": {"summary": {}},
-        "dispatch_result": {"total": 4, "completed": 4, "failed": 0, "total_collected": 36},
-        "summary": {"merged_items": 31},
+        "execution": {
+            "dispatch_summary": {"total": 4, "completed": 4, "failed": 0, "total_collected": 36}
+        },
+        "dispatch_result": {"total": 99},
     }
 
     assert dispatch_summary(state) == {
@@ -43,10 +44,11 @@ def test_dispatch_summary_reads_root_dispatch_result() -> None:
     }
 
 
-def test_select_summary_merges_dispatch_and_result_metrics() -> None:
+def test_select_summary_merges_execution_and_result_metrics() -> None:
     state = {
-        "dispatch": {"summary": {}},
-        "dispatch_result": {"total": 4, "completed": 4, "failed": 0, "total_collected": 36},
+        "execution": {
+            "dispatch_summary": {"total": 4, "completed": 4, "failed": 0, "total_collected": 36}
+        },
         "result": {"summary": {"merged_items": 31, "unique_urls": 31}},
         "summary": {"thread_id": "thread-1", "entry_mode": "chat_pipeline"},
     }
@@ -63,7 +65,7 @@ def test_select_summary_merges_dispatch_and_result_metrics() -> None:
     }
 
 
-def test_dispatch_summary_merges_dispatch_result_and_dispatch_summary() -> None:
+def test_dispatch_summary_ignores_legacy_dispatch_result_when_execution_missing() -> None:
     state = {
         "dispatch_result": {"total": 4, "completed": 3},
         "dispatch": {
@@ -72,26 +74,23 @@ def test_dispatch_summary_merges_dispatch_result_and_dispatch_summary() -> None:
         },
     }
 
-    assert dispatch_summary(state) == {
-        "total": 4,
-        "completed": 3,
-        "failed": 1,
-        "total_collected": 36,
-    }
+    assert dispatch_summary(state) == {}
 
 
-def test_task_plan_preserves_legacy_planning_state_via_workflow_adapter() -> None:
+def test_task_plan_reads_only_control_namespace() -> None:
     state = {
+        "control": {"task_plan": {"steps": ["workflow-dispatch"]}},
         "planning": {"task_plan": {"steps": ["clarify", "dispatch"]}},
         "dispatch": {"task_plan": {"steps": ["dispatch-only"]}},
     }
 
-    assert task_plan(state) == {"steps": ["dispatch-only"]}
+    assert task_plan(state) == {"steps": ["workflow-dispatch"]}
 
 
-def test_task_plan_keeps_empty_dispatch_dict_without_falling_back() -> None:
+def test_task_plan_keeps_explicit_empty_control_dict_without_falling_back() -> None:
     state = {
-        "dispatch": {"task_plan": {}},
+        "control": {"task_plan": {}},
+        "dispatch": {"task_plan": {"steps": ["dispatch-plan"]}},
         "task_plan": {"steps": ["root-plan"]},
         "planning": {"task_plan": {"steps": ["planning-plan"]}},
     }
@@ -99,9 +98,10 @@ def test_task_plan_keeps_empty_dispatch_dict_without_falling_back() -> None:
     assert task_plan(state) == {}
 
 
-def test_task_plan_keeps_empty_dispatch_list_without_falling_back() -> None:
+def test_task_plan_keeps_explicit_empty_control_list_without_falling_back() -> None:
     state = {
-        "dispatch": {"task_plan": []},
+        "control": {"task_plan": []},
+        "dispatch": {"task_plan": {"steps": ["dispatch-plan"]}},
         "task_plan": {"steps": ["root-plan"]},
         "planning": {"task_plan": {"steps": ["planning-plan"]}},
     }
@@ -166,6 +166,18 @@ def test_subtask_results_keeps_explicit_empty_workflow_namespace() -> None:
     }
 
     assert subtask_results(state) == []
+
+
+def test_get_stage_status_reads_workflow_control_stage_status() -> None:
+    state = {
+        "control": {"stage_status": "ok"},
+        "planning": {"status": "fatal"},
+        "dispatch": {"status": "fatal"},
+    }
+
+    from autospider.graph.state_access import get_stage_status
+
+    assert get_stage_status(state) == "ok"
 
 
 def test_request_params_reads_planner_runtime_payload_from_world_namespace() -> None:

@@ -33,8 +33,12 @@ class WorkflowWorldState(TypedDict, total=False):
 
 class WorkflowControlState(TypedDict, total=False):
     current_plan: Any
+    task_plan: Any
     stage_status: str
     active_strategy: dict[str, Any]
+    dispatch_policy: dict[str, Any]
+    recovery_policy: dict[str, Any]
+    decision_context: dict[str, Any]
 
 
 class WorkflowExecutionState(TypedDict, total=False):
