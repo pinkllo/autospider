@@ -12,12 +12,13 @@ from ..config import config
 from ..types import Action, ActionType, ScrollInfo
 from ..protocol import (
     extract_response_text_from_llm_payload,
-    parse_protocol_message,
+    parse_protocol_message_diagnostics,
     summarize_llm_payload,
 )
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
+from ...graph.failures import classify_protocol_violation
 from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 
@@ -88,6 +89,7 @@ class LLMDecider:
         # 循环检测：记录最近的操作序列
         self.recent_action_signatures: list[str] = []
         self.max_signature_history: int = 10
+        self.last_failure_record: dict[str, Any] | None = None
 
     async def decide(
         self,
@@ -169,6 +171,7 @@ class LLMDecider:
                 "output": {
                     "raw_response": str(response_text),
                     "parsed_action": action.model_dump(),
+                    "failure_record": self.last_failure_record,
                 },
             },
         )
@@ -607,11 +610,20 @@ class LLMDecider:
         """解析 LLM 响应"""
         response_text = getattr(response_payload, "content", response_payload)
         response_text_preview = str(response_text)
-        message = parse_protocol_message(response_payload)
+        self.last_failure_record = None
+        diagnostics = parse_protocol_message_diagnostics(response_payload)
+        message = diagnostics.get("message")
         if not message:
+            self.last_failure_record = classify_protocol_violation(
+                component="decider",
+                diagnostics=diagnostics,
+            )
+            errors = list(self.last_failure_record["metadata"].get("validation_errors") or [])
+            error_summary = "; ".join(errors[:2]) or response_text_preview[:200]
             return Action(
                 action=ActionType.RETRY,
-                thinking=f"无法解析 LLM 响应: {response_text_preview[:200]}",
+                thinking=f"contract_violation: {error_summary}",
+                summary="contract_violation",
             )
 
         # 解析 action 类型

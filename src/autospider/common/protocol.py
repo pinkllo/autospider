@@ -506,14 +506,44 @@ def _extract_response_thinking(payload: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
-    """解析统一结构：action + args + thinking"""
+def _build_protocol_diagnostics(
+    *,
+    message: dict[str, Any] | None,
+    validation_errors: list[str],
+    raw_payload: dict[str, Any] | None,
+    response_text: str,
+    action: str,
+) -> dict[str, Any]:
+    return {
+        "message": message,
+        "validation_errors": list(validation_errors),
+        "raw_payload": dict(raw_payload) if isinstance(raw_payload, dict) else None,
+        "response_text": response_text,
+        "action": action,
+    }
+
+
+def parse_protocol_message_diagnostics(payload: Any | None) -> dict[str, Any]:
+    """解析统一结构并返回详细诊断。"""
+    response_text = _extract_response_text(payload)
     if payload is None:
-        return None
+        return _build_protocol_diagnostics(
+            message=None,
+            validation_errors=["empty_payload"],
+            raw_payload=None,
+            response_text=response_text,
+            action="",
+        )
 
     data = payload if isinstance(payload, dict) else extract_json_dict_from_llm_payload(payload)
     if not isinstance(data, dict):
-        return None
+        return _build_protocol_diagnostics(
+            message=None,
+            validation_errors=["missing_json_object"],
+            raw_payload=None,
+            response_text=response_text,
+            action="",
+        )
 
     args = data.get("args") if isinstance(data.get("args"), dict) else {}
     args = dict(args)
@@ -527,13 +557,17 @@ def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
             action = _normalize_action(data.get(key))
             if action:
                 break
-
     if not action:
         action = _infer_action_from_args(args)
-
     action = _ACTION_ALIASES.get(action, action)
     if not action:
-        return None
+        return _build_protocol_diagnostics(
+            message=None,
+            validation_errors=["missing_action"],
+            raw_payload=data,
+            response_text=response_text,
+            action="",
+        )
 
     validated, errors = validate_protocol_message_payload(
         action=action,
@@ -541,7 +575,26 @@ def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
         thinking=_extract_response_thinking(payload),
     )
     if validated is not None:
-        return validated
+        return _build_protocol_diagnostics(
+            message=validated,
+            validation_errors=[],
+            raw_payload=data,
+            response_text=response_text,
+            action=action,
+        )
 
     logger.debug("[Protocol] invalid message action=%s errors=%s payload=%s", action, errors, data)
-    return None
+    return _build_protocol_diagnostics(
+        message=None,
+        validation_errors=errors,
+        raw_payload=data,
+        response_text=response_text,
+        action=action,
+    )
+
+
+def parse_protocol_message(payload: Any | None) -> dict[str, Any] | None:
+    """解析统一结构：action + args + thinking"""
+    diagnostics = parse_protocol_message_diagnostics(payload)
+    message = diagnostics.get("message")
+    return dict(message) if isinstance(message, dict) else None

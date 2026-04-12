@@ -28,6 +28,9 @@ from ...crawler.planner.task_planner import (
 from ...domain.planning import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
 from ...field import run_field_pipeline
+from ..control_types import build_default_recovery_policy
+from ..failures import classify_runtime_exception
+from ..recovery import build_recovery_directive
 from ..decision_context import build_decision_context
 from ..state_access import (
     collection_config as select_collection_config,
@@ -47,9 +50,7 @@ from ...pipeline.helpers import (
     serialize_xpath_result,
 )
 from ...pipeline.runner import run_pipeline
-from ...pipeline.types import AggregationFailure, AggregationReport, PipelineRunResult
-
-RETRY_DELAYS = (1.0, 2.0)
+from ...pipeline.types import AggregationFailure, AggregationReport
 
 
 def _ok(
@@ -74,8 +75,13 @@ def _ok(
     }
 
 
-def _fatal(code: str, message: str) -> dict[str, Any]:
-    return {
+def _fatal(
+    code: str,
+    message: str,
+    *,
+    failure_records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    result = {
         "node_status": "fatal",
         "node_payload": {},
         "result_context": {},
@@ -85,6 +91,9 @@ def _fatal(code: str, message: str) -> dict[str, Any]:
         "error_message": message,
         "error": {"code": code, "message": message},
     }
+    if failure_records:
+        result["failure_records"] = [dict(item) for item in list(failure_records)]
+    return result
 
 
 def _thread_id(state: dict[str, Any]) -> str:
@@ -155,21 +164,51 @@ def build_planning_runtime_payload(
     }
 
 
-async def _run_with_retry(
+def _resolve_recovery_retry_budget(state: dict[str, Any]) -> int:
+    default = build_default_recovery_policy().max_retries
+    params = select_request_params(state)
+    decision_context = dict(params.get("decision_context") or {})
+    recovery_policy = dict(decision_context.get("recovery_policy") or params.get("recovery_policy") or {})
+    try:
+        return max(int(recovery_policy.get("max_retries", default) or 0), 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _merge_failure_records(state: dict[str, Any], failure_record: dict[str, Any]) -> list[dict[str, Any]]:
+    params = select_request_params(state)
+    existing = [dict(item) for item in list(params.get("failure_records") or [])]
+    existing.append(dict(failure_record))
+    return existing
+
+
+async def _execute_with_recovery(
+    state: dict[str, Any],
     runner: Callable[[], Awaitable[dict[str, Any]]],
     *,
     error_code: str,
+    node_name: str,
 ) -> dict[str, Any]:
-    last_error: Exception | None = None
-    for attempt in range(len(RETRY_DELAYS) + 1):
+    failure_count = 0
+    retry_budget = _resolve_recovery_retry_budget(state)
+    while True:
         try:
             return await runner()
         except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt >= len(RETRY_DELAYS):
-                break
-            await asyncio.sleep(RETRY_DELAYS[attempt])
-    return _fatal(error_code, str(last_error or "unknown_error"))
+            failure_record = classify_runtime_exception(component=node_name, error=exc)
+            directive = build_recovery_directive(
+                failure_record=failure_record,
+                failure_count=failure_count,
+                max_retries=retry_budget,
+            )
+            if directive.action != "retry":
+                return _fatal(
+                    error_code,
+                    str(exc or "unknown_error"),
+                    failure_records=_merge_failure_records(state, failure_record),
+                )
+            failure_count += 1
+            await asyncio.sleep(directive.delay_seconds)
 
 
 async def _retry_after_browser_interrupt(
@@ -477,7 +516,12 @@ async def run_pipeline_node(state: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
-    node_result = await _run_with_retry(_runner, error_code="run_pipeline_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="run_pipeline_failed",
+        node_name="run_pipeline_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, run_pipeline_node)
 
 
@@ -498,7 +542,12 @@ async def collect_urls_node(state: dict[str, Any]) -> dict[str, Any]:
             "summary": dict(result.get("summary") or {}),
         }
 
-    node_result = await _run_with_retry(_runner, error_code="collect_urls_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="collect_urls_failed",
+        node_name="collect_urls_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, collect_urls_node)
 
 
@@ -518,7 +567,12 @@ async def generate_config_node(state: dict[str, Any]) -> dict[str, Any]:
             "summary": dict(result.get("summary") or {}),
         }
 
-    node_result = await _run_with_retry(_runner, error_code="generate_config_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="generate_config_failed",
+        node_name="generate_config_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, generate_config_node)
 
 
@@ -541,7 +595,12 @@ async def batch_collect_node(state: dict[str, Any]) -> dict[str, Any]:
             "summary": dict(result.get("summary") or {}),
         }
 
-    node_result = await _run_with_retry(_runner, error_code="batch_collect_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="batch_collect_failed",
+        node_name="batch_collect_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, batch_collect_node)
 
 
@@ -563,7 +622,12 @@ async def field_extract_node(state: dict[str, Any]) -> dict[str, Any]:
             "summary": dict(result.get("summary") or {}),
         }
 
-    node_result = await _run_with_retry(_runner, error_code="field_extract_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="field_extract_failed",
+        node_name="field_extract_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, field_extract_node)
 
 
@@ -607,7 +671,12 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
-    node_result = await _run_with_retry(_runner, error_code="plan_failed")
+    node_result = await _execute_with_recovery(
+        state,
+        _runner,
+        error_code="plan_failed",
+        node_name="plan_node",
+    )
     return await _retry_after_browser_interrupt(state, node_result, plan_node)
 
 
