@@ -115,3 +115,27 @@ def test_summarize_failures_returns_empty_for_non_positive_limits() -> None:
 
     assert summarize_failures(failure_records, limit=0) == ()
     assert summarize_failures(failure_records, limit=-1) == ()
+
+
+def test_build_decision_context_keeps_explicit_empty_world_failure_records() -> None:
+    workflow = {
+        "world": {
+            "failure_records": [],
+            "world_model": {
+                "request_params": {"target_url_count": 8},
+                "page_models": {
+                    "entry": {
+                        "page_id": "entry",
+                        "page_type": "list_page",
+                    }
+                },
+                "failure_records": [
+                    {"page_id": "entry", "category": "old", "detail": "stale"}
+                ],
+            },
+        },
+    }
+
+    context = build_decision_context(workflow, page_id="entry")
+
+    assert context["recent_failures"] == []

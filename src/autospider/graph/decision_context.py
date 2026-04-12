@@ -158,6 +158,12 @@ def _summarize_recovery_policy(policy: RecoveryDirective) -> dict[str, Any]:
     }
 
 
+def _select_failure_source(world: Mapping[str, Any], world_model: WorldModel) -> Any:
+    if "failure_records" in world:
+        return world.get("failure_records")
+    return world_model.failure_records
+
+
 def build_decision_context(
     workflow: Mapping[str, Any] | None,
     *,
@@ -169,7 +175,7 @@ def build_decision_context(
     control = dict(normalized_workflow.get("control") or {})
     resolved_page_id = str(page_id or next(iter(world_model.page_models), ""))
     page_model = world_model.page_models.get(resolved_page_id, PageModel(page_id=resolved_page_id))
-    failure_source = world.get("failure_records") or world_model.failure_records
+    failure_source = _select_failure_source(world, world_model)
     recent_failures = summarize_failures(failure_source, page_id=resolved_page_id)
     success_criteria = world_model.success_criteria
     dispatch_policy = _coerce_dispatch_policy(control.get("dispatch_policy"))
