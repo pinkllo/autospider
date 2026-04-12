@@ -7,6 +7,7 @@ from typing import Any
 
 from .control_types import (
     DispatchDecision,
+    PlanSpec,
     RecoveryDirective,
     build_default_dispatch_policy,
     build_default_recovery_policy,
@@ -93,6 +94,7 @@ def summarize_page_model(page_model: PageModel) -> dict[str, Any]:
         "page_type": page_model.page_type,
         "links": page_model.links,
         "depth": page_model.depth,
+        "metadata": dict(page_model.metadata),
     }
 
 
@@ -158,6 +160,27 @@ def _summarize_recovery_policy(policy: RecoveryDirective) -> dict[str, Any]:
     }
 
 
+def _coerce_current_plan(value: Any) -> PlanSpec:
+    if isinstance(value, PlanSpec):
+        return value
+    payload = dict(value) if isinstance(value, Mapping) else {}
+    return PlanSpec(
+        goal=str(payload.get("goal") or ""),
+        page_id=str(payload.get("page_id") or ""),
+        stage=str(payload.get("stage") or ""),
+        metadata=dict(payload.get("metadata") or {}),
+    )
+
+
+def _summarize_current_plan(current_plan: PlanSpec) -> dict[str, Any]:
+    return {
+        "goal": current_plan.goal,
+        "page_id": current_plan.page_id,
+        "stage": current_plan.stage,
+        "metadata": dict(current_plan.metadata),
+    }
+
+
 def _select_failure_source(world: Mapping[str, Any], world_model: WorldModel) -> Any:
     if "failure_records" in world:
         return world.get("failure_records")
@@ -173,7 +196,8 @@ def build_decision_context(
     world_model = _coerce_world_model(normalized_workflow)
     world = dict(normalized_workflow.get("world") or {})
     control = dict(normalized_workflow.get("control") or {})
-    resolved_page_id = str(page_id or next(iter(world_model.page_models), ""))
+    current_plan = _coerce_current_plan(control.get("current_plan"))
+    resolved_page_id = str(page_id or current_plan.page_id or next(iter(world_model.page_models), ""))
     page_model = world_model.page_models.get(resolved_page_id, PageModel(page_id=resolved_page_id))
     failure_source = _select_failure_source(world, world_model)
     recent_failures = summarize_failures(failure_source, page_id=resolved_page_id)
@@ -185,6 +209,7 @@ def build_decision_context(
         "page_model": summarize_page_model(page_model),
         "recent_failures": [_summarize_failure_record(record) for record in recent_failures],
         "success_criteria": _summarize_success_criteria(success_criteria),
+        "current_plan": _summarize_current_plan(current_plan),
         "dispatch_policy": _summarize_dispatch_policy(dispatch_policy),
         "recovery_policy": _summarize_recovery_policy(recovery_policy),
     }

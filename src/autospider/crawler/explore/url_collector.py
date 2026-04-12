@@ -63,6 +63,7 @@ class URLCollector(BaseCollector):
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         initial_nav_steps: list[dict] | None = None,
+        decision_context: dict | None = None,
     ):
         super().__init__(
             page=page,
@@ -82,6 +83,7 @@ class URLCollector(BaseCollector):
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.initial_nav_steps = list(initial_nav_steps or [])
+        self.decision_context = dict(decision_context or {})
 
         self.detail_visits: list[DetailPageVisit] = []
         self.step_index = 0
@@ -196,6 +198,7 @@ class URLCollector(BaseCollector):
             selected_skills_context=self.selected_skills_context,
             selected_skills=self.selected_skills,
             execution_brief=self.execution_brief,
+            decision_context=self.decision_context,
         )
         super()._initialize_handlers()
         self.navigation_handler = NavigationHandler(

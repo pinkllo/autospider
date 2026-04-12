@@ -94,6 +94,10 @@ navigate_to_field_user_message: |
   - **数量**：{{input_candidates_count}}
   {{input_candidates}}
 
+  ## 决策上下文
+
+  {{decision_context}}
+
   ## 已选中的站点 skills
 
   {{selected_skills_context}}
@@ -141,6 +145,10 @@ extract_field_text_user_message: |
   {% if field_example %}
   - **示例值**：{{ field_example }}
   {% endif %}
+
+  ## 决策上下文
+
+  {{decision_context}}
 
   ## 已选中的站点 skills
 
@@ -197,6 +205,10 @@ select_match_user_message: |
   {% for c in candidates %}
   - **[{{ c.mark_id }}]** {{ c.text }}
   {% endfor %}
+
+  ## 决策上下文
+
+  {{decision_context}}
 
   ## 已选中的站点 skills
 

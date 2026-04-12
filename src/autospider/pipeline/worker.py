@@ -17,6 +17,7 @@ from ..common.config import config
 from ..common.logger import get_logger
 from ..domain.fields import FieldDefinition
 from ..domain.planning import SubTask, SubTaskMode, format_execution_brief
+from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
 from ..pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult, SubtaskOutcomeType
@@ -264,6 +265,14 @@ class SubTaskWorker:
                 }
 
         concurrency = self._resolved_concurrency()
+        world_snapshot = dict(params.get("world_snapshot") or {})
+        control_snapshot = dict(params.get("control_snapshot") or {})
+        decision_context = dict(params.get("decision_context") or {})
+        if world_snapshot and control_snapshot:
+            decision_context = build_decision_context(
+                {"world": world_snapshot, "control": control_snapshot},
+                page_id=str(working_subtask.plan_node_id or ""),
+            )
         request = ExecutionRequest(
             list_url=working_subtask.list_url,
             task_description=working_subtask.task_description,
@@ -288,6 +297,9 @@ class SubTaskWorker:
             task_plan_snapshot=self.task_plan_snapshot,
             plan_journal=list(self.plan_journal or []),
             initial_nav_steps=list(working_subtask.nav_steps or []),
+            decision_context=decision_context,
+            world_snapshot=world_snapshot,
+            failure_records=list(params.get("failure_records") or []),
             anchor_url=working_subtask.anchor_url,
             page_state_signature=working_subtask.page_state_signature,
             variant_label=working_subtask.variant_label,

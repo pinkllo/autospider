@@ -67,6 +67,9 @@ class PipelineRuntimeContext:
     task_plan_snapshot: dict[str, Any] = field(default_factory=dict)
     plan_journal: list[dict[str, Any]] = field(default_factory=list)
     initial_nav_steps: list[dict[str, Any]] = field(default_factory=list)
+    decision_context: dict[str, Any] = field(default_factory=dict)
+    world_snapshot: dict[str, Any] = field(default_factory=dict)
+    failure_records: tuple[dict[str, Any], ...] = ()
     url_only_mode: bool = False
     execution_id: str = ""
     resume_mode: str = "fresh"
@@ -108,6 +111,7 @@ class ProducerService:
                 skill_runtime=self.context.skill_runtime,
                 selected_skills=self.context.selected_skills,
                 initial_nav_steps=list(self.context.initial_nav_steps or []),
+                decision_context=dict(self.context.decision_context or {}),
             )
             result = await collector.run()
             self.context.summary["collected_urls"] = len(result.collected_urls)
@@ -218,6 +222,9 @@ class ConsumerPool:
             fields=self.context.fields,
             output_dir=self.context.output_dir,
             skill_runtime=self.context.skill_runtime,
+            decision_context=dict(self.context.decision_context or {}),
+            world_snapshot=dict(self.context.world_snapshot or {}),
+            failure_records=[dict(item) for item in list(self.context.failure_records or ())],
         )
         try:
             while True:

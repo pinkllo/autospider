@@ -123,3 +123,42 @@ def upsert_page_model(
         failure_records=tuple(world_model.failure_records),
         success_criteria=world_model.success_criteria,
     )
+
+
+def page_model_to_payload(page_model: PageModel) -> dict[str, Any]:
+    return {
+        "page_id": page_model.page_id,
+        "url": page_model.url,
+        "page_type": page_model.page_type,
+        "links": page_model.links,
+        "depth": page_model.depth,
+        "metadata": dict(page_model.metadata),
+    }
+
+
+def failure_record_to_payload(record: FailureRecord) -> dict[str, Any]:
+    return {
+        "page_id": record.page_id,
+        "category": record.category,
+        "detail": record.detail,
+        "metadata": dict(record.metadata),
+    }
+
+
+def success_criteria_to_payload(success_criteria: SuccessCriteria) -> dict[str, Any]:
+    return {"target_url_count": success_criteria.target_url_count}
+
+
+def world_model_to_payload(world_model: WorldModel) -> dict[str, Any]:
+    return {
+        "request_params": dict(world_model.request_params),
+        "page_models": {
+            page_id: page_model_to_payload(page_model)
+            for page_id, page_model in world_model.page_models.items()
+        },
+        "failure_records": [
+            failure_record_to_payload(record)
+            for record in world_model.failure_records
+        ],
+        "success_criteria": success_criteria_to_payload(world_model.success_criteria),
+    }

@@ -68,6 +68,9 @@ class FieldExtractor:
         output_dir: str = "output",
         max_nav_steps: int = 10,
         skill_runtime: SkillRuntime | None = None,
+        decision_context: dict | None = None,
+        world_snapshot: dict | None = None,
+        failure_records: list[dict] | None = None,
     ):
         """
         初始化字段提取器
@@ -85,6 +88,9 @@ class FieldExtractor:
         self.skill_runtime = skill_runtime or SkillRuntime()
         self.selected_skills_context = ""
         self.selected_skills: list[dict[str, str]] = []
+        self.decision_context = dict(decision_context or {})
+        self.world_snapshot = dict(world_snapshot or {})
+        self.failure_records = [dict(item) for item in list(failure_records or [])]
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -109,6 +115,7 @@ class FieldExtractor:
             decider=self.llm_decider,
             selected_skills_context=self.selected_skills_context,
             selected_skills=self.selected_skills,
+            decision_context=self.decision_context,
         )
 
         # 动作执行器

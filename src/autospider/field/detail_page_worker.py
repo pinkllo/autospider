@@ -33,6 +33,9 @@ class DetailPageWorker:
         fields: list[FieldDefinition],
         output_dir: str,
         skill_runtime: object | None = None,
+        decision_context: dict | None = None,
+        world_snapshot: dict | None = None,
+        failure_records: list[dict] | None = None,
         xpath_query_service: FieldXPathQueryService | None = None,
         xpath_write_service: FieldXPathWriteService | None = None,
     ) -> None:
@@ -40,6 +43,9 @@ class DetailPageWorker:
         self.fields = list(fields or [])
         self.output_dir = output_dir
         self.skill_runtime = skill_runtime
+        self.decision_context = dict(decision_context or {})
+        self.world_snapshot = dict(world_snapshot or {})
+        self.failure_records = [dict(item) for item in list(failure_records or [])]
         self.xpath_query_service = xpath_query_service or FieldXPathQueryService()
         self.xpath_write_service = xpath_write_service or FieldXPathWriteService()
 
@@ -89,5 +95,8 @@ class DetailPageWorker:
             fields=self.fields,
             output_dir=self.output_dir,
             skill_runtime=self.skill_runtime,
+            decision_context=self.decision_context,
+            world_snapshot=self.world_snapshot,
+            failure_records=self.failure_records,
         )
         return await extractor.extract_from_url(url)

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
 
@@ -37,6 +38,12 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("field_extractor.yaml")
 logger = get_logger(__name__)
 
 
+def _format_decision_context(decision_context: dict[str, object] | None) -> str:
+    if not decision_context:
+        return "无"
+    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
+
+
 class FieldDecider:
     """字段提取 LLM 决策器
 
@@ -49,6 +56,7 @@ class FieldDecider:
         decider: "LLMDecider",
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
+        decision_context: dict | None = None,
     ):
         """
         初始化字段决策器
@@ -61,6 +69,7 @@ class FieldDecider:
         self.decider = decider
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
+        self.decision_context = dict(decision_context or {})
 
     def _parse_response_json(self, response_payload: object) -> dict | None:
         # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
@@ -351,6 +360,7 @@ class FieldDecider:
                 "input_candidates": input_candidates_text,
                 "input_candidates_count": input_candidates_count,
                 "page_text_hit": page_text_hit_text,
+                "decision_context": _format_decision_context(self.decision_context),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -383,6 +393,7 @@ class FieldDecider:
             "page_text_hit": page_text_hit_text,
             "clickable_candidates_count": clickable_candidates_count,
             "input_candidates_count": input_candidates_count,
+            "decision_context": dict(self.decision_context or {}),
             "selected_skills": list(self.selected_skills or []),
             "screenshot_base64_len": len(screenshot_base64 or ""),
             "candidate_count": len(getattr(snapshot, "marks", []) or []),
@@ -462,6 +473,7 @@ class FieldDecider:
                 "field_description": field.description,
                 "field_data_type": field.data_type,
                 "field_example": field.example or "",
+                "decision_context": _format_decision_context(self.decision_context),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -489,6 +501,7 @@ class FieldDecider:
             "field_description": field.description,
             "field_data_type": field.data_type,
             "field_example": field.example or "",
+            "decision_context": dict(self.decision_context or {}),
             "selected_skills": list(self.selected_skills or []),
             "screenshot_base64_len": len(screenshot_base64 or ""),
         }
@@ -576,6 +589,7 @@ class FieldDecider:
                 "field_name": field.name,
                 "field_description": field.description,
                 "candidates": candidates,
+                "decision_context": _format_decision_context(self.decision_context),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -603,6 +617,7 @@ class FieldDecider:
             "field_description": field.description,
             "candidate_count": len(candidates),
             "candidates": candidates,
+            "decision_context": dict(self.decision_context or {}),
             "selected_skills": list(self.selected_skills or []),
             "screenshot_base64_len": len(screenshot_base64 or ""),
         }

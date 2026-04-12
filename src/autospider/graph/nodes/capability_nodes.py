@@ -21,9 +21,14 @@ from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
 from ...crawler.explore.url_collector import collect_detail_urls
 from ...crawler.planner import TaskPlanner
+from ...crawler.planner.task_planner import (
+    build_planner_control_payload,
+    build_planner_world_payload,
+)
 from ...domain.planning import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
 from ...field import run_field_pipeline
+from ..decision_context import build_decision_context
 from ..state_access import (
     collection_config as select_collection_config,
     collected_urls as select_collected_urls,
@@ -117,6 +122,34 @@ def _build_collection_progress(*, list_url: str, task_description: str, collecte
     return progress.to_payload()
 
 
+def build_planning_runtime_payload(
+    *,
+    plan: TaskPlan,
+    plan_knowledge: str,
+    request_params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    resolved_request_params = dict(request_params or {})
+    world = build_planner_world_payload(plan, request_params=resolved_request_params)
+    control = build_planner_control_payload(plan, request_params=resolved_request_params)
+    decision_context = build_decision_context({"world": world, "control": control})
+    enriched_request_params = dict(resolved_request_params)
+    enriched_request_params.update(
+        {
+            "plan_knowledge": str(plan_knowledge or ""),
+            "decision_context": decision_context,
+            "world_snapshot": world,
+            "failure_records": list(world.get("failure_records") or []),
+            "control_snapshot": control,
+        }
+    )
+    return {
+        "world": world,
+        "control": control,
+        "decision_context": decision_context,
+        "request_params": enriched_request_params,
+    }
+
+
 async def _run_with_retry(
     runner: Callable[[], Awaitable[dict[str, Any]]],
     *,
@@ -194,9 +227,18 @@ async def _plan_request(request) -> dict[str, Any]:
 
     plan.shared_fields = list(request.fields or [])
     plan.total_subtasks = len(plan.subtasks)
+    runtime_payload = build_planning_runtime_payload(
+        plan=plan,
+        plan_knowledge=planner.render_plan_knowledge(plan),
+        request_params=request.model_dump(mode="python"),
+    )
     return {
         "task_plan": plan,
-        "plan_knowledge": planner.render_plan_knowledge(plan),
+        "plan_knowledge": str(runtime_payload["request_params"].get("plan_knowledge") or ""),
+        "world": dict(runtime_payload["world"] or {}),
+        "control": dict(runtime_payload["control"] or {}),
+        "decision_context": dict(runtime_payload["decision_context"] or {}),
+        "request_params": dict(runtime_payload["request_params"] or {}),
         "summary": {"total_subtasks": len(plan.subtasks)},
         "planner_status": str(getattr(planner, "planner_status", "success") or "success"),
         "terminal_reason": str(getattr(planner, "terminal_reason", "") or ""),
@@ -544,11 +586,17 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             **_ok(_node_payload(result, {"task_plan": task_plan})),
             "task_plan": task_plan,
             "plan_knowledge": str(result.get("plan_knowledge") or ""),
+            "world": dict(result.get("world") or {}),
+            "control": dict(result.get("control") or {}),
+            "normalized_params": dict(result.get("request_params") or {}),
             "summary": dict(result.get("summary") or {}),
             "planning": {
                 "status": "ok",
                 "task_plan": task_plan,
                 "plan_knowledge": str(result.get("plan_knowledge") or ""),
+                "world": dict(result.get("world") or {}),
+                "control": dict(result.get("control") or {}),
+                "decision_context": dict(result.get("decision_context") or {}),
                 "selected_skills": list(result.get("selected_skills") or []),
                 "summary": dict(result.get("summary") or {}),
             },

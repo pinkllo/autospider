@@ -58,6 +58,12 @@ def _build_trace_payload(
     return payload
 
 
+def _format_decision_context(decision_context: dict[str, object] | None) -> str:
+    if not decision_context:
+        return "无"
+    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
+
+
 class LLMDecisionMaker:
     """LLM 决策制定器，负责调用 LLM 进行决策"""
 
@@ -72,6 +78,7 @@ class LLMDecisionMaker:
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         execution_brief: dict | None = None,
+        decision_context: dict | None = None,
     ):
         self.page = page
         self.decider = decider
@@ -82,6 +89,7 @@ class LLMDecisionMaker:
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.execution_brief = dict(execution_brief or {})
+        self.decision_context = dict(decision_context or {})
 
     async def ask_for_decision(
         self,
@@ -127,6 +135,7 @@ class LLMDecisionMaker:
                 "visited_count": len(self.visited_detail_urls),
                 "collected_urls_str": collected_urls_str,
                 "execution_brief": format_execution_brief(self.execution_brief),
+                "decision_context": _format_decision_context(self.decision_context),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -163,6 +172,7 @@ class LLMDecisionMaker:
             "collected_urls_sample": list(self.collected_urls)[:10],
             "validation_feedback": validation_feedback,
             "selected_skills": list(self.selected_skills or []),
+            "decision_context": dict(self.decision_context or {}),
             "screenshot_base64_len": len(screenshot_base64 or ""),
             "candidate_count": len(getattr(snapshot, "marks", []) or []),
         }

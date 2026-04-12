@@ -65,6 +65,9 @@ ask_llm_decision_user_message: |
   ## 已收集的 URL 示例（避免重复）
   {{collected_urls_str}}
 
+  ## 决策上下文
+  {{decision_context}}
+
   ## 已选中的站点 skills
   {{selected_skills_context}}
 
