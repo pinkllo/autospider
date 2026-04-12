@@ -11,7 +11,10 @@ from autospider.graph.control_types import (
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.graph.decision_context import build_decision_context
+from autospider.graph.decision_context import (
+    build_decision_context,
+    summarize_failures,
+)
 from autospider.graph.world_model import build_initial_world_model, upsert_page_model
 
 
@@ -58,6 +61,57 @@ def test_build_decision_context_reads_world_model_failures_and_success_criteria(
 
     context = build_decision_context(workflow, page_id="entry")
 
-    assert context.page_model.page_type == "list_page"
-    assert context.recent_failures[0].category == "navigation"
-    assert context.success_criteria.target_url_count == 8
+    assert context["page_model"]["page_type"] == "list_page"
+    assert context["recent_failures"][0]["category"] == "navigation"
+    assert context["success_criteria"]["target_url_count"] == 8
+
+
+def test_build_decision_context_keeps_request_params_from_plain_world_model_mapping() -> None:
+    workflow = {
+        "world": {
+            "world_model": {
+                "request_params": {"target_url_count": 8},
+                "page_models": {
+                    "entry": {
+                        "page_id": "entry",
+                        "page_type": "list_page",
+                    }
+                },
+                "failure_records": [],
+            }
+        },
+        "control": {},
+    }
+
+    context = build_decision_context(workflow, page_id="entry")
+
+    assert context["success_criteria"]["target_url_count"] == 8
+
+
+def test_build_decision_context_parses_string_false_for_recovery_policy() -> None:
+    context = build_decision_context(
+        {
+            "world": {
+                "world_model": {
+                    "request_params": {},
+                    "page_models": {"entry": {"page_id": "entry", "page_type": "list_page"}},
+                }
+            },
+            "control": {
+                "recovery_policy": {"fail_fast": "false"},
+            },
+        },
+        page_id="entry",
+    )
+
+    assert context["recovery_policy"]["fail_fast"] is False
+
+
+def test_summarize_failures_returns_empty_for_non_positive_limits() -> None:
+    failure_records = [
+        {"page_id": "entry", "category": "navigation", "detail": "timeout"},
+        {"page_id": "entry", "category": "parsing", "detail": "missing_field"},
+    ]
+
+    assert summarize_failures(failure_records, limit=0) == ()
+    assert summarize_failures(failure_records, limit=-1) == ()
