@@ -79,6 +79,19 @@ def test_classify_runtime_exception_returns_failure_record() -> None:
     assert failure["metadata"]["message"] == "timed out"
 
 
+def test_classify_runtime_exception_marks_unknown_runtime_error_as_fatal() -> None:
+    failure = classify_runtime_exception(
+        component="collect_urls_node",
+        error=RuntimeError("boom"),
+        page_id="list-page",
+    )
+
+    assert failure["page_id"] == "list-page"
+    assert failure["category"] == "fatal"
+    assert failure["detail"] == "runtime_error"
+    assert failure["metadata"]["message"] == "boom"
+
+
 def test_decider_exposes_contract_violation_via_action_contract() -> None:
     decider = object.__new__(LLMDecider)
     decider.last_failure_record = None
@@ -126,6 +139,17 @@ def test_build_recovery_directive_fails_after_retry_budget_for_transient_failure
     assert directive.reason == "retry_budget_exhausted"
 
 
+def test_build_recovery_directive_fails_for_unknown_category() -> None:
+    directive = build_recovery_directive(
+        failure_record={"category": "mystery", "detail": "boom"},
+        failure_count=0,
+        max_retries=2,
+    )
+
+    assert directive.action == "fail"
+    assert directive.reason == "unknown_failure_category"
+
+
 @pytest.mark.asyncio
 async def test_capability_recovery_retries_transient_exception_then_fails(
     monkeypatch: pytest.MonkeyPatch,
@@ -165,12 +189,12 @@ async def test_capability_recovery_retries_transient_exception_then_fails(
 
 
 @pytest.mark.parametrize(
-    ("error_factory", "expected_category", "expected_attempts"),
+    ("error_factory", "expected_category", "expected_directive", "expected_attempts"),
     [
-        (lambda: StateMismatchError("dom changed"), "state_mismatch", 1),
-        (lambda: RuleStaleError("selector stale"), "rule_stale", 1),
-        (lambda: SiteDefenseError("captcha required"), "site_defense", 1),
-        (lambda: FatalCapabilityError("schema corrupted"), "fatal", 1),
+        (lambda: StateMismatchError("dom changed"), "state_mismatch", "replan", 1),
+        (lambda: RuleStaleError("selector stale"), "rule_stale", "replan", 1),
+        (lambda: SiteDefenseError("captcha required"), "site_defense", "human_intervention", 1),
+        (lambda: FatalCapabilityError("schema corrupted"), "fatal", "fail", 1),
     ],
 )
 @pytest.mark.asyncio
@@ -178,6 +202,7 @@ async def test_capability_recovery_escalates_non_retry_categories(
     monkeypatch: pytest.MonkeyPatch,
     error_factory,
     expected_category: str,
+    expected_directive: str,
     expected_attempts: int,
 ) -> None:
     attempts = 0
@@ -209,4 +234,22 @@ async def test_capability_recovery_escalates_non_retry_categories(
 
     assert attempts == expected_attempts
     assert result["node_status"] == "fatal"
+    assert result["recovery_directive"]["action"] == expected_directive
     assert result["failure_records"][0]["category"] == expected_category
+
+
+def test_capability_recovery_exposes_directive_for_unknown_runtime_error(
+) -> None:
+    failure_record = classify_runtime_exception(
+        component="collect_urls_node",
+        error=RuntimeError("boom"),
+    )
+
+    directive = build_recovery_directive(
+        failure_record=failure_record,
+        failure_count=0,
+        max_retries=2,
+    )
+
+    assert failure_record["category"] == "fatal"
+    assert directive.action == "fail"

@@ -28,6 +28,7 @@ _SITE_DEFENSE_HINTS = (
     "bot detected",
 )
 _FATAL_HINTS = ("fatal", "schema corrupted", "invalid schema", "unsupported")
+UNKNOWN_EXCEPTION_REASON = "unknown_exception"
 
 
 def _snake_case(name: str) -> str:
@@ -93,18 +94,18 @@ def _is_fatal_error(error: BaseException) -> bool:
     return "fatal" in name or _has_hint(_exception_message(error), _FATAL_HINTS)
 
 
-def _classify_exception_category(error: BaseException) -> str:
+def _classify_exception_category(error: BaseException) -> tuple[str, str]:
     if _is_timeout_error(error):
-        return TRANSIENT_CATEGORY
+        return TRANSIENT_CATEGORY, "timeout"
     if _is_state_mismatch_error(error):
-        return STATE_MISMATCH_CATEGORY
+        return STATE_MISMATCH_CATEGORY, "state_mismatch"
     if _is_rule_stale_error(error):
-        return RULE_STALE_CATEGORY
+        return RULE_STALE_CATEGORY, "rule_stale"
     if _is_site_defense_error(error):
-        return SITE_DEFENSE_CATEGORY
+        return SITE_DEFENSE_CATEGORY, "site_defense"
     if _is_fatal_error(error):
-        return FATAL_CATEGORY
-    return TRANSIENT_CATEGORY
+        return FATAL_CATEGORY, "fatal"
+    return FATAL_CATEGORY, UNKNOWN_EXCEPTION_REASON
 
 
 def classify_protocol_violation(
@@ -135,12 +136,14 @@ def classify_runtime_exception(
     error: BaseException,
     page_id: str = "",
 ) -> dict[str, Any]:
+    category, classification_reason = _classify_exception_category(error)
     metadata = {
         "exception_type": type(error).__name__,
         "message": str(error),
+        "classification_reason": classification_reason,
     }
     return build_failure_record(
-        category=_classify_exception_category(error),
+        category=category,
         detail=_exception_name(error),
         component=component,
         page_id=page_id,

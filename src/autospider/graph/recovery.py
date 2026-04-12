@@ -30,6 +30,7 @@ _CATEGORY_TO_ACTION = {
     SITE_DEFENSE_CATEGORY: HUMAN_INTERVENTION_ACTION,
     FATAL_CATEGORY: FAIL_ACTION,
 }
+UNKNOWN_FAILURE_CATEGORY_REASON = "unknown_failure_category"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +47,10 @@ def _resolve_retry_delay(failure_count: int) -> float:
     return float(RETRY_DELAYS[bounded_index])
 
 
-def _resolve_category_action(category: str) -> str:
+def _resolve_category_action(category: str) -> tuple[str, str]:
     if category in _CATEGORY_TO_ACTION:
-        return _CATEGORY_TO_ACTION[category]
-    return RETRY_ACTION
+        return _CATEGORY_TO_ACTION[category], category
+    return FAIL_ACTION, UNKNOWN_FAILURE_CATEGORY_REASON
 
 
 def build_recovery_directive(
@@ -60,14 +61,14 @@ def build_recovery_directive(
 ) -> RecoveryDecision:
     payload = dict(failure_record or {})
     category = str(payload.get("category") or "")
-    action = _resolve_category_action(category)
+    action, reason = _resolve_category_action(category)
     retry_budget = max(int(max_retries or 0), 0)
     if action == RETRY_ACTION and failure_count >= retry_budget:
         return RecoveryDecision(action=FAIL_ACTION, reason="retry_budget_exhausted")
     if action != RETRY_ACTION:
-        return RecoveryDecision(action=action, reason=category or action)
+        return RecoveryDecision(action=action, reason=reason)
     return RecoveryDecision(
         action=RETRY_ACTION,
         delay_seconds=_resolve_retry_delay(failure_count),
-        reason=category or "retryable_failure",
+        reason=reason or "retryable_failure",
     )

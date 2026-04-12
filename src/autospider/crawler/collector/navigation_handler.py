@@ -18,6 +18,7 @@ from ...common.som import (
     set_overlay_visibility,
 )
 from ...common.types import AgentState, RunInput, ActionType
+from ...graph.recovery import build_recovery_directive
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,6 +86,39 @@ class NavigationHandler:
         self.screenshots_dir = screenshots_dir
         self.executor: ActionExecutor | None = None
         self.nav_steps: list[dict] = []
+
+    def _build_retry_failure_entry(self, nav_step: int, failure_record: dict) -> dict[str, object]:
+        directive = build_recovery_directive(
+            failure_record=failure_record,
+            failure_count=0,
+            max_retries=0,
+        )
+        return {
+            "step": nav_step,
+            "action": ActionType.RETRY.value,
+            "thinking": "contract_violation",
+            "success": False,
+            "failure_record": dict(failure_record),
+            "recovery_directive": {
+                "action": directive.action,
+                "reason": directive.reason,
+            },
+        }
+
+    def _handle_retry_action(self, nav_step: int, action) -> bool:
+        if not action.failure_record:
+            logger.info("[Nav] 重试")
+            return False
+        failure_record = dict(action.failure_record)
+        entry = self._build_retry_failure_entry(nav_step, failure_record)
+        entry["thinking"] = action.thinking
+        self.nav_steps.append(entry)
+        logger.error(
+            "[Nav] 决策失败，停止导航: category=%s directive=%s",
+            failure_record.get("category"),
+            entry["recovery_directive"]["action"],
+        )
+        return True
 
     async def run_navigation_phase(self) -> bool:
         """
@@ -185,7 +219,8 @@ class NavigationHandler:
 
 
             if action.action == ActionType.RETRY:
-                logger.info("[Nav] 重试")
+                if self._handle_retry_action(nav_step, action):
+                    break
                 continue
 
             if action.action == ActionType.EXTRACT:

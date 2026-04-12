@@ -80,6 +80,7 @@ def _fatal(
     message: str,
     *,
     failure_records: list[dict[str, Any]] | None = None,
+    recovery_directive: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = {
         "node_status": "fatal",
@@ -93,6 +94,8 @@ def _fatal(
     }
     if failure_records:
         result["failure_records"] = [dict(item) for item in list(failure_records)]
+    if recovery_directive:
+        result["recovery_directive"] = dict(recovery_directive)
     return result
 
 
@@ -195,6 +198,13 @@ def _attach_recovery_directive(
     return payload
 
 
+def _build_recovery_payload(directive_action: str, directive_reason: str) -> dict[str, Any]:
+    return {
+        "action": directive_action,
+        "reason": directive_reason,
+    }
+
+
 async def _execute_with_recovery(
     state: dict[str, Any],
     runner: Callable[[], Awaitable[dict[str, Any]]],
@@ -224,6 +234,10 @@ async def _execute_with_recovery(
                     error_code,
                     str(exc or "unknown_error"),
                     failure_records=_merge_failure_records(state, resolved_failure),
+                    recovery_directive=_build_recovery_payload(
+                        directive.action,
+                        directive.reason,
+                    ),
                 )
             failure_count += 1
             await asyncio.sleep(directive.delay_seconds)
