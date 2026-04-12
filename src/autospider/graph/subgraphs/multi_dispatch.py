@@ -64,7 +64,9 @@ def route_after_feedback(state: dict[str, Any]) -> str:
     strategy_name = str(active_strategy.get("name") or "")
     if strategy_name == "replan":
         return "replan"
-    return "aggregate"
+    if strategy_name == "aggregate":
+        return "aggregate"
+    raise ValueError(f"unknown_feedback_route: {strategy_name or 'missing'}")
 
 
 def _subtask_signature(payload: dict[str, Any]) -> tuple[str, str, str, str, str]:

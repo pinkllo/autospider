@@ -13,6 +13,7 @@ from ..world_model import build_initial_world_model, world_model_to_payload
 AGGREGATE_STRATEGY_NAME = "aggregate"
 INITIAL_STRATEGY_REASON = "initial_dispatch_cycle"
 REPLAN_STRATEGY_REASON = "feedback_requested_replan"
+ALLOWED_ACTIVE_STRATEGIES = {AGGREGATE_STRATEGY_NAME, REPLAN_ACTION}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -67,11 +68,14 @@ def initialize_world_model_node(state: dict[str, Any]) -> dict[str, Any]:
 def plan_strategy_node(state: dict[str, Any]) -> dict[str, Any]:
     control = dict(_control_state(state))
     active_strategy = _as_dict(control.get("active_strategy"))
-    strategy_name = str(active_strategy.get("name") or AGGREGATE_STRATEGY_NAME)
+    strategy_name = str(active_strategy.get("name") or "")
+    if not strategy_name:
+        strategy_name = AGGREGATE_STRATEGY_NAME
+    elif strategy_name not in ALLOWED_ACTIVE_STRATEGIES:
+        raise ValueError(f"unknown_active_strategy: {strategy_name}")
     if strategy_name == REPLAN_ACTION:
         reason = str(active_strategy.get("reason") or REPLAN_STRATEGY_REASON)
     else:
-        strategy_name = AGGREGATE_STRATEGY_NAME
         reason = str(active_strategy.get("reason") or INITIAL_STRATEGY_REASON)
     control["active_strategy"] = {"name": strategy_name, "reason": reason}
     return {"control": control}

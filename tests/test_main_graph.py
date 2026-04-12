@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
@@ -14,6 +16,11 @@ def test_resolve_feedback_route_maps_replan_to_plan_strategy_node() -> None:
     state = {"control": {"active_strategy": {"name": "replan"}}}
 
     assert resolve_feedback_route(state) == "plan_strategy_node"
+
+
+def test_resolve_feedback_route_rejects_unknown_strategy() -> None:
+    with pytest.raises(ValueError, match="unknown_feedback_route"):
+        resolve_feedback_route({"control": {"active_strategy": {"name": "unexpected"}}})
 
 
 def test_build_main_graph_inserts_planning_and_feedback_layers() -> None:

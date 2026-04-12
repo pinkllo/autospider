@@ -97,15 +97,7 @@ def resolve_feedback_route(state: dict[str, Any]) -> str:
     return "aggregate_node"
 
 
-def build_main_graph(*, checkpointer: Any | None = None):
-    """
-    构建并编译主图（Main Graph）。
-    此函数将所有相关的能力节点、入口节点和共享收尾节点注册到图上，并定义节点之间的连接关系。
-
-    主交互链路固定为：chat 澄清 -> 历史任务复用 -> review -> planning handoff -> plan -> multi-dispatch。
-    """
-    graph = StateGraph(GraphState)
-
+def _register_main_graph_nodes(graph: StateGraph) -> None:
     graph.add_node("route_entry", route_entry)
     graph.add_node("chat_clarify", chat_clarify)
     graph.add_node("chat_collect_user_input", chat_collect_user_input)
@@ -123,6 +115,8 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("build_summary", build_summary)
     graph.add_node("finalize_result", finalize_result)
 
+
+def _add_entry_flow(graph: StateGraph) -> None:
     graph.set_entry_point("route_entry")
     graph.add_conditional_edges(
         "route_entry",
@@ -132,7 +126,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
             "finalize_result": "finalize_result",
         },
     )
-
     graph.add_conditional_edges(
         "chat_clarify",
         resolve_chat_clarify_route,
@@ -153,6 +146,9 @@ def build_main_graph(*, checkpointer: Any | None = None):
             "error": "build_artifact_index",
         },
     )
+
+
+def _add_execution_flow(graph: StateGraph) -> None:
     graph.add_conditional_edges(
         "chat_prepare_execution_handoff",
         resolve_node_outcome,
@@ -160,7 +156,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
     )
     graph.add_edge("initialize_world_model_node", "plan_strategy_node")
     graph.add_edge("plan_strategy_node", "plan_node")
-
     graph.add_conditional_edges(
         "plan_node",
         resolve_node_outcome,
@@ -181,9 +176,22 @@ def build_main_graph(*, checkpointer: Any | None = None):
         },
     )
     graph.add_edge("aggregate_node", "build_artifact_index")
-
     graph.add_edge("build_artifact_index", "build_summary")
     graph.add_edge("build_summary", "finalize_result")
     graph.add_edge("finalize_result", END)
+
+
+def build_main_graph(*, checkpointer: Any | None = None):
+    """
+    构建并编译主图（Main Graph）。
+    此函数将所有相关的能力节点、入口节点和共享收尾节点注册到图上，并定义节点之间的连接关系。
+
+    主交互链路固定为：chat 澄清 -> 历史任务复用 -> review -> planning handoff -> plan -> multi-dispatch。
+    """
+    graph = StateGraph(GraphState)
+
+    _register_main_graph_nodes(graph)
+    _add_entry_flow(graph)
+    _add_execution_flow(graph)
 
     return graph.compile(checkpointer=checkpointer)

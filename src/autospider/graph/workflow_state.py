@@ -27,11 +27,14 @@ class WorkflowIntentState(TypedDict, total=False):
 class WorkflowWorldState(TypedDict, total=False):
     request_params: dict[str, Any]
     collection_config: dict[str, Any]
+    world_model: dict[str, Any]
+    failure_records: list[dict[str, Any]]
 
 
 class WorkflowControlState(TypedDict, total=False):
     current_plan: Any
     stage_status: str
+    active_strategy: dict[str, Any]
 
 
 class WorkflowExecutionState(TypedDict, total=False):
