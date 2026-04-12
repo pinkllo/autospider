@@ -90,6 +90,9 @@ def build_execution_context(
         task_plan_snapshot=dict(request.task_plan_snapshot or {}),
         plan_journal=tuple(list(request.plan_journal or [])),
         initial_nav_steps=tuple(list(request.initial_nav_steps or [])),
+        decision_context=dict(request.decision_context or {}),
+        world_snapshot=dict(request.world_snapshot or {}),
+        failure_records=tuple(list(request.failure_records or [])),
     )
 
 

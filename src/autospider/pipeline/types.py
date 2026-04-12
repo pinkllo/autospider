@@ -83,6 +83,9 @@ class ExecutionRequest(BaseModel):
     task_plan_snapshot: dict[str, Any] = Field(default_factory=dict)
     plan_journal: list[dict[str, Any]] = Field(default_factory=list)
     initial_nav_steps: list[dict[str, Any]] = Field(default_factory=list)
+    decision_context: dict[str, Any] = Field(default_factory=dict)
+    world_snapshot: dict[str, Any] = Field(default_factory=dict)
+    failure_records: list[dict[str, Any]] = Field(default_factory=list)
     anchor_url: str | None = None
     page_state_signature: str = ""
     variant_label: str | None = None
@@ -134,6 +137,9 @@ class ExecutionRequest(BaseModel):
             task_plan_snapshot=dict(payload.get("task_plan_snapshot") or {}),
             plan_journal=list(payload.get("plan_journal") or []),
             initial_nav_steps=list(payload.get("initial_nav_steps") or []),
+            decision_context=dict(payload.get("decision_context") or {}),
+            world_snapshot=dict(payload.get("world_snapshot") or {}),
+            failure_records=list(payload.get("failure_records") or []),
             anchor_url=payload.get("anchor_url"),
             page_state_signature=str(payload.get("page_state_signature") or ""),
             variant_label=payload.get("variant_label"),
@@ -333,6 +339,9 @@ class ExecutionContext:
     task_plan_snapshot: dict[str, Any] = field(default_factory=dict)
     plan_journal: tuple[dict[str, Any], ...] = ()
     initial_nav_steps: tuple[dict[str, Any], ...] = ()
+    decision_context: dict[str, Any] = field(default_factory=dict)
+    world_snapshot: dict[str, Any] = field(default_factory=dict)
+    failure_records: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
