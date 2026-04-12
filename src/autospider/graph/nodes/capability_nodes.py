@@ -100,7 +100,8 @@ def _fatal(
 
 
 def _thread_id(state: dict[str, Any]) -> str:
-    return str(state.get("thread_id") or "")
+    meta = dict(state.get("meta") or {})
+    return str(meta.get("thread_id") or state.get("thread_id") or "")
 
 
 def _node_artifacts(service_result: dict[str, Any]) -> list[dict[str, str]]:
@@ -159,6 +160,8 @@ def build_planning_runtime_payload(
     enriched_request_params = dict(world_request_params)
     enriched_request_params["world_snapshot"] = dict(world)
     enriched_request_params["control_snapshot"] = dict(control)
+    control["task_plan"] = plan
+    control["plan_knowledge"] = str(plan_knowledge or "")
     return {
         "world": world,
         "control": control,
@@ -685,26 +688,14 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             )
         return {
             **_ok(_node_payload(result, {"task_plan": task_plan})),
-            "task_plan": task_plan,
-            "plan_knowledge": str(result.get("plan_knowledge") or ""),
             "world": dict(result.get("world") or {}),
             "control": {
                 **dict(result.get("control") or {}),
                 "task_plan": task_plan,
+                "plan_knowledge": str(result.get("plan_knowledge") or ""),
                 "stage_status": "ok",
             },
             "normalized_params": dict(result.get("request_params") or {}),
-            "summary": dict(result.get("summary") or {}),
-            "planning": {
-                "status": "ok",
-                "task_plan": task_plan,
-                "plan_knowledge": str(result.get("plan_knowledge") or ""),
-                "world": dict(result.get("world") or {}),
-                "control": dict(result.get("control") or {}),
-                "decision_context": dict(result.get("decision_context") or {}),
-                "selected_skills": list(result.get("selected_skills") or []),
-                "summary": dict(result.get("summary") or {}),
-            },
         }
 
     node_result = await _execute_with_recovery(

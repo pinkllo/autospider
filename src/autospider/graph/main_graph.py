@@ -32,6 +32,7 @@ from .state_access import (
 )
 from .subgraphs import build_multi_dispatch_subgraph
 from .subgraphs.multi_dispatch import route_after_feedback
+from .workflow_access import coerce_workflow_state
 
 
 
@@ -42,7 +43,8 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
     当前用户侧主路径是 `chat_pipeline`：先经过 chat 澄清/复用/review，
     再进入 planning 与 multi-dispatch。
     """
-    mode = str(state.get("entry_mode") or "")
+    meta = dict(coerce_workflow_state(state).get("meta") or {})
+    mode = str(meta.get("entry_mode") or state.get("entry_mode") or "")
     if mode != "chat_pipeline":
         return "finalize_result"
     return "chat_clarify"

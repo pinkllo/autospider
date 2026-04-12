@@ -58,6 +58,26 @@ class SubTaskFlowState(TypedDict, total=False):
     artifacts: Annotated[list[dict[str, str]], operator.add]
 
 
+def _control_state(state: dict[str, Any]) -> dict[str, Any]:
+    return dict(state.get("control") or {})
+
+
+def _resolved_task_plan(state: dict[str, Any]) -> TaskPlan | None:
+    control = _control_state(state)
+    task_plan = control.get("task_plan")
+    if isinstance(task_plan, TaskPlan):
+        return task_plan
+    task_plan = state.get("task_plan")
+    return task_plan if isinstance(task_plan, TaskPlan) else None
+
+
+def _resolved_plan_knowledge(state: dict[str, Any]) -> str:
+    control = _control_state(state)
+    if control.get("plan_knowledge") is not None:
+        return str(control.get("plan_knowledge") or "")
+    return str(state.get("plan_knowledge") or "")
+
+
 def route_after_feedback(state: dict[str, Any]) -> str:
     control = dict(state.get("control") or {})
     active_strategy = dict(control.get("active_strategy") or {})
@@ -166,7 +186,7 @@ def _dispatch_state_payload(
 
 
 def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
-    plan = state.get("task_plan")
+    plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法调度执行"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
@@ -201,8 +221,8 @@ def route_dispatch_batch(state: MultiDispatchState):
             "execute_subtask_flow",
             {
                 "normalized_params": params,
-                "task_plan": state.get("task_plan"),
-                "plan_knowledge": str(state.get("plan_knowledge") or ""),
+                "task_plan": _resolved_task_plan(state),
+                "plan_knowledge": _resolved_plan_knowledge(state),
                 "subtask_payload": payload,
             },
         )
@@ -213,7 +233,7 @@ def route_dispatch_batch(state: MultiDispatchState):
 async def run_subtask_worker_node(state: SubTaskFlowState):
     subtask = _restore_subtask(state.get("subtask_payload") or {})
     params = _subtask_params(state)
-    plan = state.get("task_plan")
+    plan = _resolved_task_plan(state)
     if subtask.max_pages is None and params.get("max_pages") is not None:
         subtask.max_pages = int(params["max_pages"])
     if subtask.target_url_count is None and params.get("target_url_count") is not None:
@@ -276,11 +296,11 @@ def finalize_subtask_flow(state: SubTaskFlowState) -> SubTaskFlowState:
 
 
 def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
-    plan = state.get("task_plan")
+    plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法合并调度结果"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
-    accumulated = list(state.get("subtask_results") or [])
+    accumulated = list(dict(state.get("execution") or {}).get("subtask_results") or [])
     accumulated.extend(list(state.get("round_subtask_results") or []))
     mutation = PlanMutationService().merge_expand_requests(
         plan=plan,
@@ -289,32 +309,22 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         output_dir=_dispatch_output_dir(state),
     )
     summary = _build_dispatch_summary(mutation.task_plan, accumulated)
-    dispatch_payload = _dispatch_state_payload(
-        status="ok",
-        task_plan=mutation.task_plan,
-        plan_knowledge=mutation.plan_knowledge,
-        subtask_results=accumulated,
-        summary=summary,
-    )
     return {
-        "task_plan": mutation.task_plan,
-        "plan_knowledge": mutation.plan_knowledge,
         "dispatch_queue": list(mutation.dispatch_queue),
         "current_batch": [],
-        "subtask_results": accumulated,
         "execution": {
             "subtask_results": accumulated,
             "dispatch_summary": summary,
         },
         "control": {
+            "current_plan": dict(_control_state(state).get("current_plan") or {}),
             "task_plan": mutation.task_plan,
+            "plan_knowledge": mutation.plan_knowledge,
             "stage_status": "ok",
         },
         "round_subtask_results": [],
         "round_expand_requests": [],
-        "dispatch_result": summary,
-        "summary": summary,
-        "dispatch": dispatch_payload,
+        "node_payload": {"dispatch_result": summary},
     }
 
 
@@ -325,7 +335,7 @@ def route_after_merge(state: MultiDispatchState) -> str:
 
 
 def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
-    plan = state.get("task_plan")
+    plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法完成调度"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
@@ -335,33 +345,22 @@ def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
         pending_queue=list(state.get("dispatch_queue") or []),
         output_dir=_dispatch_output_dir(state),
     )
-    result_items = list(state.get("subtask_results") or [])
+    result_items = list(dict(state.get("execution") or {}).get("subtask_results") or [])
     summary = _build_dispatch_summary(mutation.task_plan, result_items)
-    dispatch_payload = _dispatch_state_payload(
-        status="ok",
-        task_plan=mutation.task_plan,
-        plan_knowledge=mutation.plan_knowledge,
-        subtask_results=result_items,
-        summary=summary,
-    )
     return {
-        "task_plan": mutation.task_plan,
-        "plan_knowledge": mutation.plan_knowledge,
-        "dispatch_result": summary,
-        "summary": summary,
-        "subtask_results": result_items,
         "execution": {
             "subtask_results": result_items,
             "dispatch_summary": summary,
         },
         "control": {
+            "current_plan": dict(_control_state(state).get("current_plan") or {}),
             "task_plan": mutation.task_plan,
+            "plan_knowledge": mutation.plan_knowledge,
             "stage_status": "ok",
         },
         "node_status": "ok",
         "node_error": None,
         "node_payload": {"dispatch_result": summary},
-        "dispatch": dispatch_payload,
         "error": None,
     }
 

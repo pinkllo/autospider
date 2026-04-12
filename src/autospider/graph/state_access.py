@@ -168,10 +168,8 @@ def get_result_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
     graph_state = _as_dict(state)
     result = result_state(graph_state)
     summary = _merge_mappings(
-        planning_state(graph_state).get("summary"),
         dispatch_summary(graph_state),
         result.get("summary"),
-        graph_state.get("summary"),
     )
     if summary:
         return summary
@@ -194,7 +192,7 @@ def select_summary(
 
 def get_result_artifacts(state: Mapping[str, Any] | None) -> list[dict[str, str]]:
     graph_state = _as_dict(state)
-    artifacts = result_state(graph_state).get("artifacts") or graph_state.get("artifacts") or []
+    artifacts = result_state(graph_state).get("artifacts") or []
     return [
         {"label": str(item.get("label") or ""), "path": str(item.get("path") or "")}
         for item in list(artifacts)

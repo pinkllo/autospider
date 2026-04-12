@@ -20,24 +20,22 @@ FIELD_LIST = [
 ]
 
 
-def test_coerce_workflow_state_maps_legacy_fields_into_workflow_namespaces() -> None:
+def test_coerce_workflow_state_maps_legacy_meta_and_intent_fields() -> None:
     legacy_state = {
         "thread_id": "thread-1",
         "conversation": {
             "clarified_task": {
                 "fields": FIELD_LIST,
             }
-        },
-        "planning": {"task_plan": {"steps": ["collect"]}},
-        "result": {"summary": {"items": 2}},
+        }
     }
 
     workflow = coerce_workflow_state(legacy_state)
 
     assert workflow["meta"]["thread_id"] == "thread-1"
     assert workflow["intent"]["fields"] == FIELD_LIST
-    assert workflow["control"]["current_plan"] == {"steps": ["collect"]}
-    assert workflow["result"]["summary"] == {"items": 2}
+    assert workflow["control"] == {}
+    assert workflow["result"] == {}
 
 
 def test_current_plan_reads_only_workflow_control_namespace() -> None:
@@ -88,8 +86,7 @@ def test_coerce_workflow_state_maps_root_summary_and_artifacts_into_result() -> 
 
     workflow = coerce_workflow_state(legacy_state)
 
-    assert workflow["result"]["summary"] == {"thread_id": "thread-1", "merged_items": 3}
-    assert workflow["result"]["artifacts"] == [{"label": "report", "path": "tmp/report.json"}]
+    assert workflow["result"] == {}
 
 
 def test_coerce_workflow_state_preserves_real_legacy_field_list_shape() -> None:

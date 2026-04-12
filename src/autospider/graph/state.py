@@ -81,21 +81,13 @@ class GraphState(TypedDict, total=False):
     cli_args: dict[str, Any]
     normalized_params: dict[str, Any]
     conversation: ConversationState
-    planning: PlanningState
-    dispatch: DispatchState
     result: ResultState
     error: StageErrorState | None
-    artifacts: list[dict[str, str]]
-    summary: dict[str, Any]
     status: str
     error_code: str
     error_message: str
     history_match_done: bool
     history_match_signature: str
-    task_plan: Any
-    plan_knowledge: str
-    dispatch_result: dict[str, Any]
-    subtask_results: list[SubTaskRuntimeState]
     node_status: NodeStatus
     node_payload: dict[str, Any]
     node_artifacts: list[dict[str, str]]

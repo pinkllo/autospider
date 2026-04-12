@@ -34,6 +34,7 @@ class WorkflowWorldState(TypedDict, total=False):
 class WorkflowControlState(TypedDict, total=False):
     current_plan: Any
     task_plan: Any
+    plan_knowledge: str
     stage_status: str
     active_strategy: dict[str, Any]
     dispatch_policy: dict[str, Any]

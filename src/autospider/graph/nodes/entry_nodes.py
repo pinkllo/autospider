@@ -30,6 +30,12 @@ from ...pipeline.runtime_controls import resolve_concurrency_settings
 
 logger = get_logger(__name__)
 
+
+def _meta_value(state: dict[str, Any], key: str, default: Any = None) -> Any:
+    meta = dict(state.get("meta") or {})
+    return meta.get(key, state.get(key, default))
+
+
 _DEFAULT_CHAT_FALLBACK = "请按常见默认方案继续，并明确你的默认假设。"
 _MAX_HISTORY_CANDIDATES = 3
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
@@ -307,7 +313,7 @@ def _build_review_payload(
     effective_options["global_browser_budget"] = concurrency.global_browser_budget
     return {
         "type": "chat_review",
-        "thread_id": str(state.get("thread_id") or ""),
+        "thread_id": str(_meta_value(state, "thread_id") or ""),
         "clarified_task": task,
         "effective_options": effective_options,
     }
@@ -316,7 +322,7 @@ def _build_review_payload(
 
 def route_entry(state: dict[str, Any]) -> dict[str, Any]:
     """入口路由节点。"""
-    mode = state.get("entry_mode")
+    mode = _meta_value(state, "entry_mode")
     if not mode:
         return _fatal("missing_entry_mode", "缺少 entry_mode")
     if str(mode) != "chat_pipeline":
@@ -435,7 +441,7 @@ async def chat_collect_user_input(state: dict[str, Any]) -> dict[str, Any]:
     answer_payload = interrupt(
         {
             "type": "chat_clarification",
-            "thread_id": str(state.get("thread_id") or ""),
+            "thread_id": str(_meta_value(state, "thread_id") or ""),
             "question": question,
             "turn": turn_count,
             "max_turns": max_turns,
@@ -768,7 +774,7 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     # 4. interrupt 让用户选择
     answer = interrupt({
         "type": "history_task_select",
-        "thread_id": str(state.get("thread_id") or ""),
+        "thread_id": str(_meta_value(state, "thread_id") or ""),
         "message": "检测到该网站下有历史采集任务，请选择：",
         "options": options,
     })

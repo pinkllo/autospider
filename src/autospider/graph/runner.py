@@ -10,6 +10,7 @@ from langgraph.types import Command
 from ..common.config import config
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
+from .workflow_access import coerce_workflow_state
 from .state_access import select_artifacts, select_error, select_result_state, select_summary
 from .types import GraphError, GraphInput, GraphResult
 
@@ -52,10 +53,15 @@ class GraphRunner:
         snapshot_values = dict(getattr(snapshot, "values", {}) or {})
         snapshot_config = dict(getattr(snapshot, "config", {}) or {})
         configurable = dict(snapshot_config.get("configurable") or {})
-        snapshot_thread_id = str(snapshot_values.get("thread_id") or configurable.get("thread_id") or "")
+        workflow = coerce_workflow_state(snapshot_values)
+        snapshot_thread_id = str(
+            dict(workflow.get("meta") or {}).get("thread_id") or snapshot_values.get("thread_id") or configurable.get("thread_id") or ""
+        )
         if snapshot_thread_id != thread_id:
             raise RuntimeError(f"checkpoint_thread_mismatch: expected={thread_id}, actual={snapshot_thread_id or '<missing>'}")
-        entry_mode = str(snapshot_values.get("entry_mode") or "").strip()
+        entry_mode = str(
+            dict(workflow.get("meta") or {}).get("entry_mode") or snapshot_values.get("entry_mode") or ""
+        ).strip()
         if not entry_mode:
             raise RuntimeError("无法从 checkpoint 状态中恢复 entry_mode")
         return snapshot_values, configurable
@@ -82,11 +88,13 @@ class GraphRunner:
         entry_mode = str(expected_entry_mode or "").strip()
         if entry_mode:
             return entry_mode
-        entry_mode = str(final_state.get("entry_mode") or "").strip()
+        final_meta = dict(coerce_workflow_state(final_state).get("meta") or {})
+        entry_mode = str(final_meta.get("entry_mode") or final_state.get("entry_mode") or "").strip()
         if entry_mode:
             return entry_mode
         if snapshot_values:
-            entry_mode = str(snapshot_values.get("entry_mode") or "").strip()
+            snapshot_meta = dict(coerce_workflow_state(snapshot_values).get("meta") or {})
+            entry_mode = str(snapshot_meta.get("entry_mode") or snapshot_values.get("entry_mode") or "").strip()
             if entry_mode:
                 return entry_mode
         raise RuntimeError("无法从 checkpoint 状态中恢复 entry_mode")
@@ -183,6 +191,11 @@ class GraphRunner:
     async def invoke(self, graph_input: GraphInput) -> GraphResult:
         """异步执行主图。"""
         initial_state = {
+            "meta": {
+                "entry_mode": graph_input.entry_mode,
+                "thread_id": graph_input.thread_id,
+                "request_id": graph_input.request_id,
+            },
             "entry_mode": graph_input.entry_mode,
             "thread_id": graph_input.thread_id,
             "request_id": graph_input.request_id,
@@ -201,24 +214,15 @@ class GraphRunner:
                 "matched_skills": [],
                 "selected_skills": [],
             },
-            "planning": {"status": "", "task_plan": None, "plan_knowledge": "", "summary": {}},
-            "dispatch": {
-                "status": "",
-                "task_plan": None,
-                "plan_knowledge": "",
-                "dispatch_result": {},
-                "subtask_results": [],
-                "summary": {},
-            },
+            "world": {"request_params": {}, "collection_config": {}, "world_model": {}, "failure_records": []},
+            "control": {"current_plan": {}, "task_plan": None, "plan_knowledge": "", "stage_status": "", "active_strategy": {}},
+            "execution": {"dispatch_summary": {}, "subtask_results": []},
             "result": {"status": "", "summary": {}, "data": {}, "artifacts": []},
             "error": None,
             "normalized_params": {},
-            "artifacts": [],
-            "summary": {},
             "status": "",
             "error_code": "",
             "error_message": "",
-            "subtask_results": [],
         }
         return await self._invoke_with_graph(
             initial_state,

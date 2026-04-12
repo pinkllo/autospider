@@ -52,21 +52,6 @@ def _legacy_request_params(state: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _legacy_current_plan(state: dict[str, Any]) -> Any:
-    dispatch = _as_dict(state.get("dispatch"))
-    planning = _as_dict(state.get("planning"))
-    dispatch_plan = dispatch.get("task_plan")
-    if dispatch_plan is not None:
-        return dispatch_plan
-    root_plan = state.get("task_plan")
-    if root_plan is not None:
-        return root_plan
-    planning_plan = planning.get("task_plan")
-    if planning_plan is not None:
-        return planning_plan
-    return None
-
-
 def _merge_mappings(*values: Any) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for value in values:
@@ -79,21 +64,6 @@ def _looks_like_dispatch_summary(value: Any) -> bool:
     if not isinstance(value, Mapping):
         return False
     return any(key in value for key in DISPATCH_SUMMARY_KEYS)
-
-
-def _legacy_dispatch_summary(state: dict[str, Any]) -> dict[str, Any]:
-    dispatch = _as_dict(state.get("dispatch"))
-    merged = _merge_mappings(
-        state.get("dispatch_result"),
-        dispatch.get("dispatch_result"),
-        dispatch.get("summary"),
-    )
-    if merged:
-        return merged
-    root_summary = _as_dict(state.get("summary"))
-    if _looks_like_dispatch_summary(root_summary):
-        return root_summary
-    return {}
 
 
 def _fallback_error_state(state: dict[str, Any]) -> dict[str, str]:
@@ -156,44 +126,15 @@ def _world_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _control_state(state: dict[str, Any]) -> dict[str, Any]:
-    control = _as_dict(state.get("control"))
-    if "current_plan" not in control:
-        control["current_plan"] = _legacy_current_plan(state)
-    if "stage_status" not in control:
-        planning = _as_dict(state.get("planning"))
-        dispatch = _as_dict(state.get("dispatch"))
-        result = _as_dict(state.get("result"))
-        control["stage_status"] = str(
-            planning.get("status")
-            or dispatch.get("status")
-            or result.get("status")
-            or state.get("node_status")
-            or ""
-        )
-    return control
+    return _as_dict(state.get("control"))
 
 
 def _execution_state(state: dict[str, Any]) -> dict[str, Any]:
-    execution = _as_dict(state.get("execution"))
-    if "dispatch_summary" not in execution:
-        execution["dispatch_summary"] = _legacy_dispatch_summary(state)
-    if "subtask_results" not in execution:
-        dispatch = _as_dict(state.get("dispatch"))
-        execution["subtask_results"] = _as_list(dispatch.get("subtask_results")) or _as_list(
-            state.get("subtask_results")
-        )
-    return execution
+    return _as_dict(state.get("execution"))
 
 
 def _result_state(state: dict[str, Any]) -> dict[str, Any]:
-    result = _as_dict(state.get("result"))
-    if "summary" not in result:
-        result["summary"] = _as_dict(state.get("summary"))
-    if "artifacts" not in result:
-        result["artifacts"] = _as_mapping_list(state.get("artifacts"))
-    if "final_error" not in result:
-        result["final_error"] = _legacy_final_error(state)
-    return result
+    return _as_dict(state.get("result"))
 
 
 def coerce_workflow_state(state: Mapping[str, Any] | None) -> WorkflowState:

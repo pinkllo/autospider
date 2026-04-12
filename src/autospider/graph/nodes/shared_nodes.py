@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..state_access import dispatch_state, get_error_state, get_result_artifacts, get_result_state, get_result_summary
+from ..workflow_access import coerce_workflow_state
 
 
 def _dedupe_artifacts(artifacts: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -38,11 +39,12 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
     dispatch = dispatch_state(state)
     if dispatch and not summary:
         summary = dict(dispatch.get("summary") or {})
-    summary["thread_id"] = str(state.get("thread_id") or "")
-    summary["request_id"] = str(state.get("request_id") or "")
-    summary["entry_mode"] = str(state.get("entry_mode") or "")
+    meta = dict(coerce_workflow_state(state).get("meta") or {})
+    summary["thread_id"] = str(meta.get("thread_id") or state.get("thread_id") or "")
+    summary["request_id"] = str(meta.get("request_id") or state.get("request_id") or "")
+    summary["entry_mode"] = str(meta.get("entry_mode") or state.get("entry_mode") or "")
     result["summary"] = summary
-    return {"summary": summary, "result": result}
+    return {"result": result}
 
 
 def _resolve_summary_outcome_state(summary: dict[str, Any]) -> str:

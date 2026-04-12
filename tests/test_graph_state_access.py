@@ -60,8 +60,6 @@ def test_select_summary_merges_execution_and_result_metrics() -> None:
         "total_collected": 36,
         "merged_items": 31,
         "unique_urls": 31,
-        "thread_id": "thread-1",
-        "entry_mode": "chat_pipeline",
     }
 
 
