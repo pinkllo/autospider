@@ -58,6 +58,15 @@ class SubTaskFlowState(TypedDict, total=False):
     artifacts: Annotated[list[dict[str, str]], operator.add]
 
 
+def route_after_feedback(state: dict[str, Any]) -> str:
+    control = dict(state.get("control") or {})
+    active_strategy = dict(control.get("active_strategy") or {})
+    strategy_name = str(active_strategy.get("name") or "")
+    if strategy_name == "replan":
+        return "replan"
+    return "aggregate"
+
+
 def _subtask_signature(payload: dict[str, Any]) -> tuple[str, str, str, str, str]:
     return subtask_signature(payload)
 

@@ -22,6 +22,8 @@ from .nodes.entry_nodes import (
     chat_prepare_execution_handoff,
     route_entry,
 )
+from .nodes.feedback_nodes import monitor_dispatch_node, update_world_model_node
+from .nodes.planning_nodes import initialize_world_model_node, plan_strategy_node
 from .nodes.shared_nodes import build_artifact_index, build_summary, finalize_result
 from .state import GraphState
 from .state_access import (
@@ -29,6 +31,7 @@ from .state_access import (
     get_stage_status,
 )
 from .subgraphs import build_multi_dispatch_subgraph
+from .subgraphs.multi_dispatch import route_after_feedback
 
 
 
@@ -87,6 +90,13 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
 
 
 
+def resolve_feedback_route(state: dict[str, Any]) -> str:
+    """Map feedback decisions back into the next main-graph node."""
+    if route_after_feedback(state) == "replan":
+        return "plan_strategy_node"
+    return "aggregate_node"
+
+
 def build_main_graph(*, checkpointer: Any | None = None):
     """
     构建并编译主图（Main Graph）。
@@ -102,8 +112,12 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_node("chat_history_match", chat_history_match)
     graph.add_node("chat_review_task", chat_review_task)
     graph.add_node("chat_prepare_execution_handoff", chat_prepare_execution_handoff)
+    graph.add_node("initialize_world_model_node", initialize_world_model_node)
+    graph.add_node("plan_strategy_node", plan_strategy_node)
     graph.add_node("multi_dispatch_subgraph", build_multi_dispatch_subgraph())
     graph.add_node("plan_node", plan_node)
+    graph.add_node("monitor_dispatch_node", monitor_dispatch_node)
+    graph.add_node("update_world_model_node", update_world_model_node)
     graph.add_node("aggregate_node", aggregate_node)
     graph.add_node("build_artifact_index", build_artifact_index)
     graph.add_node("build_summary", build_summary)
@@ -142,8 +156,10 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_conditional_edges(
         "chat_prepare_execution_handoff",
         resolve_node_outcome,
-        {"ok": "plan_node", "error": "build_artifact_index"},
+        {"ok": "initialize_world_model_node", "error": "build_artifact_index"},
     )
+    graph.add_edge("initialize_world_model_node", "plan_strategy_node")
+    graph.add_edge("plan_strategy_node", "plan_node")
 
     graph.add_conditional_edges(
         "plan_node",
@@ -153,7 +169,16 @@ def build_main_graph(*, checkpointer: Any | None = None):
     graph.add_conditional_edges(
         "multi_dispatch_subgraph",
         resolve_node_outcome,
-        {"ok": "aggregate_node", "error": "build_artifact_index"},
+        {"ok": "monitor_dispatch_node", "error": "build_artifact_index"},
+    )
+    graph.add_edge("monitor_dispatch_node", "update_world_model_node")
+    graph.add_conditional_edges(
+        "update_world_model_node",
+        resolve_feedback_route,
+        {
+            "plan_strategy_node": "plan_strategy_node",
+            "aggregate_node": "aggregate_node",
+        },
     )
     graph.add_edge("aggregate_node", "build_artifact_index")
 
