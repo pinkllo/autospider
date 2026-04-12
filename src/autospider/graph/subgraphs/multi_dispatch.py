@@ -226,6 +226,10 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
                 pipeline_mode=params.get("pipeline_mode"),
                 runtime_subtask_max_children=_resolve_runtime_replan_max_children(params),
                 runtime_subtasks_use_main_model=_resolve_runtime_subtasks_use_main_model(params),
+                decision_context=dict(params.get("decision_context") or {}),
+                world_snapshot=dict(params.get("world_snapshot") or {}),
+                control_snapshot=dict(params.get("control_snapshot") or {}),
+                failure_records=list(params.get("failure_records") or []),
             )
             result = await worker.execute()
             effective_subtask = _restore_subtask(

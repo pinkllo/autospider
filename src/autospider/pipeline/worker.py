@@ -80,6 +80,10 @@ class SubTaskWorker:
         runtime_expansion_service_cls: type | None = None,
         runtime_subtask_max_children: int | None = None,
         runtime_subtasks_use_main_model: bool | None = None,
+        decision_context: dict | None = None,
+        world_snapshot: dict | None = None,
+        control_snapshot: dict | None = None,
+        failure_records: list[dict] | None = None,
     ):
         self.subtask = subtask
         self.raw_fields = fields
@@ -97,6 +101,10 @@ class SubTaskWorker:
         self.pipeline_mode = pipeline_mode
         self.runtime_subtask_max_children = runtime_subtask_max_children
         self.runtime_subtasks_use_main_model = runtime_subtasks_use_main_model
+        self.decision_context = dict(decision_context or {})
+        self.world_snapshot = dict(world_snapshot or {})
+        self.control_snapshot = dict(control_snapshot or {})
+        self.failure_records = [dict(item) for item in list(failure_records or [])]
         service_cls = runtime_expansion_service_cls or RuntimeExpansionService
         self.runtime_expansion_service = service_cls()
 
@@ -187,6 +195,17 @@ class SubTaskWorker:
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
+    def _resolve_decision_context(self, subtask: SubTask) -> dict:
+        if self.world_snapshot and self.control_snapshot:
+            return build_decision_context(
+                {
+                    "world": dict(self.world_snapshot),
+                    "control": dict(self.control_snapshot),
+                },
+                page_id=str(subtask.plan_node_id or ""),
+            )
+        return dict(self.decision_context or {})
+
     def _normalize_runtime_journal_entries(self, entries: tuple[dict[str, str], ...]) -> list[dict]:
         created_at = datetime.now().isoformat(timespec="seconds")
         normalized: list[dict] = []
@@ -265,14 +284,8 @@ class SubTaskWorker:
                 }
 
         concurrency = self._resolved_concurrency()
-        world_snapshot = dict(params.get("world_snapshot") or {})
-        control_snapshot = dict(params.get("control_snapshot") or {})
-        decision_context = dict(params.get("decision_context") or {})
-        if world_snapshot and control_snapshot:
-            decision_context = build_decision_context(
-                {"world": world_snapshot, "control": control_snapshot},
-                page_id=str(working_subtask.plan_node_id or ""),
-            )
+        world_snapshot = dict(self.world_snapshot or {})
+        decision_context = self._resolve_decision_context(working_subtask)
         request = ExecutionRequest(
             list_url=working_subtask.list_url,
             task_description=working_subtask.task_description,
@@ -299,7 +312,7 @@ class SubTaskWorker:
             initial_nav_steps=list(working_subtask.nav_steps or []),
             decision_context=decision_context,
             world_snapshot=world_snapshot,
-            failure_records=list(params.get("failure_records") or []),
+            failure_records=[dict(item) for item in list(self.failure_records or [])],
             anchor_url=working_subtask.anchor_url,
             page_state_signature=working_subtask.page_state_signature,
             variant_label=working_subtask.variant_label,

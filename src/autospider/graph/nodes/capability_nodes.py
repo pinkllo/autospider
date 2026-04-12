@@ -132,16 +132,21 @@ def build_planning_runtime_payload(
     world = build_planner_world_payload(plan, request_params=resolved_request_params)
     control = build_planner_control_payload(plan, request_params=resolved_request_params)
     decision_context = build_decision_context({"world": world, "control": control})
-    enriched_request_params = dict(resolved_request_params)
-    enriched_request_params.update(
+    world_request_params = dict(resolved_request_params)
+    world_request_params.update(
         {
             "plan_knowledge": str(plan_knowledge or ""),
             "decision_context": decision_context,
-            "world_snapshot": world,
             "failure_records": list(world.get("failure_records") or []),
-            "control_snapshot": control,
         }
     )
+    world["request_params"] = dict(world_request_params)
+    world_model = dict(world.get("world_model") or {})
+    world_model["request_params"] = dict(world_request_params)
+    world["world_model"] = world_model
+    enriched_request_params = dict(world_request_params)
+    enriched_request_params["world_snapshot"] = dict(world)
+    enriched_request_params["control_snapshot"] = dict(control)
     return {
         "world": world,
         "control": control,

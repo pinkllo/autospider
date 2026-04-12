@@ -41,6 +41,24 @@ def _looks_like_dispatch_summary(value: Any) -> bool:
     return any(key in value for key in dispatch_keys)
 
 
+def _enrich_request_params_from_workflow(
+    params: dict[str, Any],
+    *,
+    world: dict[str, Any],
+    control: dict[str, Any],
+) -> dict[str, Any]:
+    if not params:
+        return {}
+    enriched = dict(params)
+    if "world_snapshot" not in enriched:
+        enriched["world_snapshot"] = dict(world)
+    if "control_snapshot" not in enriched:
+        enriched["control_snapshot"] = dict(control)
+    if "failure_records" not in enriched:
+        enriched["failure_records"] = list(world.get("failure_records") or [])
+    return enriched
+
+
 def conversation_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
     return _as_dict(_as_dict(state).get("conversation"))
 
@@ -62,11 +80,20 @@ def result_data(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def request_params(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    graph_state = _as_dict(state)
     workflow = coerce_workflow_state(state)
     world = _as_dict(workflow.get("world"))
+    control = _as_dict(workflow.get("control"))
+    explicit_world = _as_dict(graph_state.get("world")) if "world" in graph_state else {}
+    explicit_control = _as_dict(graph_state.get("control")) if "control" in graph_state else {}
+    snapshot_world = explicit_world or world
+    snapshot_control = explicit_control or control
     if "request_params" in world:
-        return _as_dict(world.get("request_params"))
-    graph_state = _as_dict(state)
+        return _enrich_request_params_from_workflow(
+            _as_dict(world.get("request_params")),
+            world=snapshot_world,
+            control=snapshot_control,
+        )
     params = _as_dict(graph_state.get("normalized_params"))
     if params:
         return params
