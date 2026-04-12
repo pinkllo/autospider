@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.state_access import dispatch_summary, select_summary
+from autospider.graph.state_access import dispatch_summary, select_summary, task_plan
 
 
 def test_dispatch_summary_reads_root_dispatch_result() -> None:
@@ -43,3 +43,12 @@ def test_select_summary_merges_dispatch_and_result_metrics() -> None:
         "thread_id": "thread-1",
         "entry_mode": "chat_pipeline",
     }
+
+
+def test_task_plan_preserves_legacy_planning_state_via_workflow_adapter() -> None:
+    state = {
+        "planning": {"task_plan": {"steps": ["clarify", "dispatch"]}},
+        "dispatch": {"task_plan": {"steps": ["dispatch-only"]}},
+    }
+
+    assert task_plan(state) == {"steps": ["dispatch-only"]}

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .workflow_access import coerce_workflow_state, current_plan, final_error
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
@@ -60,6 +62,10 @@ def result_data(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def request_params(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    workflow = coerce_workflow_state(state)
+    params = _as_dict(_as_dict(workflow.get("world")).get("request_params"))
+    if params:
+        return params
     graph_state = _as_dict(state)
     params = _as_dict(graph_state.get("normalized_params"))
     if params:
@@ -71,6 +77,10 @@ def request_params(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def collection_config(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    workflow = coerce_workflow_state(state)
+    config = _as_dict(_as_dict(workflow.get("world")).get("collection_config"))
+    if config:
+        return config
     data = result_data(state)
     if isinstance(data.get("collection_config"), Mapping):
         return _as_dict(data.get("collection_config"))
@@ -89,19 +99,15 @@ def collected_urls(state: Mapping[str, Any] | None) -> list[str]:
 
 
 def task_plan(state: Mapping[str, Any] | None) -> Any:
-    dispatch = dispatch_state(state).get("task_plan")
-    if dispatch is not None:
-        return dispatch
-    root = _as_dict(state).get("task_plan")
-    if root is not None:
-        return root
-    planning = planning_state(state).get("task_plan")
-    if planning is not None:
-        return planning
-    return None
+    return current_plan(state)
 
 
 def dispatch_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    workflow = coerce_workflow_state(state)
+    execution = _as_dict(workflow.get("execution"))
+    summary = _as_dict(execution.get("dispatch_summary"))
+    if summary:
+        return summary
     graph_state = _as_dict(state)
     dispatch = dispatch_state(graph_state)
     merged = _merge_mappings(
@@ -118,6 +124,11 @@ def dispatch_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def subtask_results(state: Mapping[str, Any] | None) -> list[Any]:
+    workflow = coerce_workflow_state(state)
+    execution = _as_dict(workflow.get("execution"))
+    results = _as_list(execution.get("subtask_results"))
+    if results:
+        return results
     dispatch = dispatch_state(state).get("subtask_results")
     if isinstance(dispatch, list) and dispatch:
         return list(dispatch)
@@ -196,6 +207,9 @@ def select_artifacts(
 
 
 def get_error_state(state: Mapping[str, Any] | None) -> dict[str, str]:
+    error = final_error(state)
+    if error:
+        return error
     graph_state = _as_dict(state)
     error = _as_dict(graph_state.get("error"))
     if error.get("code"):

@@ -6,6 +6,15 @@ from typing import Any, TypedDict
 
 from ..domain.runtime import SubTaskRuntimeState
 from .types import EntryMode, NodeStatus
+from .workflow_state import (
+    WorkflowControlState,
+    WorkflowExecutionState,
+    WorkflowIntentState,
+    WorkflowMetaState,
+    WorkflowResultState,
+    WorkflowState,
+    WorkflowWorldState,
+)
 
 
 class StageErrorState(TypedDict, total=False):
@@ -57,9 +66,15 @@ class ResultState(TypedDict, total=False):
     artifacts: list[dict[str, str]]
     payload: dict[str, Any]
     error: StageErrorState | None
+    final_error: StageErrorState | None
 
 
 class GraphState(TypedDict, total=False):
+    meta: WorkflowMetaState
+    intent: WorkflowIntentState
+    world: WorkflowWorldState
+    control: WorkflowControlState
+    execution: WorkflowExecutionState
     thread_id: str
     request_id: str
     entry_mode: EntryMode
@@ -85,3 +100,20 @@ class GraphState(TypedDict, total=False):
     node_payload: dict[str, Any]
     node_artifacts: list[dict[str, str]]
     node_error: StageErrorState | None
+
+
+__all__ = [
+    "ConversationState",
+    "DispatchState",
+    "GraphState",
+    "PlanningState",
+    "ResultState",
+    "StageErrorState",
+    "WorkflowControlState",
+    "WorkflowExecutionState",
+    "WorkflowIntentState",
+    "WorkflowMetaState",
+    "WorkflowResultState",
+    "WorkflowState",
+    "WorkflowWorldState",
+]
