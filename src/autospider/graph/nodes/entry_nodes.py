@@ -220,6 +220,15 @@ def _apply_serial_mode_overrides(params: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _ensure_runtime_payload_slots(params: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(params or {})
+    normalized.setdefault("decision_context", {})
+    normalized.setdefault("world_snapshot", {})
+    normalized.setdefault("control_snapshot", {})
+    normalized.setdefault("failure_records", [])
+    return normalized
+
+
 def _normalize_resume_answer(payload: Any) -> str:
     if isinstance(payload, dict):
         answer = payload.get("answer")
@@ -321,7 +330,9 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
     """执行参数归一化。"""
-    normalized = _apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
+    normalized = _ensure_runtime_payload_slots(
+        _apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
+    )
     return {
         **_ok({"normalized": True}),
         "normalized_params": normalized,
@@ -551,7 +562,7 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         "global_browser_budget": cli_args.get("global_browser_budget"),
     })
     concurrency = resolve_concurrency_settings(base_params)
-    normalized = dict(base_params)
+    normalized = _ensure_runtime_payload_slots(dict(base_params))
     normalized["consumer_concurrency"] = concurrency.consumer_concurrency
     normalized["max_concurrent"] = concurrency.max_concurrent
     normalized["global_browser_budget"] = concurrency.global_browser_budget
