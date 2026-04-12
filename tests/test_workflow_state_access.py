@@ -59,6 +59,15 @@ def test_intent_fields_reads_only_workflow_intent_namespace() -> None:
     assert intent_fields(state) == FIELD_LIST
 
 
+def test_intent_fields_keeps_explicit_empty_workflow_namespace() -> None:
+    state = {
+        "intent": {"fields": []},
+        "conversation": {"clarified_task": {"fields": FIELD_LIST}},
+    }
+
+    assert intent_fields(state) == []
+
+
 def test_final_error_prefers_result_final_error() -> None:
     state = {
         "result": {

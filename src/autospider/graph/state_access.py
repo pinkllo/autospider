@@ -205,10 +205,12 @@ def select_artifacts(
 
 
 def get_error_state(state: Mapping[str, Any] | None) -> dict[str, str]:
-    error = final_error(state)
+    graph_state = _as_dict(state)
+    if "final_error" in _as_dict(graph_state.get("result")):
+        return final_error(graph_state)
+    error = final_error(graph_state)
     if error:
         return error
-    graph_state = _as_dict(state)
     error = _as_dict(graph_state.get("error"))
     if error.get("code"):
         return {

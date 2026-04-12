@@ -110,6 +110,16 @@ def test_get_error_state_ignores_root_error_without_code() -> None:
     assert get_error_state(state) == {"code": "NODE", "message": "node-message"}
 
 
+def test_get_error_state_keeps_explicit_empty_result_final_error() -> None:
+    state = {
+        "result": {"final_error": {}},
+        "node_error": {"code": "NODE", "message": "node-message"},
+        "error_code": "ROOT",
+    }
+
+    assert get_error_state(state) == {}
+
+
 def test_request_params_keeps_explicit_empty_workflow_namespace() -> None:
     state = {
         "world": {"request_params": {}},
