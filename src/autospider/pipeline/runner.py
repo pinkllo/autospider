@@ -597,6 +597,14 @@ async def run_pipeline(context: ExecutionContext) -> PipelineRunResult:
                     plan_journal=list(runtime_context.plan_journal or []),
                     tracker=runtime_context.tracker,
                     sessions=sessions,
+                    world_snapshot=dict(runtime_context.world_snapshot or {}),
+                    site_profile_snapshot=dict(
+                        dict(runtime_context.world_snapshot or {}).get("site_profile") or {}
+                    ),
+                    failure_records=[dict(item) for item in list(runtime_context.failure_records or ())],
+                    failure_patterns=list(
+                        dict(runtime_context.world_snapshot or {}).get("failure_patterns") or []
+                    ),
                 )
             )
         finally:

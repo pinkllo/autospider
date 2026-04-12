@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -20,6 +21,43 @@ def _parse_optional_bool(raw_value: Any) -> bool | None:
     if text in {"0", "false", "no", "off", ""}:
         return False
     raise ValueError(f"invalid_optional_bool: {raw_value}")
+
+
+def _mapping_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _workflow_request_params(world_snapshot: Any) -> dict[str, Any]:
+    world = _mapping_payload(world_snapshot)
+    request_params = _mapping_payload(world.get("request_params"))
+    if request_params:
+        return request_params
+    world_model = _mapping_payload(world.get("world_model"))
+    return _mapping_payload(world_model.get("request_params"))
+
+
+def _resolve_runtime_decision_context(payload: dict[str, Any], world_snapshot: dict[str, Any]) -> dict[str, Any]:
+    workflow_params = _workflow_request_params(world_snapshot)
+    workflow_context = _mapping_payload(workflow_params.get("decision_context"))
+    if workflow_context:
+        return workflow_context
+    return _mapping_payload(payload.get("decision_context"))
+
+
+def _resolve_runtime_failure_records(payload: dict[str, Any], world_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    workflow_params = _workflow_request_params(world_snapshot)
+    workflow_failures = workflow_params.get("failure_records")
+    if isinstance(workflow_failures, list):
+        return list(workflow_failures)
+    snapshot_failures = world_snapshot.get("failure_records")
+    if isinstance(snapshot_failures, list):
+        return list(snapshot_failures)
+    world_model = _mapping_payload(world_snapshot.get("world_model"))
+    model_failures = world_model.get("failure_records")
+    if isinstance(model_failures, list):
+        return list(model_failures)
+    legacy_failures = payload.get("failure_records")
+    return list(legacy_failures) if isinstance(legacy_failures, list) else []
 
 
 class PromotionState(str, Enum):
@@ -107,6 +145,7 @@ class ExecutionRequest(BaseModel):
         guard_intervention_mode: str = "interrupt",
     ) -> "ExecutionRequest":
         payload = dict(params or {})
+        world_snapshot = _mapping_payload(payload.get("world_snapshot"))
         headless = _parse_optional_bool(payload["headless"]) if "headless" in payload else None
         task_description = str(payload.get("task_description") or "").strip()
         request = str(payload.get("request") or task_description or "").strip()
@@ -137,9 +176,9 @@ class ExecutionRequest(BaseModel):
             task_plan_snapshot=dict(payload.get("task_plan_snapshot") or {}),
             plan_journal=list(payload.get("plan_journal") or []),
             initial_nav_steps=list(payload.get("initial_nav_steps") or []),
-            decision_context=dict(payload.get("decision_context") or {}),
-            world_snapshot=dict(payload.get("world_snapshot") or {}),
-            failure_records=list(payload.get("failure_records") or []),
+            decision_context=_resolve_runtime_decision_context(payload, world_snapshot),
+            world_snapshot=world_snapshot,
+            failure_records=_resolve_runtime_failure_records(payload, world_snapshot),
             anchor_url=payload.get("anchor_url"),
             page_state_signature=str(payload.get("page_state_signature") or ""),
             variant_label=payload.get("variant_label"),

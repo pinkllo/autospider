@@ -119,5 +119,51 @@ class TaskRunQueryService:
             repo = TaskRepository(session)
             return repo.find_by_url(normalized_url)
 
+    def get_latest_site_profile(self, url: str) -> dict[str, Any] | None:
+        target = normalize_url(url)
+        if not target:
+            return None
+        for snapshot in self._db_list_run_snapshots_by_url(target):
+            profile = _extract_site_profile_snapshot(snapshot)
+            if profile:
+                return profile
+        return None
+
+    def _db_list_run_snapshots_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
+        from autospider.common.db.engine import session_scope
+        from autospider.common.db.models import TaskRecord, TaskRun
+
+        with session_scope() as session:
+            runs = (
+                session.query(TaskRun)
+                .join(TaskRecord, TaskRun.task_id == TaskRecord.id)
+                .filter(TaskRecord.normalized_url == normalized_url)
+                .order_by(TaskRun.started_at.desc(), TaskRun.id.desc())
+                .all()
+            )
+        return [_serialize_run_learning_snapshot(run) for run in runs]
+
+
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _serialize_run_learning_snapshot(run: Any) -> dict[str, Any]:
+    return {
+        "execution_id": str(getattr(run, "execution_id", "") or ""),
+        "world_snapshot": _coerce_dict(getattr(run, "world_snapshot", None)),
+        "site_profile_snapshot": _coerce_dict(getattr(run, "site_profile_snapshot", None)),
+    }
+
+
+def _extract_site_profile_snapshot(payload: dict[str, Any]) -> dict[str, Any] | None:
+    direct = _coerce_dict(payload.get("site_profile_snapshot"))
+    if direct:
+        return direct
+
+    world_snapshot = _coerce_dict(payload.get("world_snapshot"))
+    site_profile = _coerce_dict(world_snapshot.get("site_profile"))
+    return site_profile or None
+
 
 __all__ = ["TaskRunQueryService", "invalidate_task_cache", "normalize_url"]

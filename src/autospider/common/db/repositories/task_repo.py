@@ -62,6 +62,9 @@ class TaskRunPayload:
     summary_json: dict[str, Any] = field(default_factory=dict)
     collection_config: dict[str, Any] = field(default_factory=dict)
     extraction_config: dict[str, Any] = field(default_factory=dict)
+    world_snapshot: dict[str, Any] = field(default_factory=dict)
+    site_profile_snapshot: dict[str, Any] = field(default_factory=dict)
+    failure_patterns: list[dict[str, Any]] = field(default_factory=list)
     plan_knowledge: str = ""
     task_plan: dict[str, Any] = field(default_factory=dict)
     plan_journal: list[dict[str, Any]] = field(default_factory=list)
@@ -310,6 +313,9 @@ class TaskRepository:
                 "summary_json": dict(run.summary_json or {}),
                 "collection_config": dict(run.collection_config or {}),
                 "extraction_config": dict(run.extraction_config or {}),
+                "world_snapshot": dict(run.world_snapshot or {}),
+                "site_profile_snapshot": dict(run.site_profile_snapshot or {}),
+                "failure_patterns": list(run.failure_patterns or []),
                 "plan_knowledge": run.plan_knowledge or "",
                 "plan_snapshot": dict(run.plan_snapshot or {}),
                 "plan_journal": list(run.plan_journal or []),
@@ -521,6 +527,9 @@ class TaskRepository:
             summary_json=dict(payload.summary_json),
             collection_config=dict(payload.collection_config),
             extraction_config=dict(payload.extraction_config),
+            world_snapshot=dict(payload.world_snapshot),
+            site_profile_snapshot=dict(payload.site_profile_snapshot),
+            failure_patterns=list(payload.failure_patterns),
             plan_knowledge=payload.plan_knowledge,
             plan_snapshot=dict(payload.task_plan),
             plan_journal=list(payload.plan_journal),
@@ -557,6 +566,9 @@ class TaskRepository:
         run.summary_json = dict(payload.summary_json)
         run.collection_config = dict(payload.collection_config)
         run.extraction_config = dict(payload.extraction_config)
+        run.world_snapshot = dict(payload.world_snapshot)
+        run.site_profile_snapshot = dict(payload.site_profile_snapshot)
+        run.failure_patterns = list(payload.failure_patterns)
         run.plan_knowledge = payload.plan_knowledge
         run.plan_snapshot = dict(payload.task_plan)
         run.plan_journal = list(payload.plan_journal)
