@@ -63,9 +63,9 @@ def result_data(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def request_params(state: Mapping[str, Any] | None) -> dict[str, Any]:
     workflow = coerce_workflow_state(state)
-    params = _as_dict(_as_dict(workflow.get("world")).get("request_params"))
-    if params:
-        return params
+    world = _as_dict(workflow.get("world"))
+    if "request_params" in world:
+        return _as_dict(world.get("request_params"))
     graph_state = _as_dict(state)
     params = _as_dict(graph_state.get("normalized_params"))
     if params:
@@ -78,9 +78,9 @@ def request_params(state: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def collection_config(state: Mapping[str, Any] | None) -> dict[str, Any]:
     workflow = coerce_workflow_state(state)
-    config = _as_dict(_as_dict(workflow.get("world")).get("collection_config"))
-    if config:
-        return config
+    world = _as_dict(workflow.get("world"))
+    if "collection_config" in world:
+        return _as_dict(world.get("collection_config"))
     data = result_data(state)
     if isinstance(data.get("collection_config"), Mapping):
         return _as_dict(data.get("collection_config"))
@@ -105,9 +105,8 @@ def task_plan(state: Mapping[str, Any] | None) -> Any:
 def dispatch_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
     workflow = coerce_workflow_state(state)
     execution = _as_dict(workflow.get("execution"))
-    summary = _as_dict(execution.get("dispatch_summary"))
-    if summary:
-        return summary
+    if "dispatch_summary" in execution:
+        return _as_dict(execution.get("dispatch_summary"))
     graph_state = _as_dict(state)
     dispatch = dispatch_state(graph_state)
     merged = _merge_mappings(
@@ -126,9 +125,8 @@ def dispatch_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
 def subtask_results(state: Mapping[str, Any] | None) -> list[Any]:
     workflow = coerce_workflow_state(state)
     execution = _as_dict(workflow.get("execution"))
-    results = _as_list(execution.get("subtask_results"))
-    if results:
-        return results
+    if "subtask_results" in execution:
+        return _as_list(execution.get("subtask_results"))
     dispatch = dispatch_state(state).get("subtask_results")
     if isinstance(dispatch, list) and dispatch:
         return list(dispatch)

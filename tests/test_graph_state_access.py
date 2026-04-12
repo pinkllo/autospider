@@ -7,7 +7,15 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.state_access import dispatch_summary, select_summary, task_plan
+from autospider.graph.state_access import (
+    collection_config,
+    dispatch_summary,
+    get_error_state,
+    request_params,
+    select_summary,
+    subtask_results,
+    task_plan,
+)
 
 
 def test_dispatch_summary_reads_root_dispatch_result() -> None:
@@ -89,3 +97,52 @@ def test_task_plan_keeps_empty_dispatch_list_without_falling_back() -> None:
     }
 
     assert task_plan(state) == []
+
+
+def test_get_error_state_ignores_root_error_without_code() -> None:
+    state = {
+        "error": {"message": "root-only-message"},
+        "node_error": {"code": "NODE", "message": "node-message"},
+        "error_code": "ROOT_CODE",
+        "error_message": "root-code-message",
+    }
+
+    assert get_error_state(state) == {"code": "NODE", "message": "node-message"}
+
+
+def test_request_params_keeps_explicit_empty_workflow_namespace() -> None:
+    state = {
+        "world": {"request_params": {}},
+        "normalized_params": {"keyword": "legacy"},
+    }
+
+    assert request_params(state) == {}
+
+
+def test_collection_config_keeps_explicit_empty_workflow_namespace() -> None:
+    state = {
+        "world": {"collection_config": {}},
+        "result": {"data": {"collection_config": {"source": "legacy"}}},
+    }
+
+    assert collection_config(state) == {}
+
+
+def test_dispatch_summary_keeps_explicit_empty_workflow_namespace() -> None:
+    state = {
+        "execution": {"dispatch_summary": {}},
+        "dispatch_result": {"total": 4},
+        "dispatch": {"summary": {"failed": 1}},
+    }
+
+    assert dispatch_summary(state) == {}
+
+
+def test_subtask_results_keeps_explicit_empty_workflow_namespace() -> None:
+    state = {
+        "execution": {"subtask_results": []},
+        "dispatch": {"subtask_results": [{"id": "dispatch"}]},
+        "subtask_results": [{"id": "root"}],
+    }
+
+    assert subtask_results(state) == []

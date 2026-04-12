@@ -28,6 +28,12 @@ def _as_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _as_mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
 def _normalize_error(value: Any) -> dict[str, str]:
     error = _as_dict(value)
     code = str(error.get("code") or "")
@@ -90,22 +96,27 @@ def _legacy_dispatch_summary(state: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _fallback_error_state(state: dict[str, Any]) -> dict[str, str]:
+    root_error = _as_dict(state.get("error"))
+    if root_error.get("code"):
+        return {
+            "code": str(root_error.get("code") or ""),
+            "message": str(root_error.get("message") or ""),
+        }
+    node_error = _as_dict(state.get("node_error"))
+    code = str(node_error.get("code") or state.get("error_code") or "")
+    message = str(node_error.get("message") or state.get("error_message") or "")
+    if not code and not message:
+        return {}
+    return {"code": code, "message": message}
+
+
 def _legacy_final_error(state: dict[str, Any]) -> dict[str, str]:
     result = _as_dict(state.get("result"))
-    root_error = _normalize_error(state.get("error"))
-    node_error = _normalize_error(state.get("node_error"))
-    coded_error = _normalize_error(
-        {
-            "code": state.get("error_code"),
-            "message": state.get("error_message"),
-        }
-    )
     return (
         _normalize_error(result.get("final_error"))
         or _normalize_error(result.get("error"))
-        or root_error
-        or node_error
-        or coded_error
+        or _fallback_error_state(state)
     )
 
 
@@ -127,7 +138,7 @@ def _intent_state(state: dict[str, Any]) -> dict[str, Any]:
     if "clarified_task" not in intent and clarified_task:
         intent["clarified_task"] = clarified_task
     if "fields" not in intent:
-        intent["fields"] = _as_dict(clarified_task.get("fields"))
+        intent["fields"] = _as_mapping_list(clarified_task.get("fields"))
     return intent
 
 
@@ -176,6 +187,10 @@ def _execution_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def _result_state(state: dict[str, Any]) -> dict[str, Any]:
     result = _as_dict(state.get("result"))
+    if "summary" not in result:
+        result["summary"] = _as_dict(state.get("summary"))
+    if "artifacts" not in result:
+        result["artifacts"] = _as_mapping_list(state.get("artifacts"))
     if "final_error" not in result:
         result["final_error"] = _legacy_final_error(state)
     return result
@@ -198,9 +213,9 @@ def current_plan(state: Mapping[str, Any] | None) -> Any:
     return _as_dict(workflow.get("control")).get("current_plan")
 
 
-def intent_fields(state: Mapping[str, Any] | None) -> dict[str, Any]:
+def intent_fields(state: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     workflow = coerce_workflow_state(state)
-    return _as_dict(_as_dict(workflow.get("intent")).get("fields"))
+    return _as_mapping_list(_as_dict(workflow.get("intent")).get("fields"))
 
 
 def final_error(state: Mapping[str, Any] | None) -> dict[str, str]:

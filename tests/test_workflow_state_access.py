@@ -14,13 +14,18 @@ from autospider.graph.workflow_access import (
     intent_fields,
 )
 
+FIELD_LIST = [
+    {"name": "title", "description": "标题"},
+    {"name": "published_at", "description": "发布时间"},
+]
+
 
 def test_coerce_workflow_state_maps_legacy_fields_into_workflow_namespaces() -> None:
     legacy_state = {
         "thread_id": "thread-1",
         "conversation": {
             "clarified_task": {
-                "fields": {"region": "hk", "keywords": ["tea"]},
+                "fields": FIELD_LIST,
             }
         },
         "planning": {"task_plan": {"steps": ["collect"]}},
@@ -30,7 +35,7 @@ def test_coerce_workflow_state_maps_legacy_fields_into_workflow_namespaces() -> 
     workflow = coerce_workflow_state(legacy_state)
 
     assert workflow["meta"]["thread_id"] == "thread-1"
-    assert workflow["intent"]["fields"] == {"region": "hk", "keywords": ["tea"]}
+    assert workflow["intent"]["fields"] == FIELD_LIST
     assert workflow["control"]["current_plan"] == {"steps": ["collect"]}
     assert workflow["result"]["summary"] == {"items": 2}
 
@@ -47,11 +52,11 @@ def test_current_plan_reads_only_workflow_control_namespace() -> None:
 
 def test_intent_fields_reads_only_workflow_intent_namespace() -> None:
     state = {
-        "intent": {"fields": {"region": "workflow"}},
-        "conversation": {"clarified_task": {"fields": {"region": "legacy"}}},
+        "intent": {"fields": FIELD_LIST},
+        "conversation": {"clarified_task": {"fields": [{"name": "legacy"}]}},
     }
 
-    assert intent_fields(state) == {"region": "workflow"}
+    assert intent_fields(state) == FIELD_LIST
 
 
 def test_final_error_prefers_result_final_error() -> None:
@@ -64,3 +69,29 @@ def test_final_error_prefers_result_final_error() -> None:
     }
 
     assert final_error(state) == {"code": "RESULT", "message": "workflow error"}
+
+
+def test_coerce_workflow_state_maps_root_summary_and_artifacts_into_result() -> None:
+    legacy_state = {
+        "summary": {"thread_id": "thread-1", "merged_items": 3},
+        "artifacts": [{"label": "report", "path": "tmp/report.json"}],
+    }
+
+    workflow = coerce_workflow_state(legacy_state)
+
+    assert workflow["result"]["summary"] == {"thread_id": "thread-1", "merged_items": 3}
+    assert workflow["result"]["artifacts"] == [{"label": "report", "path": "tmp/report.json"}]
+
+
+def test_coerce_workflow_state_preserves_real_legacy_field_list_shape() -> None:
+    workflow = coerce_workflow_state(
+        {
+            "conversation": {
+                "clarified_task": {
+                    "fields": FIELD_LIST,
+                }
+            }
+        }
+    )
+
+    assert workflow["intent"]["fields"] == FIELD_LIST

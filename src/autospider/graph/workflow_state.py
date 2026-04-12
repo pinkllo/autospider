@@ -20,7 +20,7 @@ class WorkflowMetaState(TypedDict, total=False):
 
 
 class WorkflowIntentState(TypedDict, total=False):
-    fields: dict[str, Any]
+    fields: list[dict[str, Any]]
     clarified_task: dict[str, Any] | None
 
 
