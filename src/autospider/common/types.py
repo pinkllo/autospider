@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -132,6 +133,7 @@ class Action(BaseModel):
     thinking: str = Field(default="", description="LLM 决策推理过程")
     expectation: str | None = Field(default=None, description="预期结果（用于校验）")
     summary: str | None = Field(default=None, description="动作摘要（如 plan_subtasks 的升级理由）")
+    failure_record: dict[str, Any] | None = Field(default=None, description="显式失败契约")
 
 
 class ActionResult(BaseModel):

@@ -23,6 +23,22 @@ from autospider.graph.nodes import capability_nodes
 from autospider.graph.recovery import build_recovery_directive
 
 
+class StateMismatchError(RuntimeError):
+    pass
+
+
+class RuleStaleError(RuntimeError):
+    pass
+
+
+class SiteDefenseError(RuntimeError):
+    pass
+
+
+class FatalCapabilityError(RuntimeError):
+    pass
+
+
 def test_parse_protocol_message_diagnostics_returns_validation_errors() -> None:
     diagnostics = parse_protocol_message_diagnostics({"action": "click", "args": {}})
 
@@ -56,44 +72,70 @@ def test_classify_runtime_exception_returns_failure_record() -> None:
     )
 
     assert failure["page_id"] == "list-page"
-    assert failure["category"] == "system_failure"
+    assert failure["category"] == "transient"
     assert failure["detail"] == "timeout_error"
     assert failure["metadata"]["component"] == "collect_urls_node"
     assert failure["metadata"]["exception_type"] == "TimeoutError"
     assert failure["metadata"]["message"] == "timed out"
 
 
-def test_decider_exposes_contract_violation_failure_record() -> None:
+def test_decider_exposes_contract_violation_via_action_contract() -> None:
     decider = object.__new__(LLMDecider)
     decider.last_failure_record = None
 
     action = decider._parse_response({"action": "click", "args": {}})
 
     assert action.action == ActionType.RETRY
-    assert decider.last_failure_record is not None
-    assert decider.last_failure_record["category"] == "contract_violation"
+    assert action.failure_record is not None
+    assert action.failure_record["category"] == "contract_violation"
     assert "contract_violation" in action.thinking
 
 
-def test_build_recovery_directive_fails_fast_for_contract_violations() -> None:
+@pytest.mark.parametrize(
+    ("category", "expected_action"),
+    [
+        ("transient", "retry"),
+        ("contract_violation", "reask"),
+        ("state_mismatch", "replan"),
+        ("rule_stale", "replan"),
+        ("site_defense", "human_intervention"),
+        ("fatal", "fail"),
+    ],
+)
+def test_build_recovery_directive_maps_category_to_action(
+    category: str,
+    expected_action: str,
+) -> None:
     directive = build_recovery_directive(
-        failure_record={"category": "contract_violation", "detail": "invalid_protocol_message"},
+        failure_record={"category": category, "detail": "example"},
         failure_count=0,
         max_retries=2,
     )
 
+    assert directive.action == expected_action
+
+
+def test_build_recovery_directive_fails_after_retry_budget_for_transient_failure() -> None:
+    directive = build_recovery_directive(
+        failure_record={"category": "transient", "detail": "timeout_error"},
+        failure_count=2,
+        max_retries=2,
+    )
+
     assert directive.action == "fail"
-    assert directive.delay_seconds == 0.0
+    assert directive.reason == "retry_budget_exhausted"
 
 
 @pytest.mark.asyncio
-async def test_capability_recovery_retries_runtime_exception_then_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_capability_recovery_retries_transient_exception_then_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     attempts = 0
 
     async def runner() -> dict[str, object]:
         nonlocal attempts
         attempts += 1
-        raise RuntimeError("boom")
+        raise TimeoutError("timed out")
 
     async def no_sleep(_: float) -> None:
         return None
@@ -118,5 +160,53 @@ async def test_capability_recovery_retries_runtime_exception_then_fails(monkeypa
     assert attempts == 2
     assert result["node_status"] == "fatal"
     assert result["node_error"]["code"] == "collect_urls_failed"
-    assert result["failure_records"][0]["category"] == "system_failure"
-    assert result["failure_records"][0]["detail"] == "runtime_error"
+    assert result["failure_records"][0]["category"] == "transient"
+    assert result["failure_records"][0]["detail"] == "timeout_error"
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "expected_category", "expected_attempts"),
+    [
+        (lambda: StateMismatchError("dom changed"), "state_mismatch", 1),
+        (lambda: RuleStaleError("selector stale"), "rule_stale", 1),
+        (lambda: SiteDefenseError("captcha required"), "site_defense", 1),
+        (lambda: FatalCapabilityError("schema corrupted"), "fatal", 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_capability_recovery_escalates_non_retry_categories(
+    monkeypatch: pytest.MonkeyPatch,
+    error_factory,
+    expected_category: str,
+    expected_attempts: int,
+) -> None:
+    attempts = 0
+
+    async def runner() -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        raise error_factory()
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(capability_nodes.asyncio, "sleep", no_sleep)
+
+    state = {
+        "world": {
+            "request_params": {
+                "decision_context": {"recovery_policy": {"max_retries": 3}},
+            }
+        }
+    }
+
+    result = await capability_nodes._execute_with_recovery(
+        state,
+        runner,
+        error_code="collect_urls_failed",
+        node_name="collect_urls_node",
+    )
+
+    assert attempts == expected_attempts
+    assert result["node_status"] == "fatal"
+    assert result["failure_records"][0]["category"] == expected_category

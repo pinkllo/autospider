@@ -6,9 +6,30 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .failures import CONTRACT_VIOLATION_CATEGORY
+from .failures import (
+    CONTRACT_VIOLATION_CATEGORY,
+    FATAL_CATEGORY,
+    RULE_STALE_CATEGORY,
+    SITE_DEFENSE_CATEGORY,
+    STATE_MISMATCH_CATEGORY,
+    TRANSIENT_CATEGORY,
+)
+
+RETRY_ACTION = "retry"
+REASK_ACTION = "reask"
+REPLAN_ACTION = "replan"
+HUMAN_INTERVENTION_ACTION = "human_intervention"
+FAIL_ACTION = "fail"
 
 RETRY_DELAYS = (1.0, 2.0)
+_CATEGORY_TO_ACTION = {
+    TRANSIENT_CATEGORY: RETRY_ACTION,
+    CONTRACT_VIOLATION_CATEGORY: REASK_ACTION,
+    STATE_MISMATCH_CATEGORY: REPLAN_ACTION,
+    RULE_STALE_CATEGORY: REPLAN_ACTION,
+    SITE_DEFENSE_CATEGORY: HUMAN_INTERVENTION_ACTION,
+    FATAL_CATEGORY: FAIL_ACTION,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +46,12 @@ def _resolve_retry_delay(failure_count: int) -> float:
     return float(RETRY_DELAYS[bounded_index])
 
 
+def _resolve_category_action(category: str) -> str:
+    if category in _CATEGORY_TO_ACTION:
+        return _CATEGORY_TO_ACTION[category]
+    return RETRY_ACTION
+
+
 def build_recovery_directive(
     *,
     failure_record: Mapping[str, Any] | None,
@@ -33,13 +60,14 @@ def build_recovery_directive(
 ) -> RecoveryDecision:
     payload = dict(failure_record or {})
     category = str(payload.get("category") or "")
+    action = _resolve_category_action(category)
     retry_budget = max(int(max_retries or 0), 0)
-    if category == CONTRACT_VIOLATION_CATEGORY:
-        return RecoveryDecision(action="fail", reason="contract_violation")
-    if failure_count >= retry_budget:
-        return RecoveryDecision(action="fail", reason="retry_budget_exhausted")
+    if action == RETRY_ACTION and failure_count >= retry_budget:
+        return RecoveryDecision(action=FAIL_ACTION, reason="retry_budget_exhausted")
+    if action != RETRY_ACTION:
+        return RecoveryDecision(action=action, reason=category or action)
     return RecoveryDecision(
-        action="retry",
+        action=RETRY_ACTION,
         delay_seconds=_resolve_retry_delay(failure_count),
-        reason="retryable_failure",
+        reason=category or "retryable_failure",
     )

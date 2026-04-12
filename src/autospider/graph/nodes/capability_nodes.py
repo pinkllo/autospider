@@ -30,7 +30,7 @@ from ...domain.runtime import SubTaskRuntimeState
 from ...field import run_field_pipeline
 from ..control_types import build_default_recovery_policy
 from ..failures import classify_runtime_exception
-from ..recovery import build_recovery_directive
+from ..recovery import RETRY_ACTION, build_recovery_directive
 from ..decision_context import build_decision_context
 from ..state_access import (
     collection_config as select_collection_config,
@@ -182,6 +182,19 @@ def _merge_failure_records(state: dict[str, Any], failure_record: dict[str, Any]
     return existing
 
 
+def _attach_recovery_directive(
+    failure_record: dict[str, Any],
+    directive_action: str,
+    directive_reason: str,
+) -> dict[str, Any]:
+    payload = dict(failure_record)
+    metadata = dict(payload.get("metadata") or {})
+    metadata["recovery_directive"] = directive_action
+    metadata["recovery_reason"] = directive_reason
+    payload["metadata"] = metadata
+    return payload
+
+
 async def _execute_with_recovery(
     state: dict[str, Any],
     runner: Callable[[], Awaitable[dict[str, Any]]],
@@ -201,11 +214,16 @@ async def _execute_with_recovery(
                 failure_count=failure_count,
                 max_retries=retry_budget,
             )
-            if directive.action != "retry":
+            resolved_failure = _attach_recovery_directive(
+                failure_record,
+                directive.action,
+                directive.reason,
+            )
+            if directive.action != RETRY_ACTION:
                 return _fatal(
                     error_code,
                     str(exc or "unknown_error"),
-                    failure_records=_merge_failure_records(state, failure_record),
+                    failure_records=_merge_failure_records(state, resolved_failure),
                 )
             failure_count += 1
             await asyncio.sleep(directive.delay_seconds)

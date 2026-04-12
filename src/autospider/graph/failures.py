@@ -6,9 +6,28 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+TRANSIENT_CATEGORY = "transient"
 CONTRACT_VIOLATION_CATEGORY = "contract_violation"
-SYSTEM_FAILURE_CATEGORY = "system_failure"
+STATE_MISMATCH_CATEGORY = "state_mismatch"
+SITE_DEFENSE_CATEGORY = "site_defense"
+RULE_STALE_CATEGORY = "rule_stale"
+FATAL_CATEGORY = "fatal"
+
 INVALID_PROTOCOL_DETAIL = "invalid_protocol_message"
+
+_TIMEOUT_HINTS = ("timeout", "timed out", "超时")
+_STATE_MISMATCH_HINTS = ("state mismatch", "dom changed", "element detached")
+_RULE_STALE_HINTS = ("rule stale", "selector stale", "xpath stale", "规则失效")
+_SITE_DEFENSE_HINTS = (
+    "captcha",
+    "challenge",
+    "too many requests",
+    "429",
+    "access denied",
+    "forbidden",
+    "bot detected",
+)
+_FATAL_HINTS = ("fatal", "schema corrupted", "invalid schema", "unsupported")
 
 
 def _snake_case(name: str) -> str:
@@ -17,7 +36,7 @@ def _snake_case(name: str) -> str:
     return normalized.strip().lower()
 
 
-def _build_failure_record(
+def build_failure_record(
     *,
     category: str,
     detail: str,
@@ -35,6 +54,59 @@ def _build_failure_record(
     }
 
 
+def _exception_name(error: BaseException) -> str:
+    return _snake_case(type(error).__name__)
+
+
+def _exception_message(error: BaseException) -> str:
+    return str(error or "").strip().lower()
+
+
+def _has_hint(value: str, hints: tuple[str, ...]) -> bool:
+    return any(hint in value for hint in hints)
+
+
+def _is_timeout_error(error: BaseException) -> bool:
+    return isinstance(error, TimeoutError) or _has_hint(
+        f"{_exception_name(error)} {_exception_message(error)}",
+        _TIMEOUT_HINTS,
+    )
+
+
+def _is_state_mismatch_error(error: BaseException) -> bool:
+    name = _exception_name(error)
+    return "state_mismatch" in name or _has_hint(_exception_message(error), _STATE_MISMATCH_HINTS)
+
+
+def _is_rule_stale_error(error: BaseException) -> bool:
+    name = _exception_name(error)
+    return "rule_stale" in name or _has_hint(_exception_message(error), _RULE_STALE_HINTS)
+
+
+def _is_site_defense_error(error: BaseException) -> bool:
+    name = _exception_name(error)
+    return "site_defense" in name or _has_hint(_exception_message(error), _SITE_DEFENSE_HINTS)
+
+
+def _is_fatal_error(error: BaseException) -> bool:
+    name = _exception_name(error)
+    return "fatal" in name or _has_hint(_exception_message(error), _FATAL_HINTS)
+
+
+def _classify_exception_category(error: BaseException) -> str:
+    if _is_timeout_error(error):
+        return TRANSIENT_CATEGORY
+    if _is_state_mismatch_error(error):
+        return STATE_MISMATCH_CATEGORY
+    if _is_rule_stale_error(error):
+        return RULE_STALE_CATEGORY
+    if _is_site_defense_error(error):
+        return SITE_DEFENSE_CATEGORY
+    if _is_fatal_error(error):
+        return FATAL_CATEGORY
+    return TRANSIENT_CATEGORY
+
+
 def classify_protocol_violation(
     *,
     component: str,
@@ -48,7 +120,7 @@ def classify_protocol_violation(
         "raw_payload": payload.get("raw_payload"),
         "validation_errors": [str(item) for item in list(payload.get("validation_errors") or [])],
     }
-    return _build_failure_record(
+    return build_failure_record(
         category=CONTRACT_VIOLATION_CATEGORY,
         detail=INVALID_PROTOCOL_DETAIL,
         component=component,
@@ -67,9 +139,9 @@ def classify_runtime_exception(
         "exception_type": type(error).__name__,
         "message": str(error),
     }
-    return _build_failure_record(
-        category=SYSTEM_FAILURE_CATEGORY,
-        detail=_snake_case(type(error).__name__),
+    return build_failure_record(
+        category=_classify_exception_category(error),
+        detail=_exception_name(error),
         component=component,
         page_id=page_id,
         metadata=metadata,

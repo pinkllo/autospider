@@ -171,7 +171,7 @@ class LLMDecider:
                 "output": {
                     "raw_response": str(response_text),
                     "parsed_action": action.model_dump(),
-                    "failure_record": self.last_failure_record,
+                    "failure_record": action.failure_record,
                 },
             },
         )
@@ -606,84 +606,61 @@ class LLMDecider:
                 return page
         return page
 
-    def _parse_response(self, response_payload: Any) -> Action:
-        """解析 LLM 响应"""
-        response_text = getattr(response_payload, "content", response_payload)
-        response_text_preview = str(response_text)
-        self.last_failure_record = None
-        diagnostics = parse_protocol_message_diagnostics(response_payload)
-        message = diagnostics.get("message")
-        if not message:
-            self.last_failure_record = classify_protocol_violation(
-                component="decider",
-                diagnostics=diagnostics,
-            )
-            errors = list(self.last_failure_record["metadata"].get("validation_errors") or [])
-            error_summary = "; ".join(errors[:2]) or response_text_preview[:200]
-            return Action(
-                action=ActionType.RETRY,
-                thinking=f"contract_violation: {error_summary}",
-                summary="contract_violation",
-            )
+    def _build_protocol_failure_action(self, diagnostics: dict[str, Any], response_preview: str) -> Action:
+        failure_record = classify_protocol_violation(
+            component="decider",
+            diagnostics=diagnostics,
+        )
+        self.last_failure_record = failure_record
+        errors = list(failure_record["metadata"].get("validation_errors") or [])
+        error_summary = "; ".join(errors[:2]) or response_preview[:200]
+        return Action(
+            action=ActionType.RETRY,
+            thinking=f"contract_violation: {error_summary}",
+            summary="contract_violation",
+            failure_record=failure_record,
+        )
 
-        # 解析 action 类型
-        action_str_raw = message.get("action") or ""
-        action_str = str(action_str_raw).strip().lower()
-        action_aliases = {
-            # 常见同义/历史动作名
-            "scroll_down": "scroll",
-            "scroll_up": "scroll",
-            "press": "retry",
-        }
-        action_str = action_aliases.get(action_str, action_str)
-
-        args = message.get("args") if isinstance(message.get("args"), dict) else {}
-
+    def _resolve_action_type(self, action_str: str, args: dict[str, Any]) -> tuple[ActionType, bool]:
         action_type: ActionType | None = None
         if action_str:
             try:
                 action_type = ActionType(action_str)
             except ValueError:
                 action_type = None
+        if action_type is not None:
+            return action_type, False
+        if args.get("text") and (args.get("mark_id") is not None or args.get("target_text")):
+            return ActionType.TYPE, True
+        if args.get("scroll_delta") is not None:
+            return ActionType.SCROLL, True
+        if args.get("url"):
+            return ActionType.NAVIGATE, True
+        if args.get("mark_id") is not None or args.get("target_text"):
+            return ActionType.CLICK, True
+        return ActionType.RETRY, False
 
-        # 修改原因：LLM 偶尔会漏写/写错 action，但其它字段已足够推断具体动作；
-        # 为避免被误判为 retry 并陷入循环，这里对缺失/非法 action 做自动推断。
-        inferred = False
-        if action_type is None:
-            if args.get("text") and (
-                args.get("mark_id") is not None or args.get("target_text")
-            ):
-                action_type = ActionType.TYPE
-                inferred = True
-            elif args.get("scroll_delta") is not None:
-                action_type = ActionType.SCROLL
-                inferred = True
-            elif args.get("url"):
-                action_type = ActionType.NAVIGATE
-                inferred = True
-            elif args.get("mark_id") is not None or args.get("target_text"):
-                action_type = ActionType.CLICK
-                inferred = True
-            else:
-                action_type = ActionType.RETRY
+    def _resolve_scroll_delta(self, args: dict[str, Any]) -> tuple[int, int] | None:
+        sd = args.get("scroll_delta")
+        if isinstance(sd, list) and len(sd) == 2:
+            return (int(sd[0]), int(sd[1]))
+        return None
 
-        # 解析 scroll_delta
-        scroll_delta = None
-        if "scroll_delta" in args:
-            sd = args["scroll_delta"]
-            if isinstance(sd, list) and len(sd) == 2:
-                scroll_delta = (int(sd[0]), int(sd[1]))
-
+    def _build_action_from_message(self, message: dict[str, Any]) -> Action:
+        action_str = str(message.get("action") or "").strip().lower()
+        action_str = {"scroll_down": "scroll", "scroll_up": "scroll", "press": "retry"}.get(
+            action_str,
+            action_str,
+        )
+        args = message.get("args") if isinstance(message.get("args"), dict) else {}
+        action_type, inferred = self._resolve_action_type(action_str, args)
         thinking = message.get("thinking", "") or ""
         if inferred and not thinking:
             thinking = f"自动推断动作: {action_type.value}"
         if action_type == ActionType.RETRY and not thinking:
             thinking = "LLM 输出未包含可执行 action，已进入重试"
-
-        # 修改原因：当 action=retry 时，清空 mark_id/target_text，避免上层误以为“重试仍指向同一元素”并造成循环提示噪音。
         mark_id = None if action_type == ActionType.RETRY else args.get("mark_id")
         target_text = None if action_type == ActionType.RETRY else args.get("target_text")
-
         return Action(
             action=action_type,
             mark_id=mark_id,
@@ -691,9 +668,19 @@ class LLMDecider:
             text=args.get("text"),
             key=args.get("key"),
             url=args.get("url"),
-            scroll_delta=scroll_delta,
+            scroll_delta=self._resolve_scroll_delta(args),
             timeout_ms=args.get("timeout_ms") or 5000,
             thinking=thinking,
             expectation=args.get("expectation") or args.get("summary"),
             summary=args.get("summary"),
         )
+
+    def _parse_response(self, response_payload: Any) -> Action:
+        """解析 LLM 响应"""
+        self.last_failure_record = None
+        diagnostics = parse_protocol_message_diagnostics(response_payload)
+        message = diagnostics.get("message")
+        if not message:
+            response_preview = str(getattr(response_payload, "content", response_payload))
+            return self._build_protocol_failure_action(diagnostics, response_preview)
+        return self._build_action_from_message(message)
