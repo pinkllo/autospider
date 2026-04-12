@@ -32,6 +32,8 @@ def _use_last(existing: Any, new: Any) -> Any:
 class MultiDispatchState(TypedDict, total=False):
     thread_id: str
     normalized_params: Annotated[dict[str, Any], _use_last]
+    control: Annotated[dict[str, Any], _use_last]
+    execution: Annotated[dict[str, Any], _use_last]
     task_plan: Annotated[TaskPlan, _use_last]
     plan_knowledge: Annotated[str, _use_last]
     dispatch_queue: list[dict[str, Any]]

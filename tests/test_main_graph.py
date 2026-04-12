@@ -10,8 +10,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 import autospider.graph.main_graph as main_graph_module
+from autospider.domain.planning import TaskPlan
 from autospider.domain.runtime import SubTaskRuntimeState
 from autospider.graph.main_graph import build_main_graph, resolve_feedback_route
+from autospider.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
 
 
 def _runtime_result(
@@ -103,18 +105,24 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
         }
 
     def plan_node_stub(state: dict[str, object]) -> dict[str, object]:
+        control = dict(state.get("control") or {})
         return {
-            "planning": {"status": "ok"},
-            "task_plan": {"subtasks": [{"id": "subtask_001"}]},
-            "plan_knowledge": "stub-plan",
+            "control": {
+                **control,
+                "current_plan": {"goal": "collect"},
+                "task_plan": {"subtasks": [{"id": "subtask_001"}]},
+                "plan_knowledge": "stub-plan",
+                "stage_status": "ok",
+            },
             "node_status": "ok",
             "error": None,
         }
 
     def multi_dispatch_stub(state: dict[str, object]) -> dict[str, object]:
         dispatch_rounds["count"] += 1
+        control = dict(state.get("control") or {})
         active_strategy = str(
-            ((state.get("control") or {}).get("active_strategy") or {}).get("name") or ""
+            (control.get("active_strategy") or {}).get("name") or ""
         )
         dispatch_strategy_names.append(active_strategy)
         is_first_round = dispatch_rounds["count"] == 1
@@ -135,19 +143,17 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
             "system_failure": 1 if is_first_round else 0,
         }
         return {
-            "dispatch": {
-                "status": "ok",
-                "subtask_results": results,
-                "dispatch_result": summary,
-                "summary": summary,
-            },
             "execution": {
                 "subtask_results": results,
                 "dispatch_summary": summary,
             },
-            "subtask_results": results,
-            "dispatch_result": summary,
-            "summary": summary,
+            "control": {
+                **control,
+                "current_plan": {"goal": "collect"},
+                "task_plan": {"subtasks": [{"id": "subtask_001"}]},
+                "plan_knowledge": "stub-plan",
+                "stage_status": "ok",
+            },
             "node_status": "ok",
             "error": None,
         }
@@ -218,3 +224,37 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
     assert final_state["world"]["world_model"]["failure_records"][0]["metadata"][
         "message"
     ] == "downstream api rejected payload"
+
+
+def test_build_multi_dispatch_subgraph_accepts_control_task_plan_boundary() -> None:
+    subgraph = build_multi_dispatch_subgraph()
+    plan = TaskPlan(
+        plan_id="plan_001",
+        original_request="collect",
+        site_url="https://example.com",
+        subtasks=[],
+        nodes=[],
+        journal=[],
+        total_subtasks=0,
+        shared_fields=[],
+        created_at="2026-04-12T00:00:00",
+        updated_at="2026-04-12T00:00:00",
+    )
+
+    result = subgraph.invoke(
+        {
+            "thread_id": "thread-1",
+            "normalized_params": {"output_dir": "output"},
+            "control": {
+                "task_plan": plan,
+                "plan_knowledge": "structured knowledge",
+                "current_plan": {"goal": "collect"},
+                "stage_status": "ok",
+            },
+            "execution": {"subtask_results": [], "dispatch_summary": {}},
+        }
+    )
+
+    assert result["node_status"] == "ok"
+    assert result["control"]["task_plan"].plan_id == "plan_001"
+    assert result["execution"]["dispatch_summary"]["total"] == 0
