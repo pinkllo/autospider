@@ -45,6 +45,23 @@ def test_select_summary_merges_dispatch_and_result_metrics() -> None:
     }
 
 
+def test_dispatch_summary_merges_dispatch_result_and_dispatch_summary() -> None:
+    state = {
+        "dispatch_result": {"total": 4, "completed": 3},
+        "dispatch": {
+            "dispatch_result": {"failed": 1},
+            "summary": {"total_collected": 36},
+        },
+    }
+
+    assert dispatch_summary(state) == {
+        "total": 4,
+        "completed": 3,
+        "failed": 1,
+        "total_collected": 36,
+    }
+
+
 def test_task_plan_preserves_legacy_planning_state_via_workflow_adapter() -> None:
     state = {
         "planning": {"task_plan": {"steps": ["clarify", "dispatch"]}},
@@ -52,3 +69,23 @@ def test_task_plan_preserves_legacy_planning_state_via_workflow_adapter() -> Non
     }
 
     assert task_plan(state) == {"steps": ["dispatch-only"]}
+
+
+def test_task_plan_keeps_empty_dispatch_dict_without_falling_back() -> None:
+    state = {
+        "dispatch": {"task_plan": {}},
+        "task_plan": {"steps": ["root-plan"]},
+        "planning": {"task_plan": {"steps": ["planning-plan"]}},
+    }
+
+    assert task_plan(state) == {}
+
+
+def test_task_plan_keeps_empty_dispatch_list_without_falling_back() -> None:
+    state = {
+        "dispatch": {"task_plan": []},
+        "task_plan": {"steps": ["root-plan"]},
+        "planning": {"task_plan": {"steps": ["planning-plan"]}},
+    }
+
+    assert task_plan(state) == []

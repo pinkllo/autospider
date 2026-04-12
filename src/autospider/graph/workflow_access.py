@@ -49,21 +49,44 @@ def _legacy_request_params(state: dict[str, Any]) -> dict[str, Any]:
 def _legacy_current_plan(state: dict[str, Any]) -> Any:
     dispatch = _as_dict(state.get("dispatch"))
     planning = _as_dict(state.get("planning"))
-    return dispatch.get("task_plan") or state.get("task_plan") or planning.get("task_plan")
+    dispatch_plan = dispatch.get("task_plan")
+    if dispatch_plan is not None:
+        return dispatch_plan
+    root_plan = state.get("task_plan")
+    if root_plan is not None:
+        return root_plan
+    planning_plan = planning.get("task_plan")
+    if planning_plan is not None:
+        return planning_plan
+    return None
+
+
+def _merge_mappings(*values: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for value in values:
+        if isinstance(value, Mapping):
+            merged.update(dict(value))
+    return merged
+
+
+def _looks_like_dispatch_summary(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return any(key in value for key in DISPATCH_SUMMARY_KEYS)
 
 
 def _legacy_dispatch_summary(state: dict[str, Any]) -> dict[str, Any]:
     dispatch = _as_dict(state.get("dispatch"))
-    candidates = (
+    merged = _merge_mappings(
         state.get("dispatch_result"),
         dispatch.get("dispatch_result"),
         dispatch.get("summary"),
-        state.get("summary"),
     )
-    for candidate in candidates:
-        summary = _as_dict(candidate)
-        if any(key in summary for key in DISPATCH_SUMMARY_KEYS):
-            return summary
+    if merged:
+        return merged
+    root_summary = _as_dict(state.get("summary"))
+    if _looks_like_dispatch_summary(root_summary):
+        return root_summary
     return {}
 
 
