@@ -5,33 +5,38 @@
 English | **[中文](README.md)**
 
 AutoSpider is a pure-vision web crawling agent built with `LangGraph + Playwright + SoM (Set-of-Mark)`.
-It can automatically discover detail links, infer highly stable and reusable XPath patterns, extract structured fields, and utilize a **Planning Agent** to decompose and crawl large-scale, complex multi-category websites.
+Its public workflow is now centered on a planning-first chat pipeline that connects clarification, history reuse, grouped planning, concurrent subtask execution, and resumable aggregation.
 
 ## 🌟 Key Features
 
-- **Natural Language Interaction (`chat-pipeline`)**: Define what you want in plain text. A multi-turn AI clarification system (`TaskClarifier`) automatically infers the target URL, data fields, and optimal crawling strategy, then launches the full pipeline with a single command.
-- **Smart Planning Agent**: Employs SoM visual recognition to analyze complex site navigation. It automatically breaks down massive, multi-category websites into independent, stable sub-tasks (`multi` mode) for scalable crawling.
+- **Planning-first chat pipeline (`chat-pipeline`)**: Describe the job in plain text, then let the system clarify requirements, match relevant history, request a final review, and only then hand off into planning and multi-dispatch.
+- **Explicit grouped collection semantics**: When the clarified task becomes `group_by=category`, the runtime treats categories discovered from the page as first-class groups, and `per_group_target_count` means "how many records per discovered category."
+- **Category facts come from page analysis and subtask scope**: category discovery is driven by page facts gathered during planning; once dispatched, category values are emitted from each subtask's `scope` / `fixed_fields` rather than guessed again from detail pages.
 - **Robust XPath Generation & Error Salvage**: Infers comprehensive multi-attribute XPath selectors (binding `id`, `class`, `data-*`). A built-in "salvage mechanism" automatically fixes and repairs field extraction errors gracefully on the fly.
 - **Non-intrusive Guard & Session Memory**: When captchas or logins interrupt, the crawler pauses seamlessly, popping a unified browser banner for human intervention. Session status is saved incrementally inside `.auth/`.
-- **Flexible execution backend**: the underlying Graph still provides unified orchestration, concurrent pipelines, resumability, adaptive rate control, and `memory` / `file` / `redis` channels, while the public CLI is intentionally reduced to a smaller set of main commands.
+- **Semantic identity for history reuse**: task reuse is aligned by a normalized `semantic_signature` built from grouped strategy payloads plus field names, instead of relying on URL matching alone.
 
 ## 🏗️ System Architecture
 
-AutoSpider uses a LangGraph-based state graph architecture centered on the `chat-pipeline` entry path. The public CLI now keeps only 3 main commands. In the current implementation, `chat-pipeline` is the primary user-facing path, and chat-originated work always enters planning before concurrent dispatch:
+AutoSpider uses a LangGraph-based state graph architecture. The public CLI currently exposes only 3 commands: `chat-pipeline`, `resume`, and `db-init`. The only user-facing crawl entry is `chat-pipeline`, and chat-originated work always enters planning before dispatch monitoring, world-model feedback, and final aggregation:
 
 ```mermaid
 graph LR
-  A["🚀 CLI Entry"] --> B["🔀 route_entry<br/>Entry Router"]
-  B --> C["💬 Chat Branch"]
-  B --> D["🔧 Pipeline Branch"]
-  B --> E["🛠️ Capability Nodes"]
-  B --> F["🧠 Multi-Task Planning"]
-
-  C --> G["📤 Finalization"]
-  D --> G
-  E --> G
-  F --> G
-  G --> H["🔴 End"]
+  A["autospider chat-pipeline"] --> B["chat_clarify"]
+  B --> C["chat_history_match"]
+  C --> D["chat_review_task"]
+  D --> E["chat_prepare_execution_handoff"]
+  E --> F["plan_node"]
+  F --> G["multi_dispatch_subgraph"]
+  G --> H["monitor_dispatch_node"]
+  H --> I["update_world_model_node"]
+  I --> J{"Need replanning?"}
+  J -->|yes| K["plan_strategy_node"]
+  K --> F
+  J -->|no| L["aggregate_node"]
+  L --> M["finalize"]
+  N["autospider resume"] --> O["Resume interrupted thread"]
+  P["autospider db-init"] --> Q["Initialize PostgreSQL schema"]
 ```
 
 > 📊 For a detailed node-level flowchart with feature descriptions, see [`output/graph/main_graph.mmd`](main_graph.mmd)
@@ -40,7 +45,9 @@ graph LR
 
 | Entry Mode | Execution Route | Description |
 |:---|:---|:---|
-| `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 AI-driven multi-turn dialog, then planning-first concurrent execution |
+| `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → monitor_dispatch_node → update_world_model_node → (optional replanning) → aggregate_node | 💬 AI-driven multi-turn dialog, then planning-first execution with feedback-driven replanning |
+
+> Legacy capabilities such as `collect_urls`, `generate_config`, `batch_collect`, `field_extract`, and `multi_pipeline` may still exist internally, but they are no longer documented as public README entry points.
 
 ## ⚙️ Requirements
 
@@ -73,14 +80,14 @@ BAILIAN_API_BASE=https://api.siliconflow.cn/v1
 BAILIAN_MODEL=qwen3.5-plus
 
 # Dedicated Vision-Model Planner (Optional)
-# PLANNER_API_KEY=your_planner_key
-# PLANNER_MODEL=qwen-vl-plus
+# SILICON_PLANNER_API_KEY=your_planner_key
+# SILICON_PLANNER_MODEL=qwen-vl-plus
 
 HEADLESS=false
 PIPELINE_MODE=memory
 ```
 
-*Note: if `--mode` is not passed to `chat-pipeline`, the default comes from `PIPELINE_MODE`. Use `memory` when Redis is not configured.*
+*Note: if `--mode` is not passed to `chat-pipeline`, the default comes from `PIPELINE_MODE`. The current code accepts backend values `memory`, `file`, and `redis`. Switch to `redis` only after installing and configuring the Redis-related dependencies.*
 
 ## 🚀 Quick Start
 
@@ -90,20 +97,17 @@ Chat your way to data. The system clarifies the task, optionally reuses historic
 
 ```bash
 # Automatically clarifies the task and enters the planning-first chat pipeline
-autospider chat-pipeline -r "Collect articles across all categories from example.com and extract titles & dates"
+autospider chat-pipeline -r "Collect 3 majors per category from all categories discovered on example.com, including title and category name"
 ```
 
-### 1) Multi-category parallel collection
+### Grouped collection semantics
 
-```bash
-autospider multi-pipeline \
-  --site-url "https://example.com" \
-  --request "Collect announcement data across all categories" \
-  --fields-file fields.json \
-  --output output
-```
+- `group_by=category`: dispatches one subtask per category discovered from the page, instead of guessing category labels from detail pages later.
+- `per_group_target_count`: the target count for each discovered category, not a single global cap shared across all categories.
+- `category_discovery_mode=auto`: categories come from page facts unless the user explicitly constrains them with `requested_categories`.
+- Category fields in emitted records come from subtask `scope` / `fixed_fields`, which makes category output deterministic even when detail pages omit or vary category text.
 
-### 2) Resume an interrupted run
+### 1) Resume an interrupted run
 
 ```bash
 autospider resume --thread-id "<thread_id>"
@@ -113,7 +117,7 @@ autospider resume --thread-id "<thread_id>"
 
 ```text
 src/autospider/
-├── cli.py                     # CLI entry point (chat-pipeline / multi-pipeline / resume)
+├── cli.py                     # CLI entry point (chat-pipeline / resume / db-init)
 ├── graph/                     # LangGraph state graph orchestration layer
 │   ├── main_graph.py          #   Main graph construction & routing logic
 │   ├── runner.py              #   GraphRunner unified execution entry
@@ -126,7 +130,7 @@ src/autospider/
 ├── common/                    # Shared infrastructure
 │   ├── config.py              #   Global configuration management
 │   ├── browser/               #   BrowserSession management
-│   ├── channel/               #   Message queues (memory / file / redis)
+│   ├── channel/               #   Pipeline backend channels (memory / file / redis)
 │   ├── llm/                   #   LLM dialog clarification (TaskClarifier) & decision engine
 │   ├── som/                   #   Set-of-Mark visual annotation engine
 │   ├── storage/               #   Persistence & Redis management

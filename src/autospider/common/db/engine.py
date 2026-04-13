@@ -57,6 +57,8 @@ _EXPECTED_COLUMNS = {
         "anchor_url",
         "variant_label",
         "task_description",
+        "semantic_signature",
+        "strategy_payload",
         "field_names",
         "created_at",
         "updated_at",
@@ -128,6 +130,28 @@ _EXPECTED_COLUMNS = {
         "updated_at",
     },
 }
+_TASKS_ADDITIVE_COLUMNS = {
+    "semantic_signature": {
+        "sqlite": "TEXT",
+        "postgresql": "TEXT",
+        "mysql": "TEXT",
+        "default": "TEXT",
+    },
+    "strategy_payload": {
+        "sqlite": "JSON",
+        "postgresql": "JSONB",
+        "mysql": "JSON",
+        "default": "JSON",
+    },
+}
+_TASKS_OLD_UNIQUE_INDEX = (
+    "ix_tasks_norm_state_desc",
+    ["normalized_url", "page_state_signature", "task_description"],
+)
+_TASKS_NEW_UNIQUE_INDEX = (
+    "ix_tasks_norm_state_semantic",
+    ["normalized_url", "page_state_signature", "semantic_signature"],
+)
 
 
 def get_engine() -> Engine:
@@ -212,7 +236,105 @@ def _find_missing_columns(engine: Engine, table_name: str, expected: set[str]) -
     return sorted(expected - actual)
 
 
+def _resolve_additive_column_type(engine: Engine, column_name: str) -> str:
+    mapping = _TASKS_ADDITIVE_COLUMNS[column_name]
+    dialect = str(engine.dialect.name or "").strip().lower()
+    return mapping.get(dialect, mapping["default"])
+
+
+def _task_indexes(engine: Engine) -> list[dict[str, object]]:
+    inspector = inspect(engine)
+    indexes = list(inspector.get_indexes("tasks")) if inspector.has_table("tasks") else []
+    known_names = {str(item.get("name") or "") for item in indexes}
+    for item in inspector.get_unique_constraints("tasks") if inspector.has_table("tasks") else []:
+        name = str(item.get("name") or "")
+        if not name or name in known_names:
+            continue
+        indexes.append(
+            {
+                "name": name,
+                "column_names": list(item.get("column_names") or []),
+                "unique": True,
+            }
+        )
+    return indexes
+
+
+def _find_task_index(engine: Engine, name: str) -> dict[str, object] | None:
+    for item in _task_indexes(engine):
+        if str(item.get("name") or "") == name:
+            return item
+    return None
+
+
+def _index_matches(index: dict[str, object] | None, columns: list[str]) -> bool:
+    if index is None:
+        return False
+    return bool(index.get("unique")) and list(index.get("column_names") or []) == columns
+
+
+def _drop_index(engine: Engine, *, table_name: str, index_name: str) -> None:
+    dialect = str(engine.dialect.name or "").strip().lower()
+    with engine.begin() as conn:
+        if dialect == "mysql":
+            conn.exec_driver_sql(f"DROP INDEX {index_name} ON {table_name}")
+            return
+        conn.exec_driver_sql(f"DROP INDEX IF EXISTS {index_name}")
+
+
+def _create_unique_index(engine: Engine, *, table_name: str, index_name: str, columns: list[str]) -> None:
+    column_sql = ", ".join(columns)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f"CREATE UNIQUE INDEX {index_name} ON {table_name} ({column_sql})")
+
+
+def _upgrade_tasks_additive_columns(engine: Engine) -> list[str]:
+    missing = _find_missing_columns(engine, "tasks", set(_TASKS_ADDITIVE_COLUMNS))
+    if not missing:
+        return []
+
+    upgraded: list[str] = []
+    with engine.begin() as conn:
+        for column_name in missing:
+            column_type = _resolve_additive_column_type(engine, column_name)
+            conn.exec_driver_sql(f"ALTER TABLE tasks ADD COLUMN {column_name} {column_type}")
+            upgraded.append(column_name)
+
+    if upgraded:
+        logger.info("[DB] 已为 tasks 表补充字段: %s", ", ".join(upgraded))
+    return upgraded
+
+
+def _upgrade_tasks_unique_index(engine: Engine) -> None:
+    if not inspect(engine).has_table("tasks"):
+        return
+
+    old_name, old_columns = _TASKS_OLD_UNIQUE_INDEX
+    new_name, new_columns = _TASKS_NEW_UNIQUE_INDEX
+    old_index = _find_task_index(engine, old_name)
+    new_index = _find_task_index(engine, new_name)
+
+    if new_index is not None and not _index_matches(new_index, new_columns):
+        raise RuntimeError(f"tasks 索引 {new_name} 结构不符合当前语义唯一性要求")
+    if old_index is not None and not _index_matches(old_index, old_columns):
+        raise RuntimeError(f"tasks 索引 {old_name} 结构与预期旧版唯一索引不一致，无法自动迁移")
+
+    if new_index is None:
+        _create_unique_index(engine, table_name="tasks", index_name=new_name, columns=new_columns)
+        logger.info("[DB] 已为 tasks 表创建语义唯一索引: %s", new_name)
+
+    if old_index is not None:
+        _drop_index(engine, table_name="tasks", index_name=old_name)
+        logger.info("[DB] 已移除 tasks 表旧描述唯一索引: %s", old_name)
+
+
+def _upgrade_additive_schema(engine: Engine) -> None:
+    _upgrade_tasks_additive_columns(engine)
+    _upgrade_tasks_unique_index(engine)
+
+
 def _validate_expected_schema(engine: Engine) -> None:
+    _upgrade_additive_schema(engine)
     mismatches: list[str] = []
     for table_name, expected in _EXPECTED_COLUMNS.items():
         missing = _find_missing_columns(engine, table_name, expected)

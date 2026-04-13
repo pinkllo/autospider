@@ -69,6 +69,16 @@ class _RedisCache:
 _cache = _RedisCache()
 
 
+def _normalize_query_results(data: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in list(data or []):
+        row = dict(item or {})
+        row["semantic_signature"] = str(row.get("semantic_signature") or "")
+        row["strategy_payload"] = dict(row.get("strategy_payload") or {})
+        rows.append(row)
+    return rows
+
+
 def normalize_url(url: str) -> str:
     raw = (url or "").strip()
     if not raw:
@@ -105,11 +115,12 @@ class TaskRunQueryService:
 
         cached = _cache.get(target)
         if cached is not None:
-            return cached
+            return _normalize_query_results(cached)
 
         results = self._db_find_by_url(target)
-        _cache.set(target, results, ttl=60 if not results else None)
-        return results
+        normalized = _normalize_query_results(results)
+        _cache.set(target, normalized, ttl=60 if not normalized else None)
+        return normalized
 
     def _db_find_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
         from autospider.common.db.engine import session_scope

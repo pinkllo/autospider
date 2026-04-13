@@ -1,7 +1,7 @@
 """现版本 PostgreSQL 持久化模型。
 
 数据库层现在承担主持久化职责：
-- `tasks` 保存可复用任务定义，按 `(normalized_url, page_state_signature, task_description)` 唯一。
+- `tasks` 保存可复用任务定义，按 `(normalized_url, page_state_signature, semantic_signature)` 唯一。
 - `task_runs` 保存每次运行的完整快照与摘要。
 - `task_run_items` 保存每个 URL 的最终提取结果。
 - `task_run_validation_failures` 保存探索阶段的校验失败明细。
@@ -37,6 +37,8 @@ class TaskRecord(Base):
     anchor_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
     variant_label: Mapped[str] = mapped_column(Text, default="", nullable=False)
     task_description: Mapped[str] = mapped_column(Text, nullable=False)
+    semantic_signature: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
+    strategy_payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     field_names: Mapped[list[str]] = mapped_column(JSON_VALUE, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -53,10 +55,10 @@ class TaskRecord(Base):
 
     __table_args__ = (
         Index(
-            "ix_tasks_norm_state_desc",
+            "ix_tasks_norm_state_semantic",
             "normalized_url",
             "page_state_signature",
-            "task_description",
+            "semantic_signature",
             unique=True,
         ),
     )
@@ -81,6 +83,8 @@ class TaskRecord(Base):
             "anchor_url": self.anchor_url,
             "variant_label": self.variant_label,
             "task_description": self.task_description,
+            "semantic_signature": self.semantic_signature or "",
+            "strategy_payload": dict(self.strategy_payload or {}),
             "fields": list(self.field_names or []),
             "execution_id": run.execution_id,
             "output_dir": run.output_dir or "",

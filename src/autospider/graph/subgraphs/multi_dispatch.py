@@ -143,6 +143,29 @@ def _resolve_subtask_status(result: dict[str, Any]):
     return resolve_subtask_status(result)
 
 
+def _is_grouped_category_subtask(subtask) -> bool:
+    scope = dict(getattr(subtask, "scope", {}) or {})
+    scope_key = str(scope.get("key") or "").strip().lower()
+    if scope_key.startswith("category:"):
+        return True
+    path = scope.get("path")
+    if isinstance(path, (list, tuple)) and any(str(item or "").strip() for item in path):
+        return True
+    return bool(str(scope.get("label") or "").strip())
+
+
+def _resolve_subtask_target_url_count(subtask, params: dict[str, Any]) -> int | None:
+    if subtask.target_url_count is not None:
+        return int(subtask.target_url_count)
+    if getattr(subtask, "per_subtask_target_count", None) is not None and _is_grouped_category_subtask(subtask):
+        return int(subtask.per_subtask_target_count)
+    if params.get("target_url_count") is not None:
+        return int(params["target_url_count"])
+    if getattr(subtask, "per_subtask_target_count", None) is not None:
+        return int(subtask.per_subtask_target_count)
+    return None
+
+
 def _build_subtask_result(
     subtask,
     *,
@@ -238,8 +261,9 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     plan = _resolved_task_plan(state)
     if subtask.max_pages is None and params.get("max_pages") is not None:
         subtask.max_pages = int(params["max_pages"])
-    if subtask.target_url_count is None and params.get("target_url_count") is not None:
-        subtask.target_url_count = int(params["target_url_count"])
+    resolved_target_count = _resolve_subtask_target_url_count(subtask, params)
+    if resolved_target_count is not None:
+        subtask.target_url_count = resolved_target_count
     while True:
         try:
             worker = SubTaskWorker(

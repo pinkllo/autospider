@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from .grouping_semantics import normalize_grouping_semantics, normalize_positive_int, normalize_string_list
+
 _PROTOCOL_ACTIONS = (
     "click",
     "type",
@@ -31,16 +33,6 @@ def _strip_text(value: Any) -> str:
 def _strip_optional_text(value: Any) -> str | None:
     text = _strip_text(value)
     return text or None
-
-
-def _normalize_positive_int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number > 0 else None
 
 
 def _format_validation_errors(exc: ValidationError) -> list[str]:
@@ -94,6 +86,12 @@ class TaskClarifierPayload(BaseModel):
     task_description: str = ""
     list_url: str = ""
     fields: list[ClarifierFieldPayload] = Field(default_factory=list)
+    group_by: Literal["none", "category"] = "none"
+    per_group_target_count: int | None = None
+    total_target_count: int | None = None
+    category_discovery_mode: Literal["auto", "manual"] = "auto"
+    requested_categories: list[str] = Field(default_factory=list)
+    category_examples: list[str] = Field(default_factory=list)
     max_pages: int | None = None
     target_url_count: int | None = None
     consumer_concurrency: int | None = None
@@ -114,6 +112,17 @@ class TaskClarifierPayload(BaseModel):
         return _strip_text(value)
 
     @field_validator(
+        "requested_categories",
+        "category_examples",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_list_fields(cls, value: Any) -> list[str]:
+        return normalize_string_list(value)
+
+    @field_validator(
+        "per_group_target_count",
+        "total_target_count",
         "max_pages",
         "target_url_count",
         "consumer_concurrency",
@@ -123,7 +132,18 @@ class TaskClarifierPayload(BaseModel):
     )
     @classmethod
     def _normalize_int_fields(cls, value: Any) -> int | None:
-        return _normalize_positive_int(value)
+        return normalize_positive_int(value)
+
+    @model_validator(mode="after")
+    def _normalize_grouping_semantics(self) -> "TaskClarifierPayload":
+        normalized = normalize_grouping_semantics(self.model_dump(mode="python"))
+        self.group_by = normalized["group_by"]
+        self.per_group_target_count = normalized["per_group_target_count"]
+        self.total_target_count = normalized["total_target_count"]
+        self.category_discovery_mode = normalized["category_discovery_mode"]
+        self.requested_categories = normalized["requested_categories"]
+        self.category_examples = normalized["category_examples"]
+        return self
 
 
 class ProtocolArgsPayload(BaseModel):

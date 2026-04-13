@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...domain.planning import PlannerCategoryCandidate
+
 
 class PlannerAnalysisPostProcessMixin:
     def _post_process_analysis(
@@ -19,23 +21,24 @@ class PlannerAnalysisPostProcessMixin:
             normalized,
             current_context,
         )
-        if not self._is_multicategory_request():
+        if not self._should_split_by_category():
             return normalized
         if self._extract_category_path(current_context):
             return normalized
-
-        page_type = str(normalized.get("page_type") or "").strip().lower()
-        requested_subtasks = self._build_requested_category_subtasks(snapshot)
-        if not requested_subtasks:
+        if not self._page_facts_support_grouped_split(normalized):
             return normalized
 
-        existing_subtasks = list(normalized.get("subtasks") or [])
-        if page_type == "category" and existing_subtasks:
-            return normalized
+        fact_subtasks = self._build_page_fact_subtasks(normalized)
+        if not fact_subtasks:
+            self._set_analysis_candidates(normalized, [])
+            return self._append_observation_note(
+                normalized,
+                "结构化分类分组已启用，但页面事实未提供可用的 category_candidates；未采用 subtasks 作为兜底来源。",
+            )
 
         normalized["page_type"] = "category"
-        normalized["subtasks"] = requested_subtasks
-        note = "检测到用户请求为多分类任务，按页面中可见分类入口强制拆分子任务。"
+        normalized["subtasks"] = fact_subtasks
+        note = "检测到结构化分类分组语义，按页面事实中的分类候选生成子任务。"
         return self._append_observation_note(normalized, note)
 
     def _prune_backtrack_subtasks(
@@ -44,7 +47,7 @@ class PlannerAnalysisPostProcessMixin:
         context: dict[str, str] | None,
     ) -> dict:
         normalized = dict(result or {})
-        subtasks = list(normalized.get("subtasks") or [])
+        subtasks = self._get_analysis_candidates(normalized)
         current_path = self._extract_category_path(context)
         if not subtasks or not current_path:
             return normalized
@@ -76,20 +79,16 @@ class PlannerAnalysisPostProcessMixin:
         if not removed_names:
             return normalized
 
-        normalized["subtasks"] = filtered_subtasks
+        self._set_analysis_candidates(normalized, filtered_subtasks)
         if filtered_subtasks:
             note = f"已过滤祖先/当前分类回跳入口: {'; '.join(removed_names)}"
             return self._append_observation_note(normalized, note)
 
         normalized["page_type"] = "list_page"
         note = f"候选分类仅包含祖先或当前分类回跳入口，停止继续拆分: {'; '.join(removed_names)}"
-        normalized["subtasks"] = []
+        self._set_analysis_candidates(normalized, [])
         if not str(normalized.get("task_description") or "").strip():
-            current_label = current_path[-1]
-            normalized["task_description"] = (
-                f"采集当前“{current_label}”分类下前 10 条招标/采购项目记录，"
-                "提取项目名称与所属分类名称。"
-            )
+            normalized["task_description"] = self._build_collect_task_description(context)
         return self._append_observation_note(normalized, note)
 
     def _collapse_sibling_switches_to_leaf(
@@ -113,10 +112,9 @@ class PlannerAnalysisPostProcessMixin:
 
         display_label = self._strip_category_group_prefix(current_label)
         normalized["page_type"] = "list_page"
-        normalized["subtasks"] = []
-        normalized["task_description"] = (
-            f"采集当前“{display_label}”分类下前 10 条招标/采购项目记录，"
-            "提取项目名称与所属分类名称。"
+        self._set_analysis_candidates(normalized, [])
+        normalized["task_description"] = self._build_collect_task_description(
+            self._build_subtask_context(display_label, context)
         )
         note = (
             "检测到当前页面已进入具体分类，页面中剩余候选项属于同层兄弟分类切换，"
@@ -124,74 +122,121 @@ class PlannerAnalysisPostProcessMixin:
         )
         return self._append_observation_note(normalized, note)
 
-    def _is_multicategory_request(self) -> bool:
-        request = str(self.user_request or "").strip()
-        if not request:
+    def _should_split_by_category(self) -> bool:
+        resolver = getattr(self, "_get_grouping_semantics", None)
+        if not callable(resolver):
             return False
-        keywords = (
-            "每类",
-            "各类",
-            "各个相关分类",
-            "各分类",
-            "分别采集",
-            "分类下",
-        )
-        return any(keyword in request for keyword in keywords)
+        grouping = dict(resolver() or {})
+        return str(grouping.get("group_by") or "").strip().lower() == "category"
 
-    def _build_requested_category_subtasks(self, snapshot: object) -> list[dict]:
-        marks = getattr(snapshot, "marks", None) or []
-        request = str(self.user_request or "").strip()
-        if not marks or not request:
-            return []
-
+    def _build_page_fact_subtasks(self, analysis: dict) -> list[dict]:
+        resolver = getattr(self, "_get_grouping_semantics", None)
+        grouping = dict(resolver() or {}) if callable(resolver) else {}
+        requested = self._get_requested_category_filters(grouping)
         subtasks: list[dict] = []
-        seen_labels: set[str] = set()
-        interactive_roles = {"link", "tab", "menuitem", "button", "option", "treeitem"}
-        for mark in marks:
-            tag = str(getattr(mark, "tag", "") or "").strip().lower()
-            role = str(getattr(mark, "role", "") or "").strip().lower()
-            if tag not in {"a", "button", "li", "div", "span"} and role not in interactive_roles:
+        seen_scope_keys: set[str] = set()
+
+        for raw in self._get_page_fact_candidates(analysis):
+            candidate = PlannerCategoryCandidate.model_validate(raw)
+            label = str(candidate.name or candidate.link_text).strip()
+            if not label:
+                continue
+            if requested and not self._matches_requested_categories(label, requested):
                 continue
 
-            label = str(getattr(mark, "text", "") or getattr(mark, "aria_label", "") or "").strip()
-            if not self._is_requested_category_label(label, request):
+            scope_key, scope_label = self._build_candidate_scope(label, candidate)
+            if scope_key in seen_scope_keys:
                 continue
-            if label in seen_labels:
-                continue
-            seen_labels.add(label)
+            seen_scope_keys.add(scope_key)
+            task_description = (
+                str(candidate.task_description or "").strip()
+                or self._build_category_candidate_task_description(label)
+            )
             subtasks.append(
                 {
                     "name": label,
-                    "mark_id": int(getattr(mark, "mark_id")),
-                    "link_text": label,
-                    "estimated_pages": None,
-                    "task_description": self._build_requested_category_task_description(label),
+                    "mark_id": candidate.mark_id,
+                    "link_text": candidate.link_text or label,
+                    "estimated_pages": candidate.estimated_pages,
+                    "task_description": task_description,
+                    "scope_key": scope_key,
+                    "scope_label": scope_label,
                 }
             )
         return subtasks
 
-    def _is_requested_category_label(self, label: str, request: str) -> bool:
-        text = str(label or "").strip()
-        if not text:
-            return False
-        if len(text) > 12:
-            return False
-        if any(ch.isdigit() for ch in text):
-            return False
-        if text not in request:
-            return False
-        noise_tokens = ("项目", "名称", "网站", "分类", "招标", "采购")
-        return text not in noise_tokens
+    def _get_requested_category_filters(self, grouping: dict) -> list[str]:
+        mode = str(grouping.get("category_discovery_mode") or "").strip().lower()
+        if mode != "manual":
+            return []
+        return [str(item or "").strip() for item in list(grouping.get("requested_categories") or []) if str(item or "").strip()]
 
-    def _build_requested_category_task_description(self, category_name: str) -> str:
-        return (
-            f"进入“{category_name}”分类，采集该分类下前 10 条招标/采购项目记录，"
-            "提取项目名称与所属分类名称。"
-        )
+    def _matches_requested_categories(self, label: str, requested_categories: list[str]) -> bool:
+        candidate_tokens = {
+            self._normalize_semantic_label(label),
+            self._normalize_category_leaf_label(label),
+            *[
+                self._normalize_semantic_label(item)
+                for item in self._expand_category_segments(label)
+            ],
+        }
+        candidate_tokens = {item for item in candidate_tokens if item}
+        for requested in requested_categories:
+            requested_tokens = {
+                self._normalize_semantic_label(requested),
+                self._normalize_category_leaf_label(requested),
+                *[
+                    self._normalize_semantic_label(item)
+                    for item in self._expand_category_segments(requested)
+                ],
+            }
+            if candidate_tokens.intersection({item for item in requested_tokens if item}):
+                return True
+        return False
+
+    def _build_candidate_scope(
+        self,
+        label: str,
+        candidate: PlannerCategoryCandidate,
+    ) -> tuple[str, str]:
+        scope_context = self._build_subtask_context(label)
+        scope_path = self._extract_category_path(scope_context)
+        scope_key = str(candidate.scope_key or "").strip()
+        if not scope_key:
+            normalized = [self._normalize_semantic_label(item) for item in scope_path if item]
+            scope_key = "category:" + " > ".join(item for item in normalized if item)
+        scope_label = str(candidate.scope_label or "").strip() or " > ".join(scope_path) or label
+        return scope_key, scope_label
+
+    def _build_category_candidate_task_description(self, category_name: str) -> str:
+        return self._build_expand_task_description(self._build_subtask_context(category_name))
+
+    def _page_facts_support_grouped_split(self, result: dict) -> bool:
+        if self._get_page_fact_candidates(result):
+            return True
+        if bool(result.get("category_controls_present")):
+            return True
+        if bool(result.get("supports_same_page_variant_switch")):
+            return True
+        return False
+
+    def _get_page_fact_candidates(self, result: dict) -> list[dict]:
+        return list(result.get("category_candidates") or [])
+
+    def _get_analysis_candidates(self, result: dict) -> list[dict]:
+        category_candidates = list(result.get("category_candidates") or [])
+        if category_candidates:
+            return category_candidates
+        return list(result.get("subtasks") or [])
+
+    def _set_analysis_candidates(self, result: dict, items: list[dict]) -> None:
+        if "category_candidates" in result or list(result.get("category_candidates") or []):
+            result["category_candidates"] = list(items)
+        result["subtasks"] = list(items)
 
     def _extract_subtask_names(self, result: dict) -> list[str]:
         names: list[str] = []
-        for item in list(result.get("subtasks") or []):
+        for item in self._get_analysis_candidates(result):
             name = str(item.get("name") or item.get("link_text") or "").strip()
             if name:
                 names.append(name)

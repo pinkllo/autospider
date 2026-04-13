@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ..config import config
+from ..grouping_semantics import normalize_grouping_semantics
 from ..llm_contracts import validate_task_clarifier_payload
 from ..protocol import (
     extract_json_dict_from_llm_payload,
@@ -143,6 +144,12 @@ class TaskClarifier:
                         "reason": result.reason,
                         "has_task": result.task is not None,
                         "task_overrides": {
+                            "group_by": result.task.group_by if result.task else "none",
+                            "per_group_target_count": result.task.per_group_target_count if result.task else None,
+                            "total_target_count": result.task.total_target_count if result.task else None,
+                            "category_discovery_mode": result.task.category_discovery_mode if result.task else "auto",
+                            "requested_categories": result.task.requested_categories if result.task else [],
+                            "category_examples": result.task.category_examples if result.task else [],
                             "max_pages": result.task.max_pages if result.task else None,
                             "target_url_count": result.task.target_url_count if result.task else None,
                             "consumer_concurrency": result.task.consumer_concurrency if result.task else None,
@@ -269,6 +276,7 @@ class TaskClarifier:
         list_url = str(payload.get("list_url") or "").strip()
         task_description = str(payload.get("task_description") or "").strip()
         fields = self._parse_fields(payload.get("fields"))
+        grouping = normalize_grouping_semantics(payload)
         max_pages = _to_int(payload.get("max_pages"))
         target_url_count = _to_int(payload.get("target_url_count"))
         consumer_concurrency = _to_int(payload.get("consumer_concurrency"))
@@ -292,6 +300,12 @@ class TaskClarifier:
             list_url=list_url,
             task_description=task_description,
             fields=fields,
+            group_by=grouping["group_by"],
+            per_group_target_count=grouping["per_group_target_count"],
+            total_target_count=grouping["total_target_count"],
+            category_discovery_mode=grouping["category_discovery_mode"],
+            requested_categories=grouping["requested_categories"],
+            category_examples=grouping["category_examples"],
             max_pages=max_pages,
             target_url_count=target_url_count,
             consumer_concurrency=consumer_concurrency,

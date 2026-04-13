@@ -5,31 +5,38 @@
 **[English](README_en.md)** | 中文
 
 AutoSpider 是一个基于 `LangGraph + Playwright + SoM(Set-of-Mark)` 的纯视觉网页采集 Agent。
-它可以自动完成列表页探索、详情页 URL 收集、字段规则归纳（XPath）以及批量抽取，并通过独创的"智能规划引擎"实现大型复杂站点的全自动全站爬取。
+它通过 planning-first 的 chat 主链路，将自然语言需求澄清、历史任务复用、分组规划、多子任务执行和结果聚合串成一条可恢复的公开工作流。
 
 ## 🌟 核心能力
 
-- **全自然语言对话交互 (`chat-pipeline`)**：只需输入一句话，系统会通过多轮 AI 澄清对话 (`TaskClarifier`) 自动对齐需求、推断目标及提取字段配置，随后一键启动完整的数据采集流水线。
-- **智能规划引擎 (Planning Agent)**：面对多分类/多频道的复杂站点，内置 `TaskPlanner` 能够利用 SoM 视觉大模型技术，自主分析页面导航结构，将大型爬取任务自动拆解为多个独立稳定的子任务，彻底攻克规模化采集难题。
+- **Planning-first 对话主链路 (`chat-pipeline`)**：只需输入一句话，系统会先执行多轮 AI 澄清 (`TaskClarifier`)、历史任务匹配、人工 review，再进入 planning 与 multi-dispatch。
+- **显式分组采集语义**：当任务被澄清为 `group_by=category` 时，系统会以页面上实际发现的分类为分组单位，`per_group_target_count` 表示“每个分类抓多少条”，而不是全局总数。
+- **分类事实来自页面与子任务上下文**：分类集合由 planner 根据页面事实发现；进入执行期后，分类字段来自 subtask 的 `scope` / `fixed_fields`，而不是到详情页再猜测分类。
 - **强健稳定的全自动 XPath 归纳**：不仅自主学习全站导航步骤，还运用多种策略（深度绑定 `id`, `class`, `data-*` 等语义属性）归纳并优选最稳定的多重属性 XPath。并内置"内省与自适应挽救机制（Salvage Mechanism）"，自动修正极少数提取异常的字段。
 - **自适应网络拦截与人工接管 (Guard)**：全新的网络与行为监控机制，遇到需要登录、人机验证等情况会自动弹出系统横幅，实时等待用户接管处理，并自动持久化 Cookie 与会话状态（`.auth/`）。
-- **灵活执行后端**：底层仍保留统一 Graph 编排与并发流水线能力，支持断点续爬、动态速率控制，以及 `memory` / `file` / `redis` 多通道消息队列机制；对外 CLI 已收口为更少的主命令。
+- **语义身份驱动的历史复用**：历史任务复用不再只看 URL 或文案，系统会基于归一化后的 strategy payload 与字段集合生成 `semantic_signature`，用于对齐历史记录与当前意图。
 
 ## 🏗️ 系统架构
 
-AutoSpider 采用基于 LangGraph 的状态图架构，通过统一入口节点进入 `chat-pipeline` 主链路。当前对外执行主路径已收敛为 `chat-pipeline`；`resume` 与 `db-init` 仅作为运维命令保留。在当前实现中，chat 发起的任务会固定先进入 planning，再进入 multi-dispatch：
+AutoSpider 采用基于 LangGraph 的状态图架构。当前公开 CLI 只有 3 个命令：`chat-pipeline`、`resume`、`db-init`。其中真正的采集入口只有 `chat-pipeline`，并且 chat 发起的任务固定先进入 planning，再进入分发监控与世界模型反馈，最终才聚合结果：
 
 ```mermaid
 graph LR
-  A["🚀 CLI 入口"] --> B["🔀 route_entry<br/>入口路由"]
-  B --> C["💬 聊天交互路线"]
-  B --> D["🔧 单流管道路线"]
-  B --> F["🧠 多任务规划路线"]
-
-  C --> G["📤 收尾整理"]
-  D --> G
-  F --> G
-  G --> H["🔴 结束"]
+  A["autospider chat-pipeline"] --> B["chat_clarify"]
+  B --> C["chat_history_match"]
+  C --> D["chat_review_task"]
+  D --> E["chat_prepare_execution_handoff"]
+  E --> F["plan_node"]
+  F --> G["multi_dispatch_subgraph"]
+  G --> H["monitor_dispatch_node"]
+  H --> I["update_world_model_node"]
+  I --> J{"需要重规划?"}
+  J -->|是| K["plan_strategy_node"]
+  K --> F
+  J -->|否| L["aggregate_node"]
+  L --> M["finalize"]
+  N["autospider resume"] --> O["恢复中断线程"]
+  P["autospider db-init"] --> Q["初始化 PostgreSQL schema"]
 ```
 
 > 📊 完整的带功能描述的节点级流程图请参见 [`main_graph.mmd`](main_graph.mmd)
@@ -38,9 +45,9 @@ graph LR
 
 | 入口模式          | 执行路线                                                                 | 功能说明                                  |
 | :---------------- | :----------------------------------------------------------------------- | :---------------------------------------- |
-| `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → aggregate_node | 💬 正式主链路：自然语言澄清后进入 planning-first 并发执行 |
+| `chat_pipeline` | chat_clarify → chat_history_match → chat_review_task → chat_prepare_execution_handoff → plan_node → multi_dispatch_subgraph → monitor_dispatch_node → update_world_model_node → (按需重规划) → aggregate_node | 💬 正式主链路：自然语言澄清后进入 planning-first，并允许基于反馈重规划 |
 
-> `collect_urls`、`generate_config`、`batch_collect`、`field_extract`、`multi_pipeline` 等旧内部能力节点不再作为正式入口维护；如需保留，仅视为迁移期内部实现细节。
+> `collect_urls`、`generate_config`、`batch_collect`、`field_extract`、`multi_pipeline` 等旧能力仅保留为内部实现细节，不再作为 README 对外入口承诺。
 
 ## ⚙️ 运行要求
 
@@ -74,14 +81,14 @@ BAILIAN_API_BASE=https://api.siliconflow.cn/v1
 BAILIAN_MODEL=qwen3.5-plus
 
 # 规划器专用模型（如需单独指定更强大的视觉模型）
-# PLANNER_API_KEY=your_planner_key
-# PLANNER_MODEL=qwen-vl-plus
+# SILICON_PLANNER_API_KEY=your_planner_key
+# SILICON_PLANNER_MODEL=qwen-vl-plus
 
 HEADLESS=false
 PIPELINE_MODE=memory
 ```
 
-*注意：`chat-pipeline` 中若未显式传入 `--mode`，默认模式来自 `PIPELINE_MODE`；若未配置 Redis 请务必使用 `memory` 模式。*
+*注意：`chat-pipeline` 中若未显式传入 `--mode`，默认模式来自 `PIPELINE_MODE`。当前代码中的可选执行后端值为 `memory` / `file` / `redis`。如果已安装 Redis 相关依赖并完成配置，可再切换到 `redis`。*
 
 ## 🚀 快速开始
 
@@ -91,8 +98,15 @@ PIPELINE_MODE=memory
 
 ```bash
 # 自动澄清需求，并进入 planning-first 的 chat 主链路
-autospider chat-pipeline -r "帮我采集 example 网站所有分类的公告列表，字段包含标题和发布时间"
+autospider chat-pipeline -r "帮我采集 example 网站页面上所有分类下的专业列表，每个分类抓 3 条，字段包含专业名称和所属分类"
 ```
+
+### 分组采集语义
+
+- `group_by=category`：按页面上发现的分类拆分子任务，而不是把“分类”当作详情页字段临时猜测。
+- `per_group_target_count`：每个分类的目标条数；若页面最终发现 5 个分类，系统会按 5 个分组分别执行。
+- `category_discovery_mode=auto`：默认由页面事实自动发现分类；只有显式指定 `requested_categories` 时才会进入手工限定分组。
+- 分类字段写入结果时来自 subtask 的 `scope` / `fixed_fields`，用于覆盖详情页里可能缺失或不稳定的分类展示。
 
 ### 1) 恢复中断执行
 
@@ -118,7 +132,7 @@ src/autospider/
 ├── common/                    # 过渡期通用基础设施（后续逐步拆分，不再新增业务模块）
 │   ├── config.py              #   全局配置管理
 │   ├── browser/               #   BrowserRuntimeSession 主生命周期抽象（BrowserSession 兼容层）
-│   ├── channel/               #   消息队列 (memory / file / redis)
+│   ├── channel/               #   Pipeline 后端通道 (memory / file / redis)
 │   ├── llm/                   #   LLM 对话澄清 (TaskClarifier) 与决策器
 │   ├── som/                   #   Set-of-Mark 视觉标注引擎
 │   ├── storage/               #   持久化存储与 Redis 管理

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .fields import FieldDefinition
 
@@ -23,6 +23,12 @@ class ClarifiedTask:
     list_url: str
     task_description: str
     fields: list[FieldDefinition]
+    group_by: str = "none"
+    per_group_target_count: int | None = None
+    total_target_count: int | None = None
+    category_discovery_mode: str = "auto"
+    requested_categories: list[str] = field(default_factory=list)
+    category_examples: list[str] = field(default_factory=list)
     max_pages: int | None = None
     target_url_count: int | None = None
     consumer_concurrency: int | None = None

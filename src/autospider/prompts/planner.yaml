@@ -19,9 +19,11 @@ analyze_site_system_prompt: |
   1. **先判断页面主体**
      - 如果截图中主体区域已经展示多条同质记录（标题、日期、来源、摘要、卡片、表格行等），优先判断为 `list_page`
      - 如果截图中主体区域主要是导航菜单、分类入口、频道宫格、栏目 tab，且没有稳定记录列表，判断为 `category`
-  2. **再判断用户是否要求“按分类分别采集”**
-     - 只有当用户明确要求“按分类分别采集 / 每类采集 / 各分类采集”，并且当前页面存在真正的分类入口时，才可以把“有列表也有分类”的页面判断为 `category`
-     - 如果用户没有明确要求按分类分别采集，只要当前页已经是可采集列表，就判断为 `list_page`
+  2. **再判断结构化分组语义是否要求按分类拆分**
+     - 系统会提供“结构化分组语义”，其中 `group_by=category` 表示任务目标是按分类分组规划；`group_by=none` 表示不要为了分组而强行拆分
+     - 只有当 `group_by=category` 且当前页面确实存在真实分类入口、能产生新的分类语义或新的页面状态时，才可以把“有列表也有分类”的页面判断为 `category`
+     - 如果 `group_by=none`，只要当前页已经是可采集列表，就判断为 `list_page`
+     - 如果 `category_discovery_mode=manual` 且提供了 `requested_categories`，应优先在页面事实中确认这些指定分类；不要从原始用户措辞里反推分类名
   3. **最后判断当前候选是否真的代表新的分类语义**
      - 只有会进入新的分类语义、或产生新的页面状态的入口，才可以作为 `subtasks`
      - 如果当前分类路径已经落到具体分类，而页面上剩余的是兄弟 tab、兄弟分类切换、交易环节切换、筛选项切换，这属于当前列表页内部状态切换，应判断为 `list_page`
@@ -42,25 +44,46 @@ analyze_site_system_prompt: |
     "task_description": "该页面的采集目标描述（仅 list_page 时需要）",
     "site_structure": "网站结构简述",
     "observations": "用 1~4 条证据短句描述页面关键信号，建议用分号分隔。例如：主体=公告列表; 当前选中=工程建设; 候选项多为兄弟切换; 存在分页",
+    "category_controls_present": true,
+    "current_selected_category": "当前高亮/已选中的分类名称；没有就填空字符串",
+    "supports_same_page_variant_switch": true,
+    "category_candidates": [
+      {
+        "name": "页面中识别出的分类名称",
+        "mark_id": 42,
+        "link_text": "页面可见原文",
+        "estimated_pages": 10,
+        "task_description": "若进入该分类，建议的采集/扩展目标描述",
+        "scope_key": "预留的稳定语义作用域 key；拿不准可留空",
+        "scope_label": "预留的稳定语义作用域 label；拿不准可留空"
+      }
+    ],
     "subtasks": [
       {
         "name": "子分类名称（如：招标公告）",
         "mark_id": 42,
         "link_text": "该分类链接的文字",
         "estimated_pages": 10,
-        "task_description": "该子分类的采集目标描述"
+        "task_description": "该子分类的采集目标描述",
+        "scope_key": "预留的稳定语义作用域 key；拿不准可留空",
+        "scope_label": "预留的稳定语义作用域 label；拿不准可留空"
       }
     ]
   }
 
   ## 注意事项
   - page_type 必填，必须是 "list_page" 或 "category"
+  - `category_controls_present` / `current_selected_category` / `supports_same_page_variant_switch` / `category_candidates` 是页面事实字段，优先基于截图主体与候选元素列表填写
+  - 先判断并填写 `category_candidates`，再决定是否把其中一部分写入 `subtasks`
   - `subtasks` 仅当 `page_type == "category"` 时填写；如果是 `list_page`，返回空数组即可，不要虚构子任务
-  - 当用户明确点名多个分类（如“工程建设”“土地矿业”）时，优先把这些分类作为 subtasks 返回
+  - 不要把“原始用户措辞里是否出现某个分类名”当作拆分依据；拆分依据应来自 `group_by` / `category_discovery_mode` / `requested_categories` 与当前页面事实
+  - 即使用户只给了一个分类示例，也要把页面中真实可见的同层相关分类完整写入 `category_candidates`
+  - 如果 `category_discovery_mode=manual` 且 `requested_categories` 非空，优先把页面事实中匹配这些指定分类的候选写入 `subtasks`
   - `link_text` 必填，必须是页面上可见的分类/频道原文；不要改写、缩写、补字、总结
   - mark_id 可选；如果无法确定，不要强猜
   - subtasks 中的每个 `name` 要有明确中文语义，且与 `link_text` 对应
   - `task_description` 要能直接指导爬虫采集，避免空话，如“采集当前分类下前 10 条公告标题与发布时间”
+  - `scope_key` / `scope_label` 只是后续语义分组占位；拿不准可以留空，但不要编造与页面无关的值
   - `observations` 不要写成长篇分析，只写对后续规划有帮助的证据
   - 不要把以下内容作为 subtasks：祖先分类、当前已选分类、返回上一级/首页入口、分页控件、排序控件、时间筛选、搜索按钮、查看更多、下载按钮、详情链接
   - 如果候选项只是同层兄弟分类切换或筛选项，不应继续向下拆分
@@ -85,6 +108,9 @@ analyze_site_user_message: |
 
   ## 候选分类元素（供你参考）
   {{candidate_elements}}
+
+  ## 结构化分组语义
+  {{grouping_semantics}}
 
   ## 已选中的站点 skills
   {{selected_skills_context}}

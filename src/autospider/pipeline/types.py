@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from ..common.grouping_semantics import normalize_grouping_semantics
 
 
 def _parse_optional_bool(raw_value: Any) -> bool | None:
@@ -104,7 +106,16 @@ class ExecutionRequest(BaseModel):
     site_url: str = ""
     request: str = ""
     task_description: str = ""
+    semantic_signature: str = ""
+    strategy_payload: dict[str, Any] = Field(default_factory=dict)
+    matched_registry_id: str = ""
     fields: list[dict[str, Any]] = Field(default_factory=list)
+    group_by: Literal["none", "category"] = "none"
+    per_group_target_count: int | None = None
+    total_target_count: int | None = None
+    category_discovery_mode: Literal["auto", "manual"] = "auto"
+    requested_categories: list[str] = Field(default_factory=list)
+    category_examples: list[str] = Field(default_factory=list)
     execution_brief: dict[str, Any] = Field(default_factory=dict)
     output_dir: str = "output"
     headless: bool | None = None
@@ -145,6 +156,7 @@ class ExecutionRequest(BaseModel):
         guard_intervention_mode: str = "interrupt",
     ) -> "ExecutionRequest":
         payload = dict(params or {})
+        grouping = normalize_grouping_semantics(payload)
         world_snapshot = _mapping_payload(payload.get("world_snapshot"))
         headless = _parse_optional_bool(payload["headless"]) if "headless" in payload else None
         task_description = str(payload.get("task_description") or "").strip()
@@ -155,7 +167,16 @@ class ExecutionRequest(BaseModel):
             site_url=site_url,
             request=request,
             task_description=task_description,
+            semantic_signature=str(payload.get("semantic_signature") or "").strip(),
+            strategy_payload=dict(payload.get("strategy_payload") or {}),
+            matched_registry_id=str(payload.get("matched_registry_id") or "").strip(),
             fields=list(payload.get("fields") or []),
+            group_by=grouping["group_by"],
+            per_group_target_count=grouping["per_group_target_count"],
+            total_target_count=grouping["total_target_count"],
+            category_discovery_mode=grouping["category_discovery_mode"],
+            requested_categories=grouping["requested_categories"],
+            category_examples=grouping["category_examples"],
             execution_brief=dict(payload.get("execution_brief") or {}),
             output_dir=str(payload.get("output_dir") or "output"),
             headless=headless,
@@ -348,6 +369,8 @@ class TaskIdentity:
     page_state_signature: str = ""
     variant_label: str = ""
     task_description: str = ""
+    semantic_signature: str = ""
+    strategy_payload: dict[str, Any] = field(default_factory=dict)
     field_names: tuple[str, ...] = ()
 
 

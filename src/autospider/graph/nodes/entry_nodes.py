@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -13,6 +14,7 @@ from langgraph.types import interrupt
 
 from ...common.config import config
 from ...common.experience import SkillRuntime
+from ...common.grouping_semantics import normalize_grouping_semantics
 from ...common.llm import TaskClarifier
 from ...common.llm.streaming import ainvoke_with_stream
 from ...common.llm.trace_logger import append_llm_trace
@@ -25,8 +27,9 @@ from ...common.protocol import (
 from ...common.storage.task_run_query_service import TaskRunQueryService
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
+from ...pipeline.helpers import resolve_semantic_identity
 from ...common.validators import validate_task_description, validate_url
-from ...pipeline.runtime_controls import resolve_concurrency_settings
+from ...graph.execution_handoff import build_chat_execution_params, build_chat_review_payload
 
 logger = get_logger(__name__)
 
@@ -96,6 +99,12 @@ def _clarified_task_to_dict(task: ClarifiedTask) -> dict[str, Any]:
         "list_url": task.list_url,
         "task_description": task.task_description,
         "fields": [_field_to_dict(field) for field in task.fields],
+        "group_by": task.group_by,
+        "per_group_target_count": task.per_group_target_count,
+        "total_target_count": task.total_target_count,
+        "category_discovery_mode": task.category_discovery_mode,
+        "requested_categories": list(task.requested_categories),
+        "category_examples": list(task.category_examples),
         "max_pages": task.max_pages,
         "target_url_count": task.target_url_count,
         "consumer_concurrency": task.consumer_concurrency,
@@ -195,12 +204,6 @@ def _to_positive_int(value: Any, default: int) -> int:
 
 
 
-def _coalesce_cli_option(cli_args: dict[str, Any], key: str, fallback: Any) -> Any:
-    """CLI 显式传值优先；CLI 为 None 时保留上游已解析出的任务参数。"""
-    value = cli_args.get(key)
-    return fallback if value is None else value
-
-
 def _conversation_state(state: dict[str, Any]) -> dict[str, Any]:
     return dict(state.get("conversation") or {})
 
@@ -259,63 +262,18 @@ def _normalize_override_task(raw_task: Any) -> dict[str, Any]:
     if not normalized_fields:
         raise ValueError("字段不能为空")
 
+    grouping = normalize_grouping_semantics(raw_task)
     return {
         "intent": str(raw_task.get("intent") or "").strip(),
         "list_url": validate_url(str(raw_task.get("list_url") or "")),
         "task_description": validate_task_description(str(raw_task.get("task_description") or "")),
         "fields": normalized_fields,
+        **grouping,
         "max_pages": raw_task.get("max_pages"),
         "target_url_count": raw_task.get("target_url_count"),
         "consumer_concurrency": raw_task.get("consumer_concurrency"),
         "field_explore_count": raw_task.get("field_explore_count"),
         "field_validate_count": raw_task.get("field_validate_count"),
-    }
-
-
-
-def _build_review_payload(
-    *,
-    state: dict[str, Any],
-    task: dict[str, Any],
-    dispatch_mode: str,
-) -> dict[str, Any]:
-    cli_args = dict(state.get("cli_args") or {})
-    base_options = _apply_serial_mode_overrides({
-        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
-        "target_url_count": _coalesce_cli_option(cli_args, "target_url_count", task.get("target_url_count")),
-        "consumer_concurrency": _coalesce_cli_option(
-            cli_args,
-            "consumer_concurrency",
-            task.get("consumer_concurrency"),
-        ),
-        "field_explore_count": _coalesce_cli_option(
-            cli_args,
-            "field_explore_count",
-            task.get("field_explore_count"),
-        ),
-        "field_validate_count": _coalesce_cli_option(
-            cli_args,
-            "field_validate_count",
-            task.get("field_validate_count"),
-        ),
-        "pipeline_mode": cli_args.get("pipeline_mode") or "默认",
-        "execution_mode": dispatch_mode,
-        "headless": cli_args["headless"] if "headless" in cli_args else None,
-        "output_dir": str(cli_args.get("output_dir") or "output"),
-        "serial_mode": cli_args.get("serial_mode"),
-        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
-        "global_browser_budget": cli_args.get("global_browser_budget"),
-    })
-    concurrency = resolve_concurrency_settings(base_options)
-    effective_options = dict(base_options)
-    effective_options["consumer_concurrency"] = concurrency.consumer_concurrency
-    effective_options["max_concurrent"] = concurrency.max_concurrent
-    effective_options["global_browser_budget"] = concurrency.global_browser_budget
-    return {
-        "type": "chat_review",
-        "thread_id": str(_meta_value(state, "thread_id") or ""),
-        "clarified_task": task,
-        "effective_options": effective_options,
     }
 
 
@@ -471,7 +429,9 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
     dispatch_mode = _resolve_chat_dispatch_mode()
-    review_payload = interrupt(_build_review_payload(state=state, task=task, dispatch_mode=dispatch_mode))
+    review_payload = interrupt(
+        build_chat_review_payload(state=state, task=task, dispatch_mode=dispatch_mode)
+    )
     action_payload = review_payload if isinstance(review_payload, dict) else {"action": review_payload}
     action = str(action_payload.get("action") or "approve").strip().lower()
 
@@ -523,55 +483,16 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
 
 def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
     """chat-pipeline 进入 planning / multi-dispatch 前的参数交接节点。"""
-    cli_args = dict(state.get("cli_args") or {})
     task = dict(_conversation_value(state, "clarified_task") or {})
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
     dispatch_mode = _resolve_chat_dispatch_mode()
-    # `clarified_task` 是 chat 阶段产物，这里只做进入 planning 的参数交接。
-    base_params = _apply_serial_mode_overrides({
-        "list_url": task.get("list_url", ""),
-        "task_description": task.get("task_description", ""),
-        "fields": [_field_to_dict(item) for item in task.get("fields", [])],
-        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
-        "target_url_count": _coalesce_cli_option(
-            cli_args,
-            "target_url_count",
-            task.get("target_url_count"),
-        ),
-        "consumer_concurrency": _coalesce_cli_option(
-            cli_args,
-            "consumer_concurrency",
-            task.get("consumer_concurrency"),
-        ),
-        "field_explore_count": _coalesce_cli_option(
-            cli_args,
-            "field_explore_count",
-            task.get("field_explore_count"),
-        ),
-        "field_validate_count": _coalesce_cli_option(
-            cli_args,
-            "field_validate_count",
-            task.get("field_validate_count"),
-        ),
-        "pipeline_mode": cli_args.get("pipeline_mode"),
-        "headless": cli_args["headless"] if "headless" in cli_args else None,
-        "output_dir": str(cli_args.get("output_dir") or "output"),
-        "serial_mode": cli_args.get("serial_mode"),
-        "request": str(cli_args.get("request") or task.get("task_description") or ""),
-        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
-        "execution_mode_resolved": dispatch_mode,
-        "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
-        "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
-        "selected_skills": list(_conversation_value(state, "selected_skills") or []),
-        "global_browser_budget": cli_args.get("global_browser_budget"),
-    })
-    concurrency = resolve_concurrency_settings(base_params)
-    normalized = _ensure_runtime_payload_slots(dict(base_params))
-    normalized["consumer_concurrency"] = concurrency.consumer_concurrency
-    normalized["max_concurrent"] = concurrency.max_concurrent
-    normalized["global_browser_budget"] = concurrency.global_browser_budget
+    normalized = build_chat_execution_params(
+        state=state,
+        task=task,
+        dispatch_mode=dispatch_mode,
+    )
 
     return {
         **_ok({"execution_mode_resolved": "multi"}),
@@ -603,8 +524,14 @@ def _llm_model_name(llm: Any) -> str | None:
     return getattr(llm, "model_name", None) or getattr(llm, "model", None) or config.llm.model
 
 
+def _current_semantic_identity(task: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    return resolve_semantic_identity(task)
+
+
 async def _llm_rank_history(
     current_desc: str,
+    current_semantic_signature: str,
+    current_strategy_payload: dict[str, Any],
     history: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """用 LLM 从历史任务中筛选并排序最多 3 个与当前意图最相关的候选。
@@ -620,12 +547,26 @@ async def _llm_rank_history(
         fields_text = ", ".join(fields) if fields else "未知"
         count = h.get("collected_count", 0)
         desc = h.get("task_description", "")
-        lines.append(f"{i + 1}. [{desc}] (采集字段: {fields_text}，已采集 {count} 条)")
+        semantic_signature = str(h.get("semantic_signature") or "")
+        strategy_payload = json.dumps(
+            dict(h.get("strategy_payload") or {}),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        lines.append(
+            f"{i + 1}. [{desc}] "
+            f"(采集字段: {fields_text}，已采集 {count} 条，"
+            f"semantic_signature: {semantic_signature or '无'}，"
+            f"strategy_payload: {strategy_payload})"
+        )
     candidates_text = "\n".join(lines)
+    current_strategy_text = json.dumps(current_strategy_payload, ensure_ascii=False, sort_keys=True)
 
     prompt = (
         "你是一个任务意图匹配助手。\n\n"
         f"当前用户的新任务描述：[{current_desc}]\n\n"
+        f"当前任务的语义身份：semantic_signature={current_semantic_signature}，"
+        f"strategy_payload={current_strategy_text}\n\n"
         f"该网站下曾经执行过的历史任务：\n{candidates_text}\n\n"
         "请从历史任务中选出与当前任务**采集意图最相关**的，最多选 3 个。\n"
         "按相关性从高到低排列，返回它们的序号列表。\n\n"
@@ -724,9 +665,11 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     如果用户已在本轮对话中完成过选择（补充需求重新生成场景），则直接跳过。
     """
     task = dict(_conversation_value(state, "clarified_task") or {})
+    semantic_signature, strategy_payload = _current_semantic_identity(task)
     signature_payload = {
         "list_url": str(task.get("list_url") or ""),
-        "task_description": str(task.get("task_description") or ""),
+        "semantic_signature": semantic_signature,
+        "strategy_payload": strategy_payload,
         "fields": [_field_to_dict(item) for item in list(task.get("fields") or [])],
     }
     task_signature = hashlib.sha1(str(signature_payload).encode("utf-8")).hexdigest()
@@ -747,7 +690,12 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
         return {**_ok(), "history_match_done": True}
 
     # 2. 调用 LLM 筛选最多 3 个最相关的候选
-    candidates = await _llm_rank_history(current_desc, history)
+    candidates = await _llm_rank_history(
+        current_desc,
+        semantic_signature,
+        strategy_payload,
+        history,
+    )
 
     if not candidates:
         return {**_ok(), "history_match_done": True}
@@ -763,6 +711,8 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
                 f"（已采集 {candidate.get('collected_count', 0)} 条）"
             ),
             "registry_id": candidate.get("registry_id", ""),
+            "semantic_signature": str(candidate.get("semantic_signature") or ""),
+            "strategy_payload": dict(candidate.get("strategy_payload") or {}),
             "task_description": candidate["task_description"],
         })
     options.append({
@@ -789,13 +739,16 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
             break
 
     if selected:
-        # 保留用户原始描述，用历史描述覆盖以命中缓存/进度
-        task["original_task_description"] = task.get("task_description", "")
-        task["task_description"] = selected["task_description"]
+        selected_strategy = dict(selected.get("strategy_payload") or {})
+        task["matched_registry_id"] = selected["registry_id"]
+        task["semantic_signature"] = str(selected.get("semantic_signature") or semantic_signature)
+        task["strategy_payload"] = selected_strategy
+        if selected_strategy:
+            task.update(selected_strategy)
         logger.info(
-            "[HistoryMatch] 用户选择复用历史任务: %s (原始意图: %s)",
+            "[HistoryMatch] 用户选择复用历史任务: %s (当前意图保持: %s)",
             selected["task_description"][:60],
-            task["original_task_description"][:60],
+            str(task.get("task_description") or "")[:60],
         )
         return {
             **_ok({"history_reused": True, "matched_registry_id": selected["registry_id"]}),

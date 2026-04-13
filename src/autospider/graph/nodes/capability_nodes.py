@@ -271,6 +271,7 @@ async def _plan_request(request) -> dict[str, Any]:
             site_url=request.site_url or request.list_url,
             user_request=request.request or request.task_description,
             output_dir=request.output_dir,
+            planner_intent=request.model_dump(mode="python"),
         )
         runtime = SkillRuntime()
         planner_url = request.site_url or request.list_url

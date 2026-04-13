@@ -30,6 +30,7 @@ from ...domain.planning import (
     PlanJournalEntry,
     PlanNode,
     PlanNodeType,
+    PlannerIntent,
     SubTask,
     SubTaskMode,
     TaskPlan,
@@ -247,6 +248,7 @@ class TaskPlanner(
         use_main_model: bool = False,
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
+        planner_intent: PlannerIntent | dict[str, Any] | None = None,
     ):
         """初始化任务规划器。
 
@@ -263,6 +265,11 @@ class TaskPlanner(
         self.output_dir = output_dir
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
+        self.planner_intent = (
+            planner_intent
+            if isinstance(planner_intent, PlannerIntent)
+            else PlannerIntent.from_payload(planner_intent)
+        )
         self._knowledge_entries: list[dict] = []  # 规划发现过程中收集的知识条目
         self._journal_entries: list[dict] = []
         self._sibling_category_registry: dict[str, set[str]] = {}
@@ -537,6 +544,22 @@ class TaskPlanner(
         result["observations"] = f"{observations}\n{note}".strip() if observations else note
         return result
 
+    def _get_grouping_semantics(self) -> dict[str, Any]:
+        return self.planner_intent.model_dump(mode="python")
+
+    def _format_grouping_semantics(self) -> str:
+        grouping = self._get_grouping_semantics()
+        return "\n".join(
+            [
+                f"- group_by: {grouping['group_by']}",
+                f"- per_group_target_count: {grouping['per_group_target_count']}",
+                f"- total_target_count: {grouping['total_target_count']}",
+                f"- category_discovery_mode: {grouping['category_discovery_mode']}",
+                f"- requested_categories: {grouping['requested_categories'] or []}",
+                f"- category_examples: {grouping['category_examples'] or []}",
+            ]
+        )
+
     def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
         """构造 URL + nav_steps 的稳定状态签名。"""
         return self._page_state.build_page_state_signature(current_url, nav_steps)
@@ -592,6 +615,7 @@ class TaskPlanner(
                 "current_category_path": self._format_context_path(node_context),
                 "recent_actions": self._format_recent_actions(nav_steps),
                 "candidate_elements": self._build_planner_candidates(snapshot),
+                "grouping_semantics": self._format_grouping_semantics(),
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -634,6 +658,7 @@ class TaskPlanner(
                         "node_context": dict(node_context or {}),
                         "nav_steps": list(nav_steps or []),
                         "candidate_count": len(getattr(snapshot, "marks", []) or []),
+                        "grouping_semantics": self._get_grouping_semantics(),
                         "selected_skills": list(self.selected_skills or []),
                     },
                     "output": {
@@ -667,6 +692,7 @@ class TaskPlanner(
                         "node_context": dict(node_context or {}),
                         "nav_steps": list(nav_steps or []),
                         "candidate_count": len(getattr(snapshot, "marks", []) or []),
+                        "grouping_semantics": self._get_grouping_semantics(),
                         "selected_skills": list(self.selected_skills or []),
                     },
                     "output": {},

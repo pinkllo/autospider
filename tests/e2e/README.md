@@ -16,10 +16,11 @@ pip install -e ".[redis,db,dev]"
 playwright install chromium
 ```
 
-运行前需要可用的 PostgreSQL 和 Redis：
+运行前需要可用的 PostgreSQL、Redis，以及至少一组 LLM 凭证：
 
 - PostgreSQL：作为 E2E 主数据库，供历史任务、运行记录和最终持久化使用
 - Redis：只用于 graph checkpoint
+- LLM 凭证：至少提供 `BAILIAN_API_KEY` 或 `SILICON_PLANNER_API_KEY`
 - Playwright Chromium：用于真实浏览器流程
 
 默认情况下，E2E 会自动加载仓库根目录下的 `.env.e2e`。
@@ -29,6 +30,7 @@ playwright install chromium
 ```env
 AUTOSPIDER_E2E_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/autospider_e2e_test
 AUTOSPIDER_E2E_REDIS_URL=redis://127.0.0.1:6380/15
+BAILIAN_API_KEY=your_api_key
 ```
 
 如果你想临时覆盖，也可以直接设置环境变量。

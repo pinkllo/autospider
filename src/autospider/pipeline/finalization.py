@@ -525,6 +525,8 @@ def _build_task_run_payload_kwargs(
         "anchor_url": str(context.anchor_url or ""),
         "variant_label": str(context.variant_label or ""),
         "task_description": context.task_description,
+        "semantic_signature": str(context.semantic_signature or ""),
+        "strategy_payload": dict(context.strategy_payload or {}),
         "field_names": _coerce_field_names(context.fields),
         "execution_id": str(context.summary.get("execution_id") or context.summary.get("run_id") or ""),
         "thread_id": context.thread_id,
@@ -638,6 +640,8 @@ class PipelineFinalizationContext:
     site_profile_snapshot: dict[str, Any] = field(default_factory=dict)
     failure_records: list[dict[str, Any]] = field(default_factory=list)
     failure_patterns: list[dict[str, Any]] = field(default_factory=list)
+    semantic_signature: str = ""
+    strategy_payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

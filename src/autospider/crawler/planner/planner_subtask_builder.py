@@ -48,6 +48,7 @@ class PlannerSubtaskBuilderMixin:
             raw = raw_subtasks[idx] if idx < len(raw_subtasks) else {}
             name = str(raw.get("name") or variant.variant_label or f"分类_{idx + 1}").strip()
             sanitized_context = self._sanitize_context(variant.context)
+            scope = self._build_subtask_scope(raw=raw, context=sanitized_context)
             task_desc = (
                 str(raw.get("task_description") or "").strip()
                 or self._build_task_description_for_mode(sanitized_context, mode)
@@ -76,6 +77,9 @@ class PlannerSubtaskBuilderMixin:
                     max_pages=raw.get("estimated_pages"),
                     nav_steps=list(variant.nav_steps or []),
                     context=sanitized_context,
+                    scope=scope,
+                    fixed_fields=self._build_subtask_fixed_fields(scope),
+                    per_subtask_target_count=self._resolve_grouped_target_count(),
                     parent_id=parent_id,
                     depth=depth + 1,
                     mode=mode,
@@ -83,6 +87,58 @@ class PlannerSubtaskBuilderMixin:
                 )
             )
         return subtasks
+
+    def _build_subtask_scope(
+        self,
+        *,
+        raw: dict,
+        context: dict[str, str] | None,
+    ) -> dict[str, object]:
+        category_path = self._extract_category_path(context)
+        scope_key = str(raw.get("scope_key") or "").strip()
+        scope_label = str(raw.get("scope_label") or "").strip()
+        if not scope_key and category_path:
+            normalized = [self._normalize_semantic_label(item) for item in category_path if item]
+            normalized = [item for item in normalized if item]
+            if normalized:
+                scope_key = "category:" + " > ".join(normalized)
+        if not scope_label and category_path:
+            scope_label = " > ".join(category_path)
+
+        scope: dict[str, object] = {}
+        if scope_key:
+            scope["key"] = scope_key
+        if scope_label:
+            scope["label"] = scope_label
+        if category_path:
+            scope["path"] = list(category_path)
+        return scope
+
+    def _build_subtask_fixed_fields(
+        self,
+        scope: dict[str, object] | None,
+    ) -> dict[str, str]:
+        category_value = self._resolve_scope_label(scope)
+        if not category_value:
+            return {}
+        return {
+            "category": category_value,
+            "category_name": category_value,
+            "分类": category_value,
+            "所属分类": category_value,
+        }
+
+    def _resolve_scope_label(self, scope: dict[str, object] | None) -> str:
+        scope_dict = dict(scope or {})
+        label = str(scope_dict.get("label") or "").strip()
+        if label:
+            return label
+        path = scope_dict.get("path")
+        if isinstance(path, (list, tuple)):
+            segments = [str(item or "").strip() for item in path if str(item or "").strip()]
+            if segments:
+                return " > ".join(segments)
+        return ""
 
     def _build_subtask_id(
         self,
@@ -123,10 +179,27 @@ class PlannerSubtaskBuilderMixin:
         return f"采集当前“{scope}”范围下{quantity}项目记录，提取项目名称与所属分类名称。"
 
     def _resolve_requested_count_text(self, prefix: str = "各") -> str:
+        grouped_target_count = self._resolve_grouped_target_count()
+        if grouped_target_count is not None:
+            return f"{prefix}{grouped_target_count}条"
         match = re.search(r"(\d+)\s*条", str(self.user_request or ""))
         if match:
             return f"{prefix}{match.group(1)}条"
         return ""
+
+    def _resolve_grouped_target_count(self) -> int | None:
+        resolver = getattr(self, "_get_grouping_semantics", None)
+        if not callable(resolver):
+            return None
+        grouping = dict(resolver() or {})
+        if str(grouping.get("group_by") or "").strip().lower() != "category":
+            return None
+        value = grouping.get("per_group_target_count")
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            return None
+        return count if count > 0 else None
 
     def _build_execution_brief(
         self,

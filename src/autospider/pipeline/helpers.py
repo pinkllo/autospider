@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from ..common.config import config
+from ..common.grouping_semantics import (
+    build_normalized_strategy_payload,
+    has_semantic_signature_inputs,
+    normalize_field_names,
+)
 from ..common.storage.collection_persistence import CollectionConfig, coerce_collection_config
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..domain.fields import FieldDefinition, build_field_definitions as build_domain_field_definitions
@@ -20,6 +27,52 @@ def build_field_definitions(raw_fields: list[Mapping[str, Any]]) -> list[FieldDe
 
 def build_artifact(label: str, path: str | Path) -> dict[str, str]:
     return {"label": label, "path": str(path)}
+
+
+def build_strategy_payload(payload: Mapping[str, Any] | ExecutionRequest | None) -> dict[str, Any]:
+    raw = (
+        payload.model_dump(mode="python")
+        if isinstance(payload, ExecutionRequest)
+        else dict(payload or {})
+    )
+    explicit_payload = dict(raw.get("strategy_payload") or {})
+    field_names = normalize_field_names(raw.get("fields"))
+    if explicit_payload:
+        return build_normalized_strategy_payload(
+            explicit_payload,
+            fallback_field_names=field_names,
+        )
+    return build_normalized_strategy_payload(
+        raw,
+        fallback_field_names=field_names,
+    )
+
+
+def build_semantic_signature(payload: Mapping[str, Any] | ExecutionRequest | None) -> str:
+    strategy_payload = build_strategy_payload(payload)
+    raw = json.dumps(strategy_payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def resolve_semantic_identity(
+    payload: Mapping[str, Any] | ExecutionRequest | None,
+) -> tuple[str, dict[str, Any]]:
+    raw = (
+        payload.model_dump(mode="python")
+        if isinstance(payload, ExecutionRequest)
+        else dict(payload or {})
+    )
+    strategy_payload = build_strategy_payload(raw)
+    explicit_signature = str(raw.get("semantic_signature") or "").strip()
+    explicit_payload = dict(raw.get("strategy_payload") or {})
+    semantic_source = explicit_payload or raw
+    fallback_field_names = normalize_field_names(raw.get("fields"))
+    if has_semantic_signature_inputs(
+        semantic_source,
+        fallback_field_names=fallback_field_names,
+    ):
+        return build_semantic_signature(raw), strategy_payload
+    return explicit_signature, strategy_payload
 
 
 def build_execution_request(
@@ -53,12 +106,15 @@ def build_execution_context(
     *,
     fields: list[Any] | None = None,
 ) -> ExecutionContext:
+    semantic_signature, strategy_payload = resolve_semantic_identity(request)
     identity = TaskIdentity(
         list_url=str(request.list_url or "").strip(),
         anchor_url=str(request.anchor_url or "").strip(),
         page_state_signature=str(request.page_state_signature or "").strip(),
         variant_label=str(request.variant_label or "").strip(),
         task_description=str(request.task_description or "").strip(),
+        semantic_signature=semantic_signature,
+        strategy_payload=strategy_payload,
         field_names=tuple(
             str(item.get("name") or "").strip()
             for item in list(request.fields or [])

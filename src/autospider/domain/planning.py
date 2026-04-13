@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+from ..common.grouping_semantics import normalize_grouping_semantics
 from ..common.utils.string_maps import normalize_string_map
 
 
@@ -94,6 +97,36 @@ class ExecutionBrief(BaseModel):
     do_not: list[str] = Field(default_factory=list, description="当前层禁止事项")
 
 
+class PlannerIntent(BaseModel):
+    """规划阶段使用的结构化分组语义。"""
+
+    group_by: str = Field(default="none", description="分组方式")
+    per_group_target_count: int | None = Field(default=None, description="每组目标数量")
+    total_target_count: int | None = Field(default=None, description="总目标数量")
+    category_discovery_mode: str = Field(default="auto", description="分类发现模式")
+    requested_categories: list[str] = Field(default_factory=list, description="手动指定分类")
+    category_examples: list[str] = Field(default_factory=list, description="分类示例")
+    subtask_scope_key: str | None = Field(default=None, description="预留的任务作用域 key 占位")
+    subtask_scope_label: str | None = Field(default=None, description="预留的任务作用域 label 占位")
+
+    @classmethod
+    def from_payload(cls, payload: dict | None) -> "PlannerIntent":
+        normalized = normalize_grouping_semantics(payload or {})
+        return cls.model_validate(normalized)
+
+
+class PlannerCategoryCandidate(BaseModel):
+    """页面事实中的分类候选项。"""
+
+    name: str = Field(default="", description="分类名称")
+    mark_id: int | None = Field(default=None, description="SoM 标记 ID")
+    link_text: str = Field(default="", description="页面可见原文")
+    estimated_pages: int | None = Field(default=None, description="预估页数")
+    task_description: str = Field(default="", description="候选分类对应的采集任务描述")
+    scope_key: str | None = Field(default=None, description="预留的语义作用域 key")
+    scope_label: str | None = Field(default=None, description="预留的语义作用域 label")
+
+
 class SubTask(BaseModel):
     """单个子任务定义。"""
 
@@ -107,11 +140,14 @@ class SubTask(BaseModel):
     fields: list[dict] = Field(default_factory=list, description="字段定义 (可继承父任务)")
     max_pages: int | None = Field(default=None, description="最大翻页次数")
     target_url_count: int | None = Field(default=None, description="目标采集 URL 数量")
+    per_subtask_target_count: int | None = Field(default=None, description="当前子任务的默认目标采集数量")
     priority: int = Field(default=0, description="优先级，越小越优先")
     parent_id: str | None = Field(default=None, description="父子任务 ID（运行时拆分时使用）")
     depth: int = Field(default=0, description="子任务层级深度（根任务=0）")
     nav_steps: list[dict] = Field(default_factory=list, description="从首页到达该分类的导航步骤")
     context: dict[str, str] = Field(default_factory=dict, description="显式上下文，例如所属分类")
+    scope: dict[str, Any] = Field(default_factory=dict, description="该子任务的显式执行作用域")
+    fixed_fields: dict[str, str] = Field(default_factory=dict, description="该子任务固定输出字段")
     mode: SubTaskMode = Field(default=SubTaskMode.COLLECT, description="运行模式")
     execution_brief: ExecutionBrief = Field(default_factory=ExecutionBrief, description="结构化执行简报")
     plan_node_id: str | None = Field(default=None, description="关联的计划节点 ID")
@@ -124,6 +160,16 @@ class SubTask(BaseModel):
     @field_validator("context", mode="before")
     @classmethod
     def _normalize_context(cls, value: object) -> dict[str, str]:
+        return normalize_string_map(value, drop_empty=False)
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def _normalize_scope(cls, value: object) -> dict[str, Any]:
+        return dict(value) if isinstance(value, Mapping) else {}
+
+    @field_validator("fixed_fields", mode="before")
+    @classmethod
+    def _normalize_fixed_fields(cls, value: object) -> dict[str, str]:
         return normalize_string_map(value, drop_empty=False)
 
 
