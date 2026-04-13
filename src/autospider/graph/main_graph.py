@@ -25,6 +25,7 @@ from .nodes.entry_nodes import (
 from .nodes.shared_nodes import build_artifact_index, build_summary, finalize_result
 from .state import GraphState
 from .state_access import (
+    StageName,
     get_conversation_state,
     get_stage_status,
 )
@@ -44,13 +45,15 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
         return "finalize_result"
     return "chat_clarify"
 
-
-
-def resolve_node_outcome(state: dict[str, Any]) -> str:
+def resolve_node_outcome(
+    state: dict[str, Any],
+    *,
+    stage: StageName | None = None,
+) -> str:
     """根据 node_status 选择图后续流向。"""
     if state.get("error"):
         return "error"
-    stage_status = get_stage_status(state)
+    stage_status = get_stage_status(state, stage=stage)
     if stage_status == "ok":
         return "ok"
     return "error"
@@ -141,18 +144,18 @@ def build_main_graph(*, checkpointer: Any | None = None):
     )
     graph.add_conditional_edges(
         "chat_prepare_execution_handoff",
-        resolve_node_outcome,
+        lambda state: resolve_node_outcome(state, stage="conversation"),
         {"ok": "plan_node", "error": "build_artifact_index"},
     )
 
     graph.add_conditional_edges(
         "plan_node",
-        resolve_node_outcome,
+        lambda state: resolve_node_outcome(state, stage="planning"),
         {"ok": "multi_dispatch_subgraph", "error": "build_artifact_index"},
     )
     graph.add_conditional_edges(
         "multi_dispatch_subgraph",
-        resolve_node_outcome,
+        lambda state: resolve_node_outcome(state, stage="dispatch"),
         {"ok": "aggregate_node", "error": "build_artifact_index"},
     )
     graph.add_edge("aggregate_node", "build_artifact_index")

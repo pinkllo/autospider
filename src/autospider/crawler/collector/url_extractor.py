@@ -39,6 +39,31 @@ class URLExtractor:
         self.page = page
         self.list_url = list_url
 
+    def _is_restore_replay_failure(self, exc: Exception) -> bool:
+        return isinstance(exc, RuntimeError) and str(exc).startswith(
+            "detail_page_restore_replay_failed"
+        )
+
+    def _did_replay_succeed(self, replay_result: object) -> bool:
+        success = getattr(replay_result, "success", None)
+        if success is not None:
+            return bool(success)
+        return bool(replay_result)
+
+    async def _restore_nav_steps_or_raise(self, nav_steps: list[dict] | None) -> None:
+        if not nav_steps:
+            return
+        from .navigation_handler import NavigationHandler
+
+        nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
+        replay_result = await nav_handler.replay_nav_steps(nav_steps)
+        if self._did_replay_succeed(replay_result):
+            return
+        failure_reason = str(getattr(replay_result, "failure_reason", "") or "").strip()
+        if failure_reason:
+            raise RuntimeError(f"detail_page_restore_replay_failed:{failure_reason}")
+        raise RuntimeError("detail_page_restore_replay_failed")
+
     async def _find_locator_from_element(self, element: "ElementMark"):
         xpath_candidates = list(getattr(element, "xpath_candidates", None) or [])
         for candidate in xpath_candidates:
@@ -212,11 +237,7 @@ class URLExtractor:
                 await asyncio.sleep(1)
 
                 # 如果有导航步骤（如点击了某些筛选条件），需要重放以恢复到之前的状态
-                if nav_steps:
-                    from .navigation_handler import NavigationHandler
-
-                    nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                    await nav_handler.replay_nav_steps(nav_steps)
+                await self._restore_nav_steps_or_raise(nav_steps)
 
                 return new_url
 
@@ -233,16 +254,16 @@ class URLExtractor:
                         self.list_url, wait_until="domcontentloaded", timeout=30000
                     )
                     await asyncio.sleep(1)
-                    if nav_steps:
-                        from .navigation_handler import NavigationHandler
-
-                        nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                        await nav_handler.replay_nav_steps(nav_steps)
-                except Exception:
+                    await self._restore_nav_steps_or_raise(nav_steps)
+                except Exception as exc:
+                    if self._is_restore_replay_failure(exc):
+                        raise
                     pass
 
             return None
         except Exception as e:
+            if self._is_restore_replay_failure(e):
+                raise
             logger.info(f"[Click] ✗ 点击失败: {e}")
             locator = await self._find_locator_from_element(element)
             if locator is not None:
@@ -255,12 +276,10 @@ class URLExtractor:
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(1)
-                if nav_steps:
-                    from .navigation_handler import NavigationHandler
-
-                    nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                    await nav_handler.replay_nav_steps(nav_steps)
-            except Exception:
+                await self._restore_nav_steps_or_raise(nav_steps)
+            except Exception as exc:
+                if self._is_restore_replay_failure(exc):
+                    raise
                 pass
             return None
 
@@ -280,8 +299,6 @@ class URLExtractor:
         Returns:
             获取到的 URL 或 None。
         """
-        from .navigation_handler import NavigationHandler
-
         list_url = self.page.url
 
         try:
@@ -311,10 +328,7 @@ class URLExtractor:
                 # URL 已变化，返回列表页并恢复状态
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(1)
-
-                if nav_steps:
-                    nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                    await nav_handler.replay_nav_steps(nav_steps)
+                await self._restore_nav_steps_or_raise(nav_steps)
 
                 return new_url
 
@@ -330,23 +344,25 @@ class URLExtractor:
                         timeout=30000,
                     )
                     await asyncio.sleep(1)
-                    if nav_steps:
-                        nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                        await nav_handler.replay_nav_steps(nav_steps)
-                except Exception:
+                    await self._restore_nav_steps_or_raise(nav_steps)
+                except Exception as exc:
+                    if self._is_restore_replay_failure(exc):
+                        raise
                     pass
 
             return None
 
         except Exception as e:
+            if self._is_restore_replay_failure(e):
+                raise
             logger.info(f"[Collect-XPath] 点击失败: {e}")
             # 异常恢复
             try:
                 await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(1)
-                if nav_steps:
-                    nav_handler = NavigationHandler(self.page, self.list_url, "", 10)
-                    await nav_handler.replay_nav_steps(nav_steps)
-            except Exception:
+                await self._restore_nav_steps_or_raise(nav_steps)
+            except Exception as exc:
+                if self._is_restore_replay_failure(exc):
+                    raise
                 pass
             return None

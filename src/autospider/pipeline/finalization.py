@@ -32,6 +32,7 @@ OUTCOME_STATE_SUCCESS = "success"
 OUTCOME_STATE_PARTIAL_SUCCESS = "partial_success"
 OUTCOME_STATE_NO_DATA = "no_data"
 OUTCOME_STATE_SYSTEM_FAILURE = "system_failure"
+OUTCOME_STATE_INTERRUPTED = "interrupted"
 DURABILITY_STATE_STAGED = "staged"
 DURABILITY_STATE_DURABLE = "durable"
 DURABILITY_STATE_FAILED_COMMIT = "failed_commit"
@@ -132,7 +133,10 @@ def classify_pipeline_result(
     validation_failure_count = len(validation_failures)
     normalized_reason = str(terminal_reason or "").strip()
 
-    if state_error:
+    if normalized_reason == "browser_intervention":
+        execution_state = EXECUTION_STATE_INTERRUPTED
+        outcome_state = OUTCOME_STATE_INTERRUPTED
+    elif state_error:
         execution_state = EXECUTION_STATE_FAILED
         outcome_state = OUTCOME_STATE_SYSTEM_FAILURE
         normalized_reason = normalized_reason or str(state_error)
@@ -150,6 +154,8 @@ def classify_pipeline_result(
 
     if outcome_state == OUTCOME_STATE_SUCCESS:
         promotion_state = "reusable"
+    elif outcome_state == OUTCOME_STATE_INTERRUPTED:
+        promotion_state = "rejected"
     elif success_count > 0:
         promotion_state = "diagnostic_only"
     else:
@@ -173,14 +179,16 @@ def should_promote_skill(
     summary: dict,
     validation_failures: list[dict],
 ) -> bool:
-    if str(summary.get("promotion_state") or "").strip().lower() == "reusable":
+    effective_error = _resolve_pipeline_error(state_error=state_error, summary=summary)
+    if not effective_error and str(summary.get("promotion_state") or "").strip().lower() == "reusable":
         return True
 
     classified = classify_pipeline_result(
         total_urls=int(summary.get("total_urls", 0) or 0),
         success_count=int(summary.get("success_count", 0) or 0),
-        state_error=state_error,
+        state_error=effective_error,
         validation_failures=validation_failures,
+        terminal_reason=str(summary.get("terminal_reason") or ""),
     )
     return bool(classified.get("promotion_state") == "reusable")
 
@@ -229,6 +237,32 @@ def _stringify_context_map(raw_context: dict[str, Any] | None) -> dict[str, str]
         if name and text:
             normalized[name] = text
     return normalized
+
+
+def _resolve_pipeline_error(*, state_error: object, summary: dict[str, Any]) -> str | None:
+    state_message = str(state_error or "").strip()
+    if state_message:
+        return state_message
+    summary_message = str(summary.get("error") or "").strip()
+    return summary_message or None
+
+
+def _refresh_summary_classification(
+    *,
+    classifier: Callable[..., dict[str, object]],
+    summary: dict[str, Any],
+    state_error: object,
+    validation_failures: list[dict[str, Any]],
+) -> None:
+    summary.update(
+        classifier(
+            total_urls=int(summary.get("total_urls", 0) or 0),
+            success_count=int(summary.get("success_count", 0) or 0),
+            state_error=_resolve_pipeline_error(state_error=state_error, summary=summary),
+            validation_failures=validation_failures,
+            terminal_reason=str(summary.get("terminal_reason") or ""),
+        )
+    )
 
 
 def _build_skill_sedimentation_payload(
@@ -564,7 +598,8 @@ class PipelineFinalizer:
             committed_summary = normalize_record_summary(
                 self._deps.build_record_summary(committed_records)
             )
-            all_records_durable = all(
+            has_committed_records = bool(committed_records)
+            all_records_durable = has_committed_records and all(
                 _is_durable_record(record)
                 for record in committed_records.values()
             )
@@ -575,18 +610,16 @@ class PipelineFinalizer:
                 DURABILITY_STATE_DURABLE if all_records_durable else DURABILITY_STATE_STAGED
             )
             context.summary["durably_persisted"] = all_records_durable
-            context.summary.update(
-                self._deps.classify_pipeline_result(
-                    total_urls=context.summary["total_urls"],
-                    success_count=context.summary["success_count"],
-                    state_error=context.runtime_state.error,
-                    validation_failures=context.runtime_state.validation_failures,
-                    terminal_reason=str(
-                        context.summary.get("terminal_reason")
-                        or context.runtime_state.terminal_reason
-                        or ""
-                    ),
-                )
+            context.summary["terminal_reason"] = str(
+                context.summary.get("terminal_reason")
+                or context.runtime_state.terminal_reason
+                or ""
+            )
+            _refresh_summary_classification(
+                classifier=self._deps.classify_pipeline_result,
+                summary=context.summary,
+                state_error=context.runtime_state.error,
+                validation_failures=context.runtime_state.validation_failures,
             )
             try:
                 self._deps.commit_items_file(context.staging_items_path, committed_records)
@@ -600,6 +633,19 @@ class PipelineFinalizer:
                 context.summary["terminal_reason"] = str(
                     context.summary.get("terminal_reason") or "export_failed"
                 )
+                _refresh_summary_classification(
+                    classifier=self._deps.classify_pipeline_result,
+                    summary=context.summary,
+                    state_error=context.summary["error"],
+                    validation_failures=context.runtime_state.validation_failures,
+                )
+                try:
+                    self._deps.write_summary(context.summary_path, context.summary)
+                except Exception as summary_exc:  # noqa: BLE001
+                    logger.error(
+                        "[Pipeline] failed to persist export failure summary: %s",
+                        summary_exc,
+                    )
             promoted_skill = promote_pipeline_skill(context)
             context.summary["skill_path"] = str(promoted_skill or "")
             context.summary["skill_state"] = "promoted" if promoted_skill else "skipped"

@@ -82,3 +82,7 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["tmp*"]
+markers = [
+    "smoke: fast developer smoke tests",
+    "e2e: end-to-end graph tests",
+]

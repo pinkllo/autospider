@@ -62,11 +62,11 @@ ALL_CASES: tuple[GraphE2ECase, ...] = (
         case_id="graph_same_page_variant",
         request_text="请只采集测试门户中成交结果栏目里的公告。",
         clarification_answers=(
-            f"从 {BASE_URL}/ 开始，只切换到成交结果 tab，提取 title、publish_date、budget、attachment_url。",
+            f"从 {BASE_URL}/ 开始，忽略首页同名快捷入口和干扰按钮，只切换正式的成交结果 tab，提取 title、publish_date、budget、attachment_url。",
         ),
         override_task=_build_override_task(
             list_url=f"{BASE_URL}/",
-            task_description="从门户首页切换到成交结果 tab，只采集成交结果栏目详情页，并提取标题、发布日期、预算金额和附件链接。",
+            task_description="从门户首页开始，忽略同名快捷入口与干扰按钮，只切换正式成交结果 tab；仅采集成交结果栏目详情页，并提取标题、发布日期、预算金额和附件链接。",
             target_url_count=8,
         ),
         expected_records_file="graph_same_page_variant.records.json",

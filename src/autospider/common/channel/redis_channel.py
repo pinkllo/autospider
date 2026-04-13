@@ -9,7 +9,7 @@ from collections import deque
 
 from autospider.common.logger import get_logger
 
-from .base import URLChannel, URLTask
+from .base import ChannelRuntimeEvent, ChannelRuntimeObserver, URLChannel, URLTask
 from ..storage.redis_manager import RedisQueueManager
 from ..config import config
 
@@ -29,6 +29,7 @@ class RedisURLChannel(URLChannel):
         consumer_name: str | None = None,
         block_ms: int = 5000,
         max_retries: int = 3,
+        runtime_observer: ChannelRuntimeObserver | None = None,
     ) -> None:
         """初始化基于 Redis 的通道。
         
@@ -52,10 +53,32 @@ class RedisURLChannel(URLChannel):
         self._background_error: RuntimeError | None = None
         self._sealed = False
         self._error_reason = ""
+        self._runtime_observer = runtime_observer
 
     def _raise_background_error(self) -> None:
         if self._background_error is not None:
             raise self._background_error
+
+    def _observe_runtime(
+        self,
+        *,
+        operation: str,
+        item_count: int = 0,
+        reason: str = "",
+        drained: bool | None = None,
+        **metadata: object,
+    ) -> None:
+        if self._runtime_observer is None:
+            return
+        self._runtime_observer(
+            ChannelRuntimeEvent(
+                operation=operation,
+                item_count=max(0, int(item_count)),
+                reason=str(reason or ""),
+                drained=drained,
+                metadata={key: value for key, value in metadata.items()},
+            )
+        )
 
     async def _recover_pending_once(self) -> None:
         """执行一次遗留未 ack (Pending) 消息的恢复逻辑。
@@ -73,6 +96,12 @@ class RedisURLChannel(URLChannel):
         )
         if recovered:
             self._retry_buffer.extend(recovered)
+        self._observe_runtime(
+            operation="recover",
+            item_count=len(recovered),
+            retry_buffer_size=len(self._retry_buffer),
+            consumer_name=self.consumer_name,
+        )
 
     def _start_recover_loop(self) -> None:
         """启动后台死信及僵尸任务恢复轮询循环。"""
@@ -153,6 +182,7 @@ class RedisURLChannel(URLChannel):
             buffered.append(self._retry_buffer.popleft())
         if buffered:
             tasks = buffered
+            source = "retry_buffer"
         else:
             # 底层借用 redis-py `xreadgroup` 实现消费者抢占读取
             tasks = await self.manager.fetch_task(
@@ -160,6 +190,16 @@ class RedisURLChannel(URLChannel):
                 block_ms=block_ms,
                 count=max_items,
             )
+            source = "redis"
+
+        self._observe_runtime(
+            operation="fetch",
+            item_count=len(tasks),
+            requested_items=max_items,
+            block_ms=block_ms,
+            source=source,
+            retry_buffer_size=len(self._retry_buffer),
+        )
 
         wrapped: list[URLTask] = []
         # 对 Redis Stream 读取出来的结果集按条目进行拆包和重封装
@@ -186,8 +226,25 @@ class RedisURLChannel(URLChannel):
                 if result == "retry":
                     self._retry_buffer.append((sid, did, dict(task_data)))
 
+            async def _release(
+                reason: str,
+                sid: str = stream_id,
+                did: str = data_id,
+            ) -> None:
+                released = await self.manager.release_task(sid, did, reason)
+                if not released:
+                    raise RuntimeError(f"redis_release_failed:{did}")
+                self._observe_runtime(
+                    operation="release",
+                    item_count=1,
+                    reason=reason,
+                    stream_id=sid,
+                    data_id=did,
+                    consumer_name=self.consumer_name,
+                )
+
             # 组装返回最终给业务侧消费者的任务对象
-            wrapped.append(URLTask(url=url, ack=_ack, fail=_fail))
+            wrapped.append(URLTask(url=url, ack=_ack, fail=_fail, release=_release))
 
         return wrapped
 
@@ -222,8 +279,16 @@ class RedisURLChannel(URLChannel):
             return False
         self._raise_background_error()
         await self._ensure_connected()
-        pending_count = await self.manager.get_pending_count(self.consumer_name)
-        return pending_count <= 0 and not self._retry_buffer
+        stream_length = await self.manager.get_stream_length()
+        drained = stream_length <= 0 and not self._retry_buffer
+        self._observe_runtime(
+            operation="is_drained",
+            drained=drained,
+            stream_length=stream_length,
+            retry_buffer_size=len(self._retry_buffer),
+            sealed=self._sealed,
+        )
+        return drained
 
     async def close_with_error(self, reason: str) -> None:
         self._error_reason = str(reason or "")

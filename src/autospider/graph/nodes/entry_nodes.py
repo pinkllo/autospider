@@ -26,7 +26,11 @@ from ...common.storage.task_run_query_service import TaskRunQueryService
 from ...domain.chat import ClarifiedTask, DialogueMessage
 from ...domain.fields import FieldDefinition
 from ...common.validators import validate_task_description, validate_url
-from ...pipeline.runtime_controls import resolve_concurrency_settings
+from ..execution_handoff import (
+    apply_serial_mode_overrides,
+    build_chat_execution_params,
+    build_chat_review_payload,
+)
 
 logger = get_logger(__name__)
 
@@ -189,35 +193,12 @@ def _to_positive_int(value: Any, default: int) -> int:
 
 
 
-def _coalesce_cli_option(cli_args: dict[str, Any], key: str, fallback: Any) -> Any:
-    """CLI 显式传值优先；CLI 为 None 时保留上游已解析出的任务参数。"""
-    value = cli_args.get(key)
-    return fallback if value is None else value
-
-
 def _conversation_state(state: dict[str, Any]) -> dict[str, Any]:
     return dict(state.get("conversation") or {})
 
 
 def _conversation_value(state: dict[str, Any], key: str, default: Any = None) -> Any:
     return _conversation_state(state).get(key, default)
-
-
-def _is_serial_mode_enabled(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _apply_serial_mode_overrides(params: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(params or {})
-    serial_mode = _is_serial_mode_enabled(normalized.get("serial_mode"))
-    normalized["serial_mode"] = serial_mode
-    if not serial_mode:
-        return normalized
-    normalized["consumer_concurrency"] = 1
-    normalized["max_concurrent"] = 1
-    return normalized
 
 
 def _normalize_resume_answer(payload: Any) -> str:
@@ -258,53 +239,6 @@ def _normalize_override_task(raw_task: Any) -> dict[str, Any]:
 
 
 
-def _build_review_payload(
-    *,
-    state: dict[str, Any],
-    task: dict[str, Any],
-    dispatch_mode: str,
-) -> dict[str, Any]:
-    cli_args = dict(state.get("cli_args") or {})
-    base_options = _apply_serial_mode_overrides({
-        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
-        "target_url_count": _coalesce_cli_option(cli_args, "target_url_count", task.get("target_url_count")),
-        "consumer_concurrency": _coalesce_cli_option(
-            cli_args,
-            "consumer_concurrency",
-            task.get("consumer_concurrency"),
-        ),
-        "field_explore_count": _coalesce_cli_option(
-            cli_args,
-            "field_explore_count",
-            task.get("field_explore_count"),
-        ),
-        "field_validate_count": _coalesce_cli_option(
-            cli_args,
-            "field_validate_count",
-            task.get("field_validate_count"),
-        ),
-        "pipeline_mode": cli_args.get("pipeline_mode") or "默认",
-        "execution_mode": dispatch_mode,
-        "headless": cli_args["headless"] if "headless" in cli_args else None,
-        "output_dir": str(cli_args.get("output_dir") or "output"),
-        "serial_mode": cli_args.get("serial_mode"),
-        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
-        "global_browser_budget": cli_args.get("global_browser_budget"),
-    })
-    concurrency = resolve_concurrency_settings(base_options)
-    effective_options = dict(base_options)
-    effective_options["consumer_concurrency"] = concurrency.consumer_concurrency
-    effective_options["max_concurrent"] = concurrency.max_concurrent
-    effective_options["global_browser_budget"] = concurrency.global_browser_budget
-    return {
-        "type": "chat_review",
-        "thread_id": str(state.get("thread_id") or ""),
-        "clarified_task": task,
-        "effective_options": effective_options,
-    }
-
-
-
 def route_entry(state: dict[str, Any]) -> dict[str, Any]:
     """入口路由节点。"""
     mode = state.get("entry_mode")
@@ -314,14 +248,14 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("invalid_entry_mode", f"不支持的 entry_mode: {mode}")
     return {
         **_ok({"entry_mode": mode}),
-        "normalized_params": _apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
+        "normalized_params": apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
     }
 
 
 
 def normalize_pipeline_params(state: dict[str, Any]) -> dict[str, Any]:
     """执行参数归一化。"""
-    normalized = _apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
+    normalized = apply_serial_mode_overrides(dict(state.get("cli_args") or {}))
     return {
         **_ok({"normalized": True}),
         "normalized_params": normalized,
@@ -454,7 +388,14 @@ async def chat_review_task(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
     dispatch_mode = _resolve_chat_dispatch_mode()
-    review_payload = interrupt(_build_review_payload(state=state, task=task, dispatch_mode=dispatch_mode))
+    review_payload = interrupt(
+        build_chat_review_payload(
+            thread_id=str(state.get("thread_id") or ""),
+            cli_args=cli_args,
+            task=task,
+            dispatch_mode=dispatch_mode,
+        )
+    )
     action_payload = review_payload if isinstance(review_payload, dict) else {"action": review_payload}
     action = str(action_payload.get("action") or "approve").strip().lower()
 
@@ -512,49 +453,12 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
 
     dispatch_mode = _resolve_chat_dispatch_mode()
-    # `clarified_task` 是 chat 阶段产物，这里只做进入 planning 的参数交接。
-    base_params = _apply_serial_mode_overrides({
-        "list_url": task.get("list_url", ""),
-        "task_description": task.get("task_description", ""),
-        "fields": [_field_to_dict(item) for item in task.get("fields", [])],
-        "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),
-        "target_url_count": _coalesce_cli_option(
-            cli_args,
-            "target_url_count",
-            task.get("target_url_count"),
-        ),
-        "consumer_concurrency": _coalesce_cli_option(
-            cli_args,
-            "consumer_concurrency",
-            task.get("consumer_concurrency"),
-        ),
-        "field_explore_count": _coalesce_cli_option(
-            cli_args,
-            "field_explore_count",
-            task.get("field_explore_count"),
-        ),
-        "field_validate_count": _coalesce_cli_option(
-            cli_args,
-            "field_validate_count",
-            task.get("field_validate_count"),
-        ),
-        "pipeline_mode": cli_args.get("pipeline_mode"),
-        "headless": cli_args["headless"] if "headless" in cli_args else None,
-        "output_dir": str(cli_args.get("output_dir") or "output"),
-        "serial_mode": cli_args.get("serial_mode"),
-        "request": str(cli_args.get("request") or task.get("task_description") or ""),
-        "max_concurrent": _coalesce_cli_option(cli_args, "max_concurrent", None),
-        "execution_mode_resolved": dispatch_mode,
-        "runtime_subtask_max_children": cli_args.get("runtime_subtask_max_children"),
-        "runtime_subtasks_use_main_model": cli_args.get("runtime_subtasks_use_main_model"),
-        "selected_skills": list(_conversation_value(state, "selected_skills") or []),
-        "global_browser_budget": cli_args.get("global_browser_budget"),
-    })
-    concurrency = resolve_concurrency_settings(base_params)
-    normalized = dict(base_params)
-    normalized["consumer_concurrency"] = concurrency.consumer_concurrency
-    normalized["max_concurrent"] = concurrency.max_concurrent
-    normalized["global_browser_budget"] = concurrency.global_browser_budget
+    normalized = build_chat_execution_params(
+        cli_args=cli_args,
+        task=task,
+        dispatch_mode=dispatch_mode,
+        selected_skills=list(_conversation_value(state, "selected_skills") or []),
+    )
 
     return {
         **_ok({"execution_mode_resolved": "multi"}),

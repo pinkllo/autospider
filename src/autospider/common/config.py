@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 _DOTENV_LOADED = False
 _CONFIG_CACHE: "Config | None" = None
+REDIS_PIPELINE_MODE = "redis"
+PIPELINE_MODE_ONLY_SUPPORTS_REDIS = "pipeline_mode_only_supports_redis"
 
 
 def _load_environment() -> None:
@@ -18,6 +20,15 @@ def _load_environment() -> None:
         return
     load_dotenv()
     _DOTENV_LOADED = True
+
+
+def normalize_pipeline_mode(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return REDIS_PIPELINE_MODE
+    if normalized != REDIS_PIPELINE_MODE:
+        raise ValueError(PIPELINE_MODE_ONLY_SUPPORTS_REDIS)
+    return REDIS_PIPELINE_MODE
 
 
 class LLMConfig(BaseModel):
@@ -238,26 +249,10 @@ class FieldExtractorConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
-    """Pipeline 配置 (支持 memory/file/redis 模式)"""
+    """Pipeline 配置（仅支持 redis 模式）。"""
 
-    # 运行模式: memory (内存), file (本地文件), redis (Redis 队列)
     mode: str = Field(default_factory=lambda: os.getenv("PIPELINE_MODE", "redis"))
-    
-    # 内存模式下的队列最大容量
-    memory_queue_size: int = Field(
-        default_factory=lambda: int(os.getenv("PIPELINE_MEMORY_QUEUE_SIZE", "1000"))
-    )
-    
-    # 文件模式下的轮询检查间隔（秒）
-    file_poll_interval: float = Field(
-        default_factory=lambda: float(os.getenv("PIPELINE_FILE_POLL_INTERVAL", "1.0"))
-    )
-    
-    # 文件模式下用于记录爬取进度的游标文件名
-    file_cursor_name: str = Field(
-        default_factory=lambda: os.getenv("PIPELINE_FILE_CURSOR_NAME", "urls.cursor.json")
-    )
-    
+
     # 从队列获取任务的超时时间（秒）
     fetch_timeout_s: float = Field(
         default_factory=lambda: float(os.getenv("PIPELINE_FETCH_TIMEOUT", "5"))
@@ -281,6 +276,11 @@ class PipelineConfig(BaseModel):
     local_serial_mode: bool = Field(
         default_factory=lambda: os.getenv("LOCAL_SERIAL_MODE", "false").lower() == "true"
     )
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, value: object) -> str:
+        return normalize_pipeline_mode(value)
 
 
 class PlannerConfig(BaseModel):

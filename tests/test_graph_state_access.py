@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.state_access import dispatch_summary, select_summary
+from autospider.graph.state_access import dispatch_summary, get_stage_status, select_summary
 
 
 def test_dispatch_summary_reads_root_dispatch_result() -> None:
@@ -43,3 +43,13 @@ def test_select_summary_merges_dispatch_and_result_metrics() -> None:
         "thread_id": "thread-1",
         "entry_mode": "chat_pipeline",
     }
+
+
+def test_get_stage_status_prefers_requested_stage_over_stale_prior_stage() -> None:
+    state = {
+        "planning": {"status": "ok"},
+        "dispatch": {"status": "fatal"},
+        "node_status": "ok",
+    }
+
+    assert get_stage_status(state, stage="dispatch") == "fatal"

@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from autospider.common.logger import get_logger
+from autospider.common.storage.pipeline_runtime_store import PipelineRuntimeStore
 from autospider.common.storage.redis_pool import get_sync_client
 
 logger = get_logger(__name__)
@@ -89,8 +90,27 @@ def normalize_url(url: str) -> str:
     return result
 
 
+def _clean_lookup_value(value: str) -> str:
+    return str(value or "").strip()
+
+
+def build_task_lookup_key(
+    url: str,
+    *,
+    page_state_signature: str = "",
+    anchor_url: str = "",
+    variant_label: str = "",
+) -> dict[str, str]:
+    return {
+        "normalized_url": normalize_url(url),
+        "page_state_signature": _clean_lookup_value(page_state_signature),
+        "anchor_url": _clean_lookup_value(anchor_url),
+        "variant_label": _clean_lookup_value(variant_label),
+    }
+
+
 def invalidate_task_cache(url: str) -> None:
-    normalized = normalize_url(url)
+    normalized = build_task_lookup_key(url)["normalized_url"]
     if normalized:
         _cache.invalidate(normalized)
 
@@ -98,8 +118,11 @@ def invalidate_task_cache(url: str) -> None:
 class TaskRunQueryService:
     """Read-side query service for historical task runs."""
 
+    def __init__(self, runtime_store: PipelineRuntimeStore | None = None) -> None:
+        self._runtime_store = runtime_store or PipelineRuntimeStore()
+
     def find_by_url(self, url: str) -> list[dict[str, Any]]:
-        target = normalize_url(url)
+        target = build_task_lookup_key(url)["normalized_url"]
         if not target:
             return []
 
@@ -111,6 +134,12 @@ class TaskRunQueryService:
         _cache.set(target, results, ttl=60 if not results else None)
         return results
 
+    def get_runtime_state(self, execution_id: str) -> dict[str, Any] | None:
+        target = str(execution_id or "").strip()
+        if not target:
+            return None
+        return self._runtime_store_get(target)
+
     def _db_find_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
         from autospider.common.db.engine import session_scope
         from autospider.common.db.repositories.task_repo import TaskRepository
@@ -119,5 +148,13 @@ class TaskRunQueryService:
             repo = TaskRepository(session)
             return repo.find_by_url(normalized_url)
 
+    def _runtime_store_get(self, execution_id: str) -> dict[str, Any] | None:
+        return self._runtime_store.get_runtime_state(execution_id)
 
-__all__ = ["TaskRunQueryService", "invalidate_task_cache", "normalize_url"]
+
+__all__ = [
+    "TaskRunQueryService",
+    "build_task_lookup_key",
+    "invalidate_task_cache",
+    "normalize_url",
+]

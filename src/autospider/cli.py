@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from typing import Any
 
@@ -13,14 +14,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .common.db.engine import init_db
-from .common.logger import bootstrap_logging, get_logger
-from .domain.fields import FieldDefinition, build_field_definitions, serialize_field_definitions
-from .graph import EntryMode, GraphInput, GraphRunner
-from .common.config import config
+from . import cli_runtime
 
 # 日志器
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="autospider",
@@ -29,11 +26,12 @@ app = typer.Typer(
 )
 console = Console()
 _GRAPH_THREAD_ID_HELP = "LangGraph 线程 ID。为空时自动生成，可用于后续 resume。"
+_PIPELINE_MODE_REDIS = "redis"
 
 
 def _ensure_database_ready() -> None:
     """确保 PostgreSQL schema 已按当前模型初始化。"""
-    init_db()
+    cli_runtime.init_database()
 
 
 def run_async_safely(coro):
@@ -124,7 +122,7 @@ def _build_generated_fields_table(fields: list[FieldDefinition]) -> Table:
 
 def _serialize_fields(fields: list[FieldDefinition]) -> list[dict]:
     """将字段定义序列化为可传输字典。"""
-    return serialize_field_definitions(fields)
+    return cli_runtime.serialize_field_definitions_payload(fields)
 
 
 def _log_graph_runtime(result: dict) -> None:
@@ -150,6 +148,7 @@ def _log_graph_runtime(result: dict) -> None:
 def _invoke_graph(entry_mode: EntryMode, cli_args: dict, *, thread_id: str = "") -> dict:
     """统一调用 GraphRunner 并返回 dict 结构结果。"""
     _ensure_database_ready()
+    GraphInput, GraphRunner = cli_runtime.load_graph_runtime()
     runner = GraphRunner()
     graph_input_kwargs = {
         "entry_mode": entry_mode,
@@ -180,6 +179,7 @@ def _resume_graph(
 ) -> dict:
     """恢复图线程并返回 dict 结构结果。"""
     _ensure_database_ready()
+    _, GraphRunner = cli_runtime.load_graph_runtime()
     active_runner = runner or GraphRunner()
     graph_result = run_async_safely(
         active_runner.resume(
@@ -197,6 +197,7 @@ def _resume_graph(
 def _inspect_graph(thread_id: str, *, runner: GraphRunner | None = None) -> dict:
     """读取图线程当前状态。"""
     _ensure_database_ready()
+    _, GraphRunner = cli_runtime.load_graph_runtime()
     active_runner = runner or GraphRunner()
     graph_result = run_async_safely(active_runner.inspect(thread_id=thread_id))
     result = graph_result.model_dump()
@@ -219,13 +220,13 @@ def _primary_interrupt_payload(result: dict) -> dict[str, Any] | None:
 
 def _field_definition_from_mapping(raw_field: dict[str, Any]) -> FieldDefinition:
     """将字典字段转换为 FieldDefinition。"""
-    return build_field_definitions([raw_field])[0]
+    return cli_runtime.build_field_definition(raw_field)
 
 
 
 def _field_definitions_from_mappings(raw_fields: list[dict[str, Any]]) -> list[FieldDefinition]:
     """将字典字段列表转换为 FieldDefinition 列表。"""
-    return build_field_definitions(item for item in raw_fields if isinstance(item, dict))
+    return cli_runtime.build_field_definitions(raw_fields)
 
 
 
@@ -274,7 +275,7 @@ def _edit_chat_review_task(task_payload: dict[str, Any]) -> dict[str, Any]:
         if not new_name or not new_desc:
             raise ValueError("name/description 不能为空。")
 
-        fields[index - 1] = FieldDefinition(
+        fields[index - 1] = cli_runtime.create_field_definition(
             name=new_name,
             description=new_desc,
             required=new_required,
@@ -311,8 +312,6 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
     task = dict(payload.get("clarified_task") or {})
     effective = dict(payload.get("effective_options") or {})
     fields = _field_definitions_from_mappings(list(task.get("fields") or []))
-    mode_text = str(effective.get("pipeline_mode") or "默认")
-
     console.print(
         Panel(
             f"[bold]识别意图:[/bold] {task.get('intent') or '未提供'}\n"
@@ -325,7 +324,7 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
             f"[bold]字段校验数:[/bold] {effective.get('field_validate_count') if effective.get('field_validate_count') is not None else '默认'}\n"
             f"[bold]消费者并发:[/bold] {effective.get('consumer_concurrency') if effective.get('consumer_concurrency') is not None else '默认'}\n"
             f"[bold]串行模式:[/bold] {bool(effective.get('serial_mode', False))}\n"
-            f"[bold]模式:[/bold] {mode_text}\n"
+            f"[bold]执行后端:[/bold] {_PIPELINE_MODE_REDIS}\n"
             f"[bold]执行引擎:[/bold] {effective.get('execution_mode') or 'multi'}\n"
             f"[bold]多任务并发:[/bold] {effective.get('max_concurrent') if effective.get('max_concurrent') is not None else '默认'}\n"
             f"[bold]无头模式:[/bold] {_format_optional_bool(effective.get('headless'))}\n"
@@ -435,6 +434,7 @@ def _handle_history_task_select_interrupt(payload: dict[str, Any]) -> dict[str, 
 
 def _continue_chat_interrupts(result: dict, *, runner: GraphRunner | None = None) -> dict:
     """在 CLI 中继续处理 chat-pipeline interrupt。"""
+    _, GraphRunner = cli_runtime.load_graph_runtime()
     active_runner = runner or GraphRunner()
     current = dict(result)
 
@@ -555,14 +555,9 @@ def chat_pipeline_command(
         help="详情抽取消费者并发数（默认取配置）",
     ),
     serial_mode: bool = typer.Option(
-        config.pipeline.local_serial_mode,
+        False,
         "--serial/--no-serial",
         help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发",
-    ),
-    pipeline_mode: str = typer.Option(
-        "",
-        "--mode",
-        help="通道模式: memory/file/redis",
     ),
     max_concurrent: int | None = typer.Option(
         None,
@@ -570,7 +565,7 @@ def chat_pipeline_command(
         help="多分类子任务最大并发数（用于 multi）",
     ),
     headless: bool = typer.Option(
-        config.browser.headless,
+        False,
         "--headless/--no-headless",
         help="是否使用无头模式（默认读取 .env HEADLESS）",
     ),
@@ -583,7 +578,7 @@ def chat_pipeline_command(
     thread_id: str = typer.Option("", "--thread-id", help=_GRAPH_THREAD_ID_HELP),
 ):
     """全自然语言多轮交互后执行流水线。"""
-    bootstrap_logging(output_dir=output_dir)
+    cli_runtime.bootstrap_cli_logging(output_dir=output_dir)
     if max_turns < 1:
         console.print(
             Panel(
@@ -593,6 +588,9 @@ def chat_pipeline_command(
             )
         )
         raise typer.Exit(1)
+
+    if not _option_was_explicit(ctx, "serial_mode"):
+        serial_mode = cli_runtime.get_default_serial_mode()
 
     initial_request = request.strip()
     if not initial_request:
@@ -624,7 +622,6 @@ def chat_pipeline_command(
                 "serial_mode": serial_mode,
                 "field_explore_count": field_explore_count,
                 "field_validate_count": field_validate_count,
-                "pipeline_mode": pipeline_mode.strip() or None,
                 "max_concurrent": max_concurrent,
             },
             thread_id=thread_id,
@@ -657,6 +654,45 @@ def main():
     app()
 
 
+def _render_doctor_section(section: cli_runtime.DoctorCheckSection) -> bool:
+    console.print(f"[bold]{section.title}[/bold]")
+    table = Table(title=f"AutoSpider Doctor / {section.title}")
+    table.add_column("check", style="cyan")
+    table.add_column("status", style="bold")
+    table.add_column("detail", style="white")
+
+    has_failure = False
+    status_styles = {
+        "ok": "green",
+        "fail": "red",
+        "skipped": "yellow",
+    }
+
+    for check in section.checks:
+        status = str(check.status or "").strip().lower() or "unknown"
+        style = status_styles.get(status, "white")
+        table.add_row(
+            check.name,
+            f"[{style}]{status}[/{style}]",
+            check.detail,
+        )
+        has_failure = has_failure or status == "fail"
+
+    console.print(table)
+    return has_failure
+
+
+@app.command("doctor")
+def doctor_command() -> None:
+    """检查 Redis-only CLI 的本地运行前置条件。"""
+    cli_runtime.bootstrap_cli_logging()
+    has_failure = False
+    for section in cli_runtime.build_doctor_sections():
+        has_failure = _render_doctor_section(section) or has_failure
+    if has_failure:
+        raise typer.Exit(1)
+
+
 @app.command("db-init")
 def db_init_command(
     reset: bool = typer.Option(
@@ -666,7 +702,8 @@ def db_init_command(
     ),
 ) -> None:
     """初始化 PostgreSQL schema。"""
-    init_db(reset=reset)
+    cli_runtime.bootstrap_cli_logging()
+    cli_runtime.init_database(reset=reset)
     console.print("[green]数据库 schema 已初始化[/green]")
 
 
@@ -682,6 +719,8 @@ def resume_graph_command(
 ):
     """恢复已持久化的 LangGraph 线程。"""
     try:
+        cli_runtime.bootstrap_cli_logging()
+        _, GraphRunner = cli_runtime.load_graph_runtime()
         resume_payload, has_payload = _parse_resume_payload(resume_json)
         runner = GraphRunner()
         if has_payload:

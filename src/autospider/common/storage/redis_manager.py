@@ -125,6 +125,15 @@ end
 return acked
 """
 
+# 5. 原子释放：XACK + XDEL + XADD（保留 payload，不计失败）
+LUA_RELEASE_TASK = """
+local acked = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+if acked == 0 then return 0 end
+redis.call('XDEL', KEYS[1], ARGV[2])
+redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[4], '*', 'data_id', ARGV[3])
+return 1
+"""
+
 # 5. 原子捞回：XAUTOCLAIM + HGET 批量获取详情
 LUA_RECOVER_TASK = """
 local result = redis.call('XAUTOCLAIM', KEYS[1], ARGV[1], ARGV[2], ARGV[3], '0-0', 'COUNT', ARGV[4])
@@ -204,6 +213,7 @@ class RedisQueueManager:
         self._lua_fetch: Script | None = None
         self._lua_fail: Script | None = None
         self._lua_ack: Script | None = None
+        self._lua_release: Script | None = None
         self._lua_recover: Script | None = None
 
     def _generate_hash_id(self, item: str) -> str:
@@ -296,6 +306,7 @@ class RedisQueueManager:
             self._lua_fetch = self.client.register_script(LUA_FETCH_TASK)
             self._lua_fail = self.client.register_script(LUA_FAIL_TASK)
             self._lua_ack = self.client.register_script(LUA_ACK_TASK)
+            self._lua_release = self.client.register_script(LUA_RELEASE_TASK)
             self._lua_recover = self.client.register_script(LUA_RECOVER_TASK)
 
             # 初始化 Consumer Group（如果不存在）
@@ -551,6 +562,23 @@ class RedisQueueManager:
             self.logger.error(f"ACK 任务失败: {e}")
             return False
 
+    async def release_task(self, stream_id: str, data_id: str, reason: str = "") -> bool:
+        """释放当前 lease，并将同一 payload 重新发布回队列。"""
+        if not self.client or not self._lua_release:
+            return False
+
+        try:
+            result = await self._lua_release(
+                keys=[self.stream_key],
+                args=[self.group_name, stream_id, data_id, self.stream_maxlen],
+            )
+            if result:
+                self.logger.info("已释放任务回队列: %s (%s)", data_id, reason or "released")
+            return bool(result)
+        except Exception as e:
+            self.logger.error(f"释放任务回队列失败: {e}")
+            return False
+
     async def fail_task(
         self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3
     ) -> bool:
@@ -725,6 +753,16 @@ class RedisQueueManager:
 
         except Exception as e:
             self.logger.error(f"获取待处理任务数失败: {e}")
+            return 0
+
+    async def get_stream_length(self) -> int:
+        if not self.client:
+            return 0
+
+        try:
+            return int(await self.client.xlen(self.stream_key))
+        except Exception as e:
+            self.logger.error(f"获取 Stream 长度失败: {e}")
             return 0
 
     async def get_stats(self) -> dict[str, Any]:

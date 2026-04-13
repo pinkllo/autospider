@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+from ..common.config import normalize_pipeline_mode
 
 
 def _parse_optional_bool(raw_value: Any) -> bool | None:
@@ -35,8 +36,6 @@ class DurabilityState(str, Enum):
 
 
 class PipelineMode(str, Enum):
-    MEMORY = "memory"
-    FILE = "file"
     REDIS = "redis"
 
 
@@ -122,11 +121,7 @@ class ExecutionRequest(BaseModel):
             consumer_concurrency=payload.get("consumer_concurrency"),
             max_pages=payload.get("max_pages"),
             target_url_count=payload.get("target_url_count"),
-            pipeline_mode=(
-                PipelineMode(str(payload.get("pipeline_mode") or "").strip().lower())
-                if str(payload.get("pipeline_mode") or "").strip()
-                else None
-            ),
+            pipeline_mode=PipelineMode(normalize_pipeline_mode(payload.get("pipeline_mode"))),
             guard_intervention_mode=guard_intervention_mode,
             guard_thread_id=thread_id,
             selected_skills=list(payload.get("selected_skills") or []),

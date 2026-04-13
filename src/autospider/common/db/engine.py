@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import Generator
 from urllib.parse import urlsplit, urlunsplit
 
-from sqlalchemy import MetaData, Table, create_engine, event, inspect
+from sqlalchemy import MetaData, Table, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -192,13 +192,23 @@ def session_scope() -> Generator[Session, None, None]:
 
 
 def _drop_known_tables(engine: Engine) -> None:
-    metadata = MetaData()
-    inspector = inspect(engine)
-    for table_name in _LEGACY_TABLES:
-        if not inspector.has_table(table_name):
-            continue
-        table = Table(table_name, metadata, autoload_with=engine)
-        table.drop(engine)
+    dialect = engine.dialect.name.lower()
+    with engine.begin() as connection:
+        for table_name in _LEGACY_TABLES:
+            if dialect == "postgresql":
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+                connection.execute(text(f'DROP SEQUENCE IF EXISTS "{table_name}_id_seq" CASCADE'))
+                continue
+            if dialect == "sqlite":
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
+                continue
+
+            metadata = MetaData()
+            inspector = inspect(engine)
+            if not inspector.has_table(table_name):
+                continue
+            table = Table(table_name, metadata, autoload_with=engine)
+            table.drop(connection, checkfirst=True)
 
 
 def _find_missing_columns(engine: Engine, table_name: str, expected: set[str]) -> list[str]:

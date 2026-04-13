@@ -3,7 +3,7 @@
 每个 SubTaskWorker 为一个子任务提供独立的执行环境：
 - 独立输出目录
 - 复用现有 run_pipeline() 作为执行引擎
-- 根据配置选择 memory/redis，并在 redis 下做子任务队列隔离
+- 统一走 Redis，并按子任务隔离队列命名空间
 """
 
 from __future__ import annotations
@@ -233,7 +233,6 @@ class SubTaskWorker:
 
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         working_subtask = self.subtask
-        spawned_subtasks: list[dict] = []
         journal_entries: list[dict] = []
 
         logger.info(

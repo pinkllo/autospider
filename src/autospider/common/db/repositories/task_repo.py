@@ -257,6 +257,33 @@ class TaskRepository:
         self._session.flush()
         return self._serialize_run_item(row)
 
+    def release_claimed_item(
+        self,
+        *,
+        execution_id: str,
+        url: str,
+        worker_id: str,
+        terminal_reason: str,
+    ) -> dict[str, Any]:
+        row = self._query_run_item(execution_id=execution_id, url=url)
+        if row is None:
+            raise RuntimeError("missing_claimed_item")
+        if str(row.claim_state or "").strip().lower() != "claimed":
+            raise RuntimeError("release_requires_claimed_item")
+        current_worker_id = str(row.worker_id or "")
+        expected_worker_id = str(worker_id or "")
+        if current_worker_id != expected_worker_id:
+            raise RuntimeError("release_claim_worker_mismatch")
+        if str(row.durability_state or "").strip().lower() == DURABLE_STATE:
+            raise RuntimeError("release_requires_staged_item")
+        row.claim_state = "pending"
+        row.durability_state = STAGED_STATE
+        row.terminal_reason = str(terminal_reason or "released_claim")
+        row.worker_id = ""
+        row.updated_at = datetime.now()
+        self._session.flush()
+        return self._serialize_run_item(row)
+
     def release_inflight_items_for_resume(self, execution_id: str) -> int:
         if not execution_id:
             return 0

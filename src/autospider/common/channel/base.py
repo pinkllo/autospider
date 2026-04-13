@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass
-from typing import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable
 
 
 AckFn = Callable[[], Awaitable[None]]
 FailFn = Callable[[str], Awaitable[None]]
+ReleaseFn = Callable[[str], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelRuntimeEvent:
+    operation: str
+    item_count: int = 0
+    reason: str = ""
+    drained: bool | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+ChannelRuntimeObserver = Callable[[ChannelRuntimeEvent], None]
 
 
 @dataclass
@@ -18,6 +31,7 @@ class URLTask:
     url: str
     ack: AckFn | None = None
     fail: FailFn | None = None
+    release: ReleaseFn | None = None
 
     async def ack_task(self) -> None:
         if self.ack:
@@ -26,6 +40,11 @@ class URLTask:
     async def fail_task(self, reason: str) -> None:
         if self.fail:
             await self.fail(reason)
+
+    async def release_task(self, reason: str) -> None:
+        if self.release is None:
+            raise RuntimeError("task_release_unsupported")
+        await self.release(reason)
 
 
 class URLChannel(abc.ABC):
