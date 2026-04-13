@@ -54,6 +54,7 @@ scripts/
 /docs/
 CLAUDE.md
 /skills/
+/.agent/
 
 # Playwright
 playwright-report/
