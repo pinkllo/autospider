@@ -68,8 +68,6 @@ def _resolve_runtime_failure_records(payload: dict[str, Any], world_snapshot: di
         return list(model_failures)
     legacy_failures = payload.get("failure_records")
     return list(legacy_failures) if isinstance(legacy_failures, list) else []
-
-
 class PromotionState(str, Enum):
     REUSABLE = "reusable"
     DIAGNOSTIC_ONLY = "diagnostic_only"

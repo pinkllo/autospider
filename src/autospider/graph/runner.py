@@ -214,7 +214,7 @@ class GraphRunner:
                 "matched_skills": [],
                 "selected_skills": [],
             },
-            "world": {"request_params": {}, "collection_config": {}, "world_model": {}, "failure_records": []},
+            "world": {"collection_config": {}, "world_model": {}, "failure_records": []},
             "control": {"current_plan": {}, "task_plan": None, "plan_knowledge": "", "stage_status": "", "active_strategy": {}},
             "execution": {"dispatch_summary": {}, "subtask_results": []},
             "result": {"status": "", "summary": {}, "data": {}, "artifacts": []},

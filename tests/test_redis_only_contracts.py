@@ -7,7 +7,7 @@ from autospider.common.channel import __all__ as channel_exports
 from autospider.common.channel.factory import create_url_channel
 from autospider.common.channel.redis_channel import RedisURLChannel
 from autospider.pipeline.helpers import build_execution_context
-from autospider.pipeline.types import ExecutionRequest, PipelineMode
+from autospider.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
 
 
 def _reset_config_cache() -> None:
@@ -37,6 +37,22 @@ def test_execution_request_normalizes_blank_pipeline_mode_to_redis() -> None:
     request = ExecutionRequest.from_params({"pipeline_mode": "  "})
 
     assert request.pipeline_mode is PipelineMode.REDIS
+
+
+@pytest.mark.parametrize(
+    ("raw_resume_mode", "expected"),
+    [
+        (ResumeMode.FRESH, ResumeMode.FRESH),
+        (ResumeMode.RESUME, ResumeMode.RESUME),
+    ],
+)
+def test_execution_request_accepts_resume_mode_enum_input(
+    raw_resume_mode: ResumeMode,
+    expected: ResumeMode,
+) -> None:
+    request = ExecutionRequest.from_params({"resume_mode": raw_resume_mode})
+
+    assert request.resume_mode is expected
 
 
 @pytest.mark.parametrize("legacy_mode", ["memory", "file"])

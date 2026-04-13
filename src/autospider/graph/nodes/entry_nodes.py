@@ -287,7 +287,7 @@ def route_entry(state: dict[str, Any]) -> dict[str, Any]:
         return _fatal("invalid_entry_mode", f"不支持的 entry_mode: {mode}")
     return {
         **_ok({"entry_mode": mode}),
-        "normalized_params": apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
+        "normalized_params": _apply_serial_mode_overrides(dict(state.get("cli_args") or {})),
     }
 
 
