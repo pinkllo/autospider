@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import inspect
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -15,7 +17,6 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.types import GraphResult
 from tests.e2e.contracts import (
     BASE_URL_PLACEHOLDER,
     BUSINESS_FIELDS,
@@ -23,6 +24,22 @@ from tests.e2e.contracts import (
     GraphE2ECase,
     resolve_golden_path,
 )
+from tests.e2e.mock_site.pages import render_home_page
+
+
+def _load_graph_result_type() -> type:
+    module_path = SRC_ROOT / "autospider" / "graph" / "types.py"
+    spec = importlib.util.spec_from_file_location("autospider.graph.types", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 GraphResult 类型文件: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.GraphResult
+
+
+GraphResult = _load_graph_result_type()
+
+pytestmark = pytest.mark.e2e
 
 CASE_IDS = (
     "graph_all_categories",
@@ -187,6 +204,46 @@ def _load_records(path: Path) -> list[dict[str, Any]]:
     return payload
 
 
+def _assert_same_page_variant_records(records: list[dict[str, Any]], *, base_url: str) -> None:
+    normalized_base_url = base_url.rstrip("/")
+    deal_prefix = f"{normalized_base_url}/details/deal/"
+    deal_attachment_prefix = f"{normalized_base_url}/downloads/deal/"
+    announcement_prefix = f"{normalized_base_url}/details/announcement/"
+    announcement_attachment_prefix = f"{normalized_base_url}/downloads/announcement/"
+
+    assert records, "same-page variant 不应产出空结果"
+    for row in records:
+        url = str(row.get("url") or "")
+        attachment_url = str(row.get("attachment_url") or "")
+        assert url.startswith(deal_prefix), f"发现非成交结果详情 URL: {url}"
+        assert attachment_url.startswith(
+            deal_attachment_prefix
+        ), f"发现非成交结果附件 URL: {attachment_url}"
+        assert not url.startswith(announcement_prefix), f"混入通知公告详情 URL: {url}"
+        assert not attachment_url.startswith(
+            announcement_attachment_prefix
+        ), f"混入通知公告附件 URL: {attachment_url}"
+
+
+def test_same_page_variant_home_page_contains_text_decoy_before_real_tab() -> None:
+    html = render_home_page(base_url="https://mock.local")
+
+    decoy_match = re.search(
+        r'<(?:div|button)[^>]+id="deals-tab-decoy"[^>]*>\s*成交结果\s*</(?:div|button)>',
+        html,
+    )
+    real_match = re.search(
+        r'<button[^>]+id="deals-tab"[^>]*>\s*.*?成交结果\s*</button>',
+        html,
+        re.DOTALL,
+    )
+
+    assert decoy_match is not None, "same-page variant 首页缺少同文案干扰按钮"
+    assert real_match is not None, "same-page variant 首页缺少真实成交结果 tab"
+    assert decoy_match.start() < real_match.start(), "干扰按钮必须先于真实 tab 出现"
+    assert "document.getElementById('deals-tab').click();" not in html, "快捷入口不应直接触发真实成交结果 tab"
+
+
 def _materialize_expected_records(records: list[dict[str, Any]], *, base_url: str) -> list[dict[str, Any]]:
     normalized_base_url = base_url.rstrip("/")
     rendered: list[dict[str, Any]] = []
@@ -282,3 +339,5 @@ async def test_graph_e2e(case_id: str, request: pytest.FixtureRequest) -> None:
 
     assert actual_records == expected_records
     assert actual_summary == expected_summary
+    if case_id == "graph_same_page_variant":
+        _assert_same_page_variant_records(actual_records, base_url=base_url)

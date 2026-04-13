@@ -10,6 +10,9 @@ from ...common.logger import get_logger
 
 logger = get_logger(__name__)
 _ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
+_SAME_PAGE_ROLES = {"tab", "option", "menuitem", "menuitemradio", "treeitem"}
+_SAME_PAGE_TAGS = {"button"}
+_EMPTY_HREF_VALUES = {"", "#", "javascript:void(0)", "javascript:void(0);", "javascript:;"}
 
 
 def normalize_planner_nav_step(step: dict[str, Any]) -> dict[str, Any]:
@@ -55,7 +58,23 @@ class PlannerPageState:
         stable_candidates = self._stable_xpath_candidates(step)
         if stable_candidates:
             payload["clicked_element_xpath_candidates"] = stable_candidates
+        stable_validation = self._stable_state_validation(step)
+        if stable_validation:
+            payload["state_validation"] = stable_validation
 
+        return payload
+
+    def _stable_state_validation(self, step: dict[str, Any]) -> dict[str, str]:
+        raw = step.get("state_validation")
+        if not isinstance(raw, dict):
+            return {}
+        kind = str(raw.get("kind") or "").strip().lower()
+        interaction_xpath = str(raw.get("interaction_xpath") or "").strip()
+        if not kind:
+            return {}
+        payload = {"kind": kind}
+        if interaction_xpath:
+            payload["interaction_xpath"] = interaction_xpath
         return payload
 
     def normalize_nav_steps(self, nav_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -114,7 +133,7 @@ class PlannerPageState:
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
-        if not replay_ok:
+        if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
             return False
 
@@ -133,7 +152,7 @@ class PlannerPageState:
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
-        if not replay_ok:
+        if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 基于当前页面重放子状态失败，nav_steps=%d", len(nav_steps))
             return False
 
@@ -166,7 +185,7 @@ class PlannerPageState:
         for mark in marks:
             if mark.mark_id != mark_id:
                 continue
-            return {
+            step = {
                 "action": "click",
                 "mark_id": mark_id,
                 "target_text": str(getattr(mark, "text", "") or "").strip(),
@@ -185,7 +204,51 @@ class PlannerPageState:
                 ],
                 "success": True,
             }
+            state_validation = self._build_same_page_validation(step)
+            if state_validation:
+                step["state_validation"] = state_validation
+            return step
         return None
+
+    def _is_replay_result_valid(self, replay_result: Any) -> bool:
+        success = getattr(replay_result, "success", None)
+        if success is False:
+            return False
+        if success is None and not replay_result:
+            return False
+        required = int(getattr(replay_result, "required_validation_steps", 0) or 0)
+        if required <= 0:
+            return True
+        validated = int(getattr(replay_result, "validated_steps", 0) or 0)
+        status = str(getattr(replay_result, "validation_status", "") or "").strip().lower()
+        return status == "passed" and validated >= required
+
+    def _build_same_page_validation(self, step: dict[str, Any]) -> dict[str, str]:
+        href = str(step.get("clicked_element_href") or "").strip().lower()
+        if href not in _EMPTY_HREF_VALUES:
+            return {}
+        role = str(step.get("clicked_element_role") or "").strip().lower()
+        tag = str(step.get("clicked_element_tag") or "").strip().lower()
+        if role not in _SAME_PAGE_ROLES and tag not in _SAME_PAGE_TAGS:
+            return {}
+        xpath = self._first_xpath_candidate(step)
+        if not xpath:
+            return {}
+        return {
+            "kind": "same_page_activation",
+            "interaction_xpath": xpath,
+        }
+
+    def _first_xpath_candidate(self, step: dict[str, Any]) -> str:
+        candidates = sorted(
+            list(step.get("clicked_element_xpath_candidates") or []),
+            key=lambda item: item.get("priority", 99),
+        )
+        for candidate in candidates:
+            xpath = str(candidate.get("xpath") or "").strip()
+            if xpath:
+                return xpath
+        return ""
 
     async def get_dom_signature(self) -> str:
         try:

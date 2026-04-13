@@ -83,15 +83,24 @@ BAILIAN_MODEL=qwen3.5-plus
 # SILICON_PLANNER_API_KEY=your_planner_key
 # SILICON_PLANNER_MODEL=qwen-vl-plus
 
+REDIS_ENABLED=true
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
 HEADLESS=false
-PIPELINE_MODE=memory
+PIPELINE_MODE=redis
 ```
 
 *Note: if `--mode` is not passed to `chat-pipeline`, the default comes from `PIPELINE_MODE`. The current code accepts backend values `memory`, `file`, and `redis`. Switch to `redis` only after installing and configuring the Redis-related dependencies.*
 
 ## 🚀 Quick Start
 
-### 0) AI-Driven Interactive Crawling (Recommended 🎉)
+### 0) Run environment checks first
+
+```bash
+autospider doctor
+```
+
+### 1) AI-Driven Interactive Crawling (Recommended 🎉)
 
 Chat your way to data. The system clarifies the task, optionally reuses historical tasks, asks for final review, then enters planning and concurrent subtask dispatch automatically:
 
@@ -165,9 +174,13 @@ src/autospider/
 ## 🧪 Development & Testing
 
 ```bash
-pip install -e ".[dev]"
-pytest
+pip install -e ".[redis,db,dev]"
+autospider doctor
+pytest -m smoke -q
+pytest tests/e2e -m e2e -q
 ```
+
+`pytest tests/e2e -m e2e -q` is the only maintained E2E entrypoint now. When the runtime dependencies or infra are unavailable, the suite exits through explicit `skip`s instead of failing during `pytest configure`. See [`tests/e2e/README.md`](tests/e2e/README.md) for the full end-to-end setup notes.
 
 ## 📄 License
 

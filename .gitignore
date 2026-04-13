@@ -49,7 +49,11 @@ scripts/
 .pytest_tmp*/
 .tmp_pytest*/
 .pytest_tmp_run*/
+/.tmp/
+/tmp/
+/docs/
 CLAUDE.md
+/skills/
 
 # Playwright
 playwright-report/

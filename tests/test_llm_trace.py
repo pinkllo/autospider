@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.smoke
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:

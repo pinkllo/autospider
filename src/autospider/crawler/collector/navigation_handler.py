@@ -29,6 +29,22 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+_ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
+_ARIA_CURRENT_ACTIVE_VALUES = {"true", "page", "step", "location"}
+
+
+@dataclass(slots=True)
+class ReplayNavigationResult:
+    success: bool
+    executed_steps: int = 0
+    failed_step: int | None = None
+    failure_reason: str = ""
+    validation_status: str = "not_requested"
+    required_validation_steps: int = 0
+    validated_steps: int = 0
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 
@@ -312,26 +328,33 @@ class NavigationHandler:
             logger.warning("[Nav] ⚠ 导航阶段达到最大步数 %s，继续探索", self.max_nav_steps)
             return False
 
-    async def replay_nav_steps(self, nav_steps: list[dict] = None) -> bool:
+    async def replay_nav_steps(self, nav_steps: list[dict] = None) -> ReplayNavigationResult:
         """重放导航步骤（使用记录的 xpath）"""
         steps = nav_steps if nav_steps is not None else self.nav_steps
         if not steps:
-            return False
+            return ReplayNavigationResult(success=False, failure_reason="no_replay_steps")
 
-        all_success = True
         executed_steps = 0
+        required_validation_steps = 0
+        validated_steps = 0
 
-        for step in steps:
+        for step_index, step in enumerate(steps, start=1):
             if not step.get("success"):
                 continue
 
             action_type = (step.get("action") or "").lower()
             step_success = True
+            failure_reason = "replay_step_failed"
+            validation = step.get("state_validation") if isinstance(step.get("state_validation"), dict) else {}
+            validation_kind = str(validation.get("kind") or "").strip().lower()
+            if validation_kind == "same_page_activation":
+                required_validation_steps += 1
 
             if action_type in ["click", "type"]:
                 locator = await self._resolve_replay_locator(step)
                 if locator is None:
                     step_success = False
+                    failure_reason = "replay_locator_not_found"
                 else:
                     try:
                         if action_type == "click":
@@ -357,8 +380,8 @@ class NavigationHandler:
                                     logger.info(
                                         "[Replay] ✓ 切换到新标签页: %s", self.page.url
                                     )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug("[Replay] 点击后未捕获新页面: %s", exc)
                             await asyncio.sleep(1)
                         elif action_type == "type":
                             text = step.get("text") or ""
@@ -380,6 +403,7 @@ class NavigationHandler:
                     except Exception as e:
                         logger.error("[Replay] ✗ 执行失败: %s", e)
                         step_success = False
+                        failure_reason = f"replay_{action_type}_failed"
             elif action_type == "scroll":
                 delta = step.get("scroll_delta") or (0, 300)
                 try:
@@ -389,10 +413,12 @@ class NavigationHandler:
                 except Exception as e:
                     logger.error("[Replay] ✗ 滚动失败: %s", e)
                     step_success = False
+                    failure_reason = "replay_scroll_failed"
             elif action_type == "navigate":
                 url = step.get("url")
                 if not url:
                     step_success = False
+                    failure_reason = "replay_url_missing"
                 else:
                     try:
                         logger.info("[Replay] 导航: %s", url)
@@ -401,6 +427,7 @@ class NavigationHandler:
                     except Exception as e:
                         logger.error("[Replay] ✗ 导航失败: %s", e)
                         step_success = False
+                        failure_reason = "replay_navigate_failed"
             elif action_type == "wait":
                 timeout_ms = step.get("timeout_ms") or 2000
                 try:
@@ -416,6 +443,7 @@ class NavigationHandler:
                 except Exception as e:
                     logger.error("[Replay] ✗ 返回失败: %s", e)
                     step_success = False
+                    failure_reason = "replay_go_back_failed"
             elif action_type == "go_back_tab":
                 try:
                     logger.info("[Replay] 返回上一个标签页")
@@ -432,6 +460,7 @@ class NavigationHandler:
                         break
                     if target_page is None:
                         step_success = False
+                        failure_reason = "replay_tab_not_found"
                     else:
                         try:
                             await current_page.close()
@@ -443,14 +472,44 @@ class NavigationHandler:
                 except Exception as e:
                     logger.error("[Replay] ✗ 返回标签页失败: %s", e)
                     step_success = False
+                    failure_reason = "replay_go_back_tab_failed"
             else:
                 continue
 
             executed_steps += 1
             if not step_success:
-                all_success = False
+                return ReplayNavigationResult(
+                    success=False,
+                    executed_steps=executed_steps,
+                    failed_step=step_index,
+                    failure_reason=failure_reason,
+                    validation_status="failed" if required_validation_steps else "not_requested",
+                    required_validation_steps=required_validation_steps,
+                    validated_steps=validated_steps,
+                )
+            if validation_kind == "same_page_activation":
+                if not await self._validate_same_page_activation(step):
+                    return ReplayNavigationResult(
+                        success=False,
+                        executed_steps=executed_steps,
+                        failed_step=step_index,
+                        failure_reason="same_page_state_not_activated",
+                        validation_status="failed",
+                        required_validation_steps=required_validation_steps,
+                        validated_steps=validated_steps,
+                    )
+                validated_steps += 1
 
-        return executed_steps > 0 and all_success
+        if executed_steps == 0:
+            return ReplayNavigationResult(success=False, failure_reason="no_replayable_steps")
+        validation_status = "passed" if required_validation_steps else "not_requested"
+        return ReplayNavigationResult(
+            success=True,
+            executed_steps=executed_steps,
+            validation_status=validation_status,
+            required_validation_steps=required_validation_steps,
+            validated_steps=validated_steps,
+        )
 
     async def _resolve_replay_locator(self, step: dict):
         xpath_candidates = list(step.get("clicked_element_xpath_candidates") or [])
@@ -496,3 +555,58 @@ class NavigationHandler:
             if normalized_target and normalized_target in normalized_text:
                 return candidate
         return None
+
+    async def _validate_same_page_activation(self, step: dict) -> bool:
+        interaction_xpath = self._get_interaction_xpath(step)
+        if not interaction_xpath:
+            return False
+        state = await self._get_interaction_state(interaction_xpath)
+        return self._is_active_interaction_state(state)
+
+    def _get_interaction_xpath(self, step: dict) -> str:
+        validation = step.get("state_validation") if isinstance(step.get("state_validation"), dict) else {}
+        interaction_xpath = str(validation.get("interaction_xpath") or "").strip()
+        if interaction_xpath:
+            return interaction_xpath
+        xpath_candidates = list(step.get("clicked_element_xpath_candidates") or [])
+        xpath_candidates_sorted = sorted(xpath_candidates, key=lambda item: item.get("priority", 99))
+        for candidate in xpath_candidates_sorted:
+            xpath = str(candidate.get("xpath") or "").strip()
+            if xpath:
+                return xpath
+        return ""
+
+    async def _get_interaction_state(self, xpath: str) -> dict[str, str]:
+        try:
+            state = await self.page.evaluate(
+                """(xpath) => {
+                    const result = document.evaluate(
+                        xpath, document, null,
+                        XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                    );
+                    const el = result.singleNodeValue;
+                    if (!el) return {};
+                    return {
+                        class_name: String(el.className || ''),
+                        aria_selected: String(el.getAttribute('aria-selected') || ''),
+                        aria_current: String(el.getAttribute('aria-current') || ''),
+                        data_state: String(el.getAttribute('data-state') || ''),
+                    };
+                }""",
+                xpath,
+            )
+            return dict(state or {})
+        except Exception:
+            return {}
+
+    def _is_active_interaction_state(self, state: dict[str, str] | None) -> bool:
+        if not state:
+            return False
+        class_name = str(state.get("class_name") or "").lower()
+        if any(token in class_name for token in _ACTIVE_STATE_TOKENS):
+            return True
+        if str(state.get("aria_selected") or "").lower() == "true":
+            return True
+        if str(state.get("aria_current") or "").lower() in _ARIA_CURRENT_ACTIVE_VALUES:
+            return True
+        return str(state.get("data_state") or "").lower() in _ACTIVE_STATE_TOKENS

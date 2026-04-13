@@ -52,7 +52,7 @@ def render_home_page(*, base_url: str) -> str:
             <div class="ql-icon ql-icon-deal">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </div>
-            <span>成交结果</span>
+            <span>快捷入口</span>
           </div>
           <div class="quick-link-card">
             <div class="ql-icon ql-icon-help">
@@ -80,6 +80,9 @@ def render_home_page(*, base_url: str) -> str:
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
               站点总览
             </button>
+            <div id="deals-tab-decoy" class="tab-button tab-button-decoy" aria-hidden="true">
+              成交结果
+            </div>
             <button id="deals-tab" class="tab-button" type="button" data-panel="deals-panel">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
               成交结果
@@ -179,7 +182,6 @@ def render_home_page(*, base_url: str) -> str:
         const qlDeals = document.getElementById('ql-deals-link');
         if (qlDeals) {{
           qlDeals.addEventListener('click', () => {{
-            document.getElementById('deals-tab').click();
             document.querySelector('.tabs-card').scrollIntoView({{ behavior: 'smooth' }});
           }});
         }}
@@ -1344,7 +1346,7 @@ def _layout(*, title: str, body: str) -> str:
       <nav class="header-nav">
         <a href="/" class="nav-active">首页</a>
         <a href="/announcements?page=1">通知公告</a>
-        <a href="/">成交结果</a>
+        <a href="/">结果频道</a>
         <a href="#">政策法规</a>
         <a href="#">办事指南</a>
       </nav>
@@ -1374,7 +1376,7 @@ def _layout(*, title: str, body: str) -> str:
           <div class="footer-link-group">
             <h4>信息服务</h4>
             <a href="/announcements?page=1">通知公告</a>
-            <a href="/">成交结果</a>
+            <a href="/">结果频道</a>
             <a href="#">政策法规</a>
           </div>
           <div class="footer-link-group">

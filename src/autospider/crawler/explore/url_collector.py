@@ -109,7 +109,15 @@ class URLCollector(BaseCollector):
         if self.initial_nav_steps:
             logger.info("\n[Phase 1] 重放 planner 导航路径...")
             nav_success = await self.navigation_handler.replay_nav_steps(self.initial_nav_steps)
-            if not nav_success:
+            replay_succeeded = (
+                bool(getattr(nav_success, "success"))
+                if getattr(nav_success, "success", None) is not None
+                else bool(nav_success)
+            )
+            if not replay_succeeded:
+                failure_reason = str(getattr(nav_success, "failure_reason", "") or "").strip()
+                if failure_reason:
+                    raise RuntimeError(f"planner_nav_steps_replay_failed:{failure_reason}")
                 raise RuntimeError("planner_nav_steps_replay_failed")
             self.nav_steps = list(self.initial_nav_steps)
             logger.info("[URLCollector] ✓ planner 导航路径重放完成，共 %s 步", len(self.nav_steps))

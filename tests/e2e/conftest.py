@@ -1,10 +1,30 @@
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TESTS_ROOT = REPO_ROOT / "tests"
+WORKSPACE_PREFIX = "autospider-e2e-runtime-"
+
+
+def _ensure_local_tests_package() -> None:
+    tests_module = sys.modules.get("tests")
+    expected_path = str(TESTS_ROOT)
+    current_paths = [str(path) for path in getattr(tests_module, "__path__", [])]
+    if expected_path in current_paths:
+        return
+    local_tests = types.ModuleType("tests")
+    local_tests.__path__ = [expected_path]
+    sys.modules["tests"] = local_tests
+
+
+_ensure_local_tests_package()
 
 from tests.e2e.cases import CASE_BY_ID
 from tests.e2e.env import (
@@ -20,7 +40,7 @@ _SESSION_RUNTIME_SKIP_REASON: str | None = None
 
 
 def _ensure_src_path() -> None:
-    src_root = Path(__file__).resolve().parents[2] / "src"
+    src_root = REPO_ROOT / "src"
     src_text = str(src_root)
     if src_text not in sys.path:
         sys.path.insert(0, src_text)
@@ -29,16 +49,46 @@ def _ensure_src_path() -> None:
 _ensure_src_path()
 
 
+def _session_workspace_root() -> Path:
+    return REPO_ROOT / ".tmp" / "e2e-runtime"
+
+
+def _workspace_roots() -> tuple[Path, ...]:
+    return (
+        _session_workspace_root(),
+        REPO_ROOT / "artifacts" / "test_tmp" / "e2e-runtime",
+    )
+
+
+def _create_workspace(base_dir: Path) -> Path:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    workspace = tempfile.mkdtemp(prefix=WORKSPACE_PREFIX, dir=base_dir)
+    return Path(workspace)
+
+
+def _initialize_session_runtime(workspace_root: Path | None = None) -> tuple[E2ERuntime | None, str | None]:
+    roots = (workspace_root,) if workspace_root is not None else _workspace_roots()
+    last_error: Exception | None = None
+    for base_dir in roots:
+        workspace: Path | None = None
+        try:
+            workspace = _create_workspace(base_dir)
+            return prepare_e2e_runtime(workspace), None
+        except (RuntimeError, PermissionError, OSError, ModuleNotFoundError) as exc:
+            last_error = exc
+            if workspace is not None:
+                shutil.rmtree(workspace, ignore_errors=True)
+    if last_error is None:
+        return None, "E2E 基础设施不可用: 未找到可写工作目录。"
+    return None, f"E2E 基础设施不可用: {last_error}"
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "e2e: end-to-end graph tests")
     global _SESSION_RUNTIME, _SESSION_RUNTIME_SKIP_REASON
     if _SESSION_RUNTIME is not None or _SESSION_RUNTIME_SKIP_REASON is not None:
         return
-    workspace = Path(tempfile.mkdtemp(prefix="autospider-e2e-runtime-"))
-    try:
-        _SESSION_RUNTIME = prepare_e2e_runtime(workspace)
-    except RuntimeError as exc:
-        _SESSION_RUNTIME_SKIP_REASON = f"E2E 基础设施不可用: {exc}"
+    _SESSION_RUNTIME, _SESSION_RUNTIME_SKIP_REASON = _initialize_session_runtime()
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -54,12 +104,13 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     del config
-    if _SESSION_RUNTIME_SKIP_REASON is None:
-        return
-    skip_marker = pytest.mark.skip(reason=_SESSION_RUNTIME_SKIP_REASON)
     e2e_root = Path(__file__).resolve().parent
     for item in items:
         if Path(str(item.fspath)).resolve().is_relative_to(e2e_root):
+            item.add_marker(pytest.mark.e2e)
+            if _SESSION_RUNTIME_SKIP_REASON is None:
+                continue
+            skip_marker = pytest.mark.skip(reason=_SESSION_RUNTIME_SKIP_REASON)
             item.add_marker(skip_marker)
 
 
@@ -112,12 +163,31 @@ def graph_e2e_driver():
     return GraphRunnerE2EHarness()
 
 
+def _is_sqlalchemy_infra_error(exc: Exception) -> bool:
+    try:
+        from sqlalchemy.exc import SQLAlchemyError
+    except ModuleNotFoundError:
+        return False
+    return isinstance(exc, SQLAlchemyError)
+
+
+def _reset_or_skip_e2e_state() -> None:
+    try:
+        reset_e2e_state()
+    except (ModuleNotFoundError, OSError, RuntimeError) as exc:
+        pytest.skip(f"E2E 基础设施不可用: {exc}")
+    except Exception as exc:
+        if _is_sqlalchemy_infra_error(exc):
+            pytest.skip(f"E2E 基础设施不可用: {exc}")
+        raise
+
+
 @pytest.fixture(autouse=True)
 def e2e_case_state(e2e_runtime: E2ERuntime):
     del e2e_runtime
-    reset_e2e_state()
+    _reset_or_skip_e2e_state()
     yield
-    reset_e2e_state()
+    _reset_or_skip_e2e_state()
 
 
 @pytest.fixture()

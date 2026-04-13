@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from .workflow_access import coerce_workflow_state, final_error
 
@@ -245,7 +245,24 @@ def select_error(
     return get_error_state(snapshot_values)
 
 
-def get_stage_status(state: Mapping[str, Any] | None) -> str:
+StageName = Literal["conversation", "planning", "dispatch", "result"]
+
+
+def _stage_status_from_state(state: dict[str, Any], stage: StageName) -> str:
+    if stage == "conversation":
+        return str(conversation_state(state).get("status") or "")
+    if stage == "planning":
+        return str(planning_state(state).get("status") or "")
+    if stage == "dispatch":
+        return str(dispatch_state(state).get("status") or "")
+    return str(result_state(state).get("status") or "")
+
+
+def get_stage_status(
+    state: Mapping[str, Any] | None,
+    *,
+    stage: StageName | None = None,
+) -> str:
     graph_state = _as_dict(state)
     control = _as_dict(graph_state.get("control"))
     return str(

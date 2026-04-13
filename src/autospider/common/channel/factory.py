@@ -1,13 +1,10 @@
-"""URL 通道（Channel）工厂模块，用于根据配置创建统一 queue backend。"""
+"""URL 通道（Channel）工厂模块。"""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..config import config
+from ..config import config, normalize_pipeline_mode
 from .base import URLChannel
-from .memory_channel import MemoryURLChannel
-from .file_channel import FileURLChannel
+from .redis_channel import RedisURLChannel
 
 
 def create_url_channel(
@@ -15,62 +12,23 @@ def create_url_channel(
     output_dir: str = "output",
     redis_key_prefix: str | None = None,
 ) -> URLChannel:
-    """根据配置或指定模式创建 URL 通道。
+    """根据配置或指定模式创建 Redis URL 通道。"""
+    selected = normalize_pipeline_mode(config.pipeline.mode if mode is None else mode)
 
-    支持以下模式：
-    - 'memory': 基于 asyncio.Queue 的内存队列，适用于单机小型任务。
-    - 'file': 基于本地文件的持久化队列。
-    - 'redis': 基于 Redis Stream 的分布式队列，支持 ACK 机制和多机协同。
+    _ = output_dir
+    from ..storage.redis_manager import RedisQueueManager
 
-    Args:
-        mode: 通道模式 ('memory', 'file', 'redis')。如果为 None，则从全局配置中读取。
-        output_dir: 文件模式下保存 URL 和进度文件的目录。
-        redis_key_prefix: Redis 模式下覆盖默认 key_prefix（用于队列隔离）。
-
-    Raises:
-        ValueError: 当指定的模式不支持时抛出。
-    """
-    # 获取并标准化选择的模式名称
-    selected_mode = config.pipeline.mode if mode is None else mode
-    selected = str(selected_mode).lower().strip()
-
-    if selected == "memory":
-        # 内存模式：最基础的模式，适合简单的本地脚本运行
-        channel = MemoryURLChannel(maxsize=config.pipeline.memory_queue_size)
-        return channel
-
-    if selected == "file":
-        # 文件模式：通过本地文件持久化任务，支持任务的中断恢复
-        base_dir = Path(output_dir)
-        urls_file = base_dir / "urls.txt"
-        cursor_file = base_dir / config.pipeline.file_cursor_name
-        channel = FileURLChannel(
-            urls_file=urls_file,
-            cursor_file=cursor_file,
-            poll_interval=config.pipeline.file_poll_interval,
-        )
-        return channel
-
-    if selected == "redis":
-        # Redis 模式：生产级分布式模式，核心特性是基于 Stream 的可靠消息处理
-        # 如果调用者没有提供 manager，则根据全局配置创建一个新的
-        from ..storage.redis_manager import RedisQueueManager
-        from .redis_channel import RedisURLChannel
-
-        key_prefix = (redis_key_prefix or config.redis.key_prefix).strip() or config.redis.key_prefix
-        manager = RedisQueueManager(
-            host=config.redis.host,
-            port=config.redis.port,
-            password=config.redis.password,
-            db=config.redis.db,
-            key_prefix=key_prefix,
-        )
-        channel = RedisURLChannel(
-            manager=manager,
-            consumer_name=config.redis.consumer_name,
-            block_ms=config.redis.fetch_block_ms,
-            max_retries=config.redis.max_retries,
-        )
-        return channel
-
-    raise ValueError(f"不支持的流水线模式 (Unsupported pipeline mode): {selected}")
+    key_prefix = (redis_key_prefix or config.redis.key_prefix).strip() or config.redis.key_prefix
+    manager = RedisQueueManager(
+        host=config.redis.host,
+        port=config.redis.port,
+        password=config.redis.password,
+        db=config.redis.db,
+        key_prefix=key_prefix,
+    )
+    return RedisURLChannel(
+        manager=manager,
+        consumer_name=config.redis.consumer_name,
+        block_ms=config.redis.fetch_block_ms,
+        max_retries=config.redis.max_retries,
+    )

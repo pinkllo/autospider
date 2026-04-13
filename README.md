@@ -84,15 +84,24 @@ BAILIAN_MODEL=qwen3.5-plus
 # SILICON_PLANNER_API_KEY=your_planner_key
 # SILICON_PLANNER_MODEL=qwen-vl-plus
 
+REDIS_ENABLED=true
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
 HEADLESS=false
-PIPELINE_MODE=memory
+PIPELINE_MODE=redis
 ```
 
 *注意：`chat-pipeline` 中若未显式传入 `--mode`，默认模式来自 `PIPELINE_MODE`。当前代码中的可选执行后端值为 `memory` / `file` / `redis`。如果已安装 Redis 相关依赖并完成配置，可再切换到 `redis`。*
 
 ## 🚀 快速开始
 
-### 0) 全自然语言多轮交互执行（最推荐 🎉）
+### 0) 先做环境自检
+
+```bash
+autospider doctor
+```
+
+### 1) 全自然语言多轮交互执行（最推荐 🎉）
 
 无需手写繁琐配置或分析结构。系统会先澄清任务、按需复用历史任务、执行 review，再进入 planning 与并发子任务调度：
 
@@ -118,7 +127,8 @@ autospider resume --thread-id "<thread_id>"
 
 ```text
 src/autospider/
-├── cli.py                     # 命令行入口 (chat-pipeline / resume / db-init)
+├── cli.py                     # 命令行入口 (doctor / chat-pipeline / resume / db-init)
+├── cli_runtime.py             # CLI 运行时装配与 doctor 自检 helper
 ├── graph/                     # LangGraph 状态图编排层（主图/恢复/汇总适配）
 │   ├── main_graph.py          #   主图构建与路由逻辑
 │   ├── runner.py              #   GraphRunner 统一执行入口
@@ -128,7 +138,6 @@ src/autospider/
 │       ├── entry_nodes.py     #     入口路由 / 参数归一化 / 对话澄清
 │       ├── capability_nodes.py#     各能力执行节点
 │       └── shared_nodes.py    #     共享收尾节点 (Artifact/Summary/Finalize)
-├── application/               # 应用层 use case（plan / dispatch / execute / aggregate）
 ├── common/                    # 过渡期通用基础设施（后续逐步拆分，不再新增业务模块）
 │   ├── config.py              #   全局配置管理
 │   ├── browser/               #   BrowserRuntimeSession 主生命周期抽象（BrowserSession 兼容层）
@@ -165,15 +174,19 @@ src/autospider/
 ```
 
 > 当前约束：
-> `application/` 是主链唯一业务入口层；历史兼容入口 `BrowserSession`、
-> `TaskRegistry`、`FieldXPathRegistry` 与旧 service facade 已移除。
+> 对外开发入口已收口为 `autospider doctor`、`chat-pipeline`、`resume`、`db-init`；
+> 历史兼容入口 `BrowserSession`、`TaskRegistry`、`FieldXPathRegistry` 与旧 service facade 已移除。
 
 ## 🧪 开发与测试
 
 ```bash
-pip install -e ".[dev]"
-pytest
+pip install -e ".[redis,db,dev]"
+autospider doctor
+pytest -m smoke -q
+pytest tests/e2e -m e2e -q
 ```
+
+其中 `pytest tests/e2e -m e2e -q` 是当前唯一维护的 E2E 入口；运行依赖或基础设施不可用时，会以显式 `skip` 收口，而不是在 `pytest configure` 阶段硬失败。更完整的闭环说明见 [`tests/e2e/README.md`](tests/e2e/README.md)。
 
 ## 📄 License
 

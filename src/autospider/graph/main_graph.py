@@ -27,6 +27,7 @@ from .nodes.planning_nodes import initialize_world_model_node, plan_strategy_nod
 from .nodes.shared_nodes import build_artifact_index, build_summary, finalize_result
 from .state import GraphState
 from .state_access import (
+    StageName,
     get_conversation_state,
     get_stage_status,
 )
@@ -49,13 +50,15 @@ def resolve_entry_route(state: dict[str, Any]) -> str:
         return "finalize_result"
     return "chat_clarify"
 
-
-
-def resolve_node_outcome(state: dict[str, Any]) -> str:
+def resolve_node_outcome(
+    state: dict[str, Any],
+    *,
+    stage: StageName | None = None,
+) -> str:
     """根据 node_status 选择图后续流向。"""
     if state.get("error"):
         return "error"
-    stage_status = get_stage_status(state)
+    stage_status = get_stage_status(state, stage=stage)
     if stage_status == "ok":
         return "ok"
     return "error"
@@ -160,7 +163,7 @@ def _add_execution_flow(graph: StateGraph) -> None:
     graph.add_edge("plan_strategy_node", "plan_node")
     graph.add_conditional_edges(
         "plan_node",
-        resolve_node_outcome,
+        lambda state: resolve_node_outcome(state, stage="planning"),
         {"ok": "multi_dispatch_subgraph", "error": "build_artifact_index"},
     )
     graph.add_conditional_edges(

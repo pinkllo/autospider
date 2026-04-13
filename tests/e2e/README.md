@@ -1,5 +1,15 @@
 # E2E 闭环测试
 
+根 README 才是开发入口权威说明。推荐顺序是先运行：
+
+```bash
+autospider doctor
+pytest -m smoke -q
+pytest tests/e2e -m e2e -q
+```
+
+`pytest tests/e2e -m e2e -q` 是当前唯一维护的 E2E 入口。若 PostgreSQL、Redis、`redis` Python 依赖或本地运行时工作目录不可用，suite 会显式 `skip`，而不是在 `pytest configure` 阶段硬失败。
+
 这套测试以 `GraphRunner.invoke/resume` 为主入口，覆盖 `chat_pipeline -> planning -> multi_dispatch -> aggregate` 的真实图执行链路。测试只比较最终交付结果：
 
 - `merged_results.jsonl`
@@ -51,6 +61,7 @@ $env:AUTOSPIDER_E2E_REDIS_URL="redis://127.0.0.1:6380/15"
 
 如果不提供 `AUTOSPIDER_E2E_REDIS_URL`，fixture 会尝试从本机 `PATH` 中启动临时 `redis-server`。
 数据库会在每个 case 前后执行 `init_db(reset=True)`，因此强烈建议始终使用显式测试库。
+E2E 运行时会优先使用仓库内 `.tmp/e2e-runtime/` 作为工作目录，并把临时文件收口到该工作区下。
 
 ## 目录约定
 
@@ -77,22 +88,22 @@ $env:AUTOSPIDER_E2E_REDIS_URL="redis://127.0.0.1:6380/15"
 
 ## 运行命令
 
-运行全部 3 个 case：
+运行全部 E2E：
 
 ```bash
-pytest tests/e2e/test_graph_e2e.py -q
+pytest tests/e2e -m e2e -q
 ```
 
 只跑单个 case：
 
 ```bash
-pytest tests/e2e/test_graph_e2e.py -k graph_same_page_variant -q
+pytest tests/e2e -m e2e -k graph_same_page_variant -q
 ```
 
 查看详细日志：
 
 ```bash
-pytest tests/e2e/test_graph_e2e.py -vv -s
+pytest tests/e2e -m e2e -vv -s
 ```
 
 ## 断言口径

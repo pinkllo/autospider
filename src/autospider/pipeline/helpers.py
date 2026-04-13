@@ -21,6 +21,10 @@ from .runtime_controls import resolve_concurrency_settings
 from .types import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 
 
+def _resolve_pipeline_mode(raw_mode: object) -> PipelineMode:
+    return PipelineMode(normalize_pipeline_mode(raw_mode))
+
+
 def build_field_definitions(raw_fields: list[Mapping[str, Any]]) -> list[FieldDefinition]:
     return build_domain_field_definitions(raw_fields)
 
@@ -89,11 +93,10 @@ def build_execution_request(
 
 
 def build_infra_config() -> InfraConfig:
-    pipeline_mode = str(config.pipeline.mode or PipelineMode.REDIS.value).strip().lower()
     return InfraConfig(
         browser_headless_default=bool(config.browser.headless),
         browser_timeout_ms=int(config.browser.timeout_ms or 30000),
-        pipeline_mode_default=PipelineMode(pipeline_mode),
+        pipeline_mode_default=_resolve_pipeline_mode(config.pipeline.mode),
         pipeline_consumer_concurrency=int(config.pipeline.consumer_concurrency or 1),
         planner_max_concurrent_subtasks=int(config.planner.max_concurrent_subtasks or 1),
         redis_enabled=bool(config.redis.enabled),

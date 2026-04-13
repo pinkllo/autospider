@@ -17,6 +17,18 @@ from .progress_tracker import TaskProgressTracker
 logger = get_logger(__name__)
 
 
+async def _set_runtime_stage(
+    tracker: TaskProgressTracker,
+    *,
+    stage: str,
+    terminal_reason: str = "",
+) -> None:
+    payload = {"stage": stage}
+    if terminal_reason:
+        payload["terminal_reason"] = terminal_reason
+    await tracker.set_runtime_state(payload)
+
+
 @dataclass(slots=True)
 class PipelineRuntimeState:
     collection_config: dict[str, Any] = field(default_factory=dict)
@@ -97,6 +109,7 @@ class ProducerService:
 
     async def run(self) -> None:
         try:
+            await _set_runtime_stage(self.context.tracker, stage="collecting")
             collector = self.deps.collector_cls(
                 page=self.context.sessions.list_session.page,
                 list_url=self.context.list_url,
@@ -153,6 +166,7 @@ class ConsumerPool:
         self.context = context
         self.deps = deps
         self._claim_slots: asyncio.Semaphore | None = None
+        self._entered_consuming = False
 
     async def run(self) -> None:
         logger.info("[Pipeline] Consumer workers: %s", self.context.consumer_workers)
@@ -231,6 +245,9 @@ class ConsumerPool:
                 task = await task_queue.get()
                 if task is None:
                     return
+                if not self._entered_consuming:
+                    self._entered_consuming = True
+                    await _set_runtime_stage(self.context.tracker, stage="consuming")
                 try:
                     await self.deps.process_task(
                         extractor=extractor,
