@@ -33,6 +33,18 @@ def _fresh_import_cli():
     return importlib.import_module("autospider.cli")
 
 
+@pytest.fixture(autouse=True)
+def _restore_heavy_modules_after_test():
+    saved = {
+        module_name: module
+        for module_name, module in sys.modules.items()
+        if module_name.startswith(_HEAVY_PREFIXES)
+    }
+    yield
+    _purge_modules()
+    sys.modules.update(saved)
+
+
 @pytest.fixture()
 def repo_tmp_dir() -> Path:
     base_dir = REPO_ROOT / "artifacts" / "test_tmp"

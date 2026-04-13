@@ -140,6 +140,9 @@ async def test_producer_service_passes_decision_context_to_collector() -> None:
             return SimpleNamespace(collected_urls=["https://example.com/detail/1"])
 
     class FakeTracker:
+        async def set_runtime_state(self, _payload: dict[str, object]) -> None:
+            return None
+
         async def set_total(self, _total: int) -> None:
             return None
 

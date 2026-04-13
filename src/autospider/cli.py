@@ -13,6 +13,7 @@ from click.core import ParameterSource
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from . import cli_runtime
 
@@ -659,7 +660,7 @@ def _render_doctor_section(section: cli_runtime.DoctorCheckSection) -> bool:
     table = Table(title=f"AutoSpider Doctor / {section.title}")
     table.add_column("check", style="cyan")
     table.add_column("status", style="bold")
-    table.add_column("detail", style="white")
+    table.add_column("detail", style="white", overflow="fold")
 
     has_failure = False
     status_styles = {
@@ -679,6 +680,9 @@ def _render_doctor_section(section: cli_runtime.DoctorCheckSection) -> bool:
         has_failure = has_failure or status == "fail"
 
     console.print(table)
+    if section.name == "runtime":
+        for check in section.checks:
+            print(f"{check.name}: {check.detail}")
     return has_failure
 
 

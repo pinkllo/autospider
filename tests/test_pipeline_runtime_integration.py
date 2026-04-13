@@ -216,6 +216,9 @@ async def test_run_pipeline_passes_learning_snapshots_into_finalization(
         def __init__(self, *_args, **_kwargs) -> None:
             return None
 
+        async def set_runtime_state(self, _payload: dict[str, object]) -> None:
+            return None
+
     class _FakeFinalizer:
         def __init__(self, _deps) -> None:
             return None
@@ -232,7 +235,11 @@ async def test_run_pipeline_passes_learning_snapshots_into_finalization(
     monkeypatch.setattr(runner_module, "SkillRuntime", lambda: object())
     monkeypatch.setattr(runner_module, "TaskProgressTracker", _FakeTracker)
     monkeypatch.setattr(runner_module, "_prepare_pipeline_output", lambda **_kwargs: None)
-    monkeypatch.setattr(runner_module, "_persist_run_snapshot", lambda **_kwargs: None)
+
+    async def _fake_persist_run_snapshot(**_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(runner_module, "_persist_run_snapshot", _fake_persist_run_snapshot)
     monkeypatch.setattr(runner_module, "_load_persisted_run_records", lambda _execution_id: {})
     monkeypatch.setattr(
         runner_module,

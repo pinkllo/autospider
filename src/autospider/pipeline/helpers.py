@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..common.config import config
+from ..common.config import config, normalize_pipeline_mode
 from ..common.grouping_semantics import (
     build_normalized_strategy_payload,
     has_semantic_signature_inputs,
