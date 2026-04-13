@@ -69,7 +69,7 @@ async def test_llm_decision_maker_injects_decision_context_into_prompt(
 
     variables = dict(captured["variables"])
     assert "list_page" in str(variables["decision_context"])
-    assert "收集详情页链接" in str(variables["decision_context"])
+    assert "page_model" in str(variables["decision_context"])
 
 
 @pytest.mark.asyncio
@@ -111,14 +111,14 @@ async def test_field_decider_injects_decision_context_into_navigation_prompt(
         },
     )
 
+    monkeypatch.setattr(field_decider_module, "get_accessibility_text", lambda *a, **kw: "")
+
     await decider.decide_navigation(
         snapshot=SimpleNamespace(marks=[], scroll_info=None),
         screenshot_base64="ZmFrZQ==",
         field=FieldDefinition(name="title", description="公告标题"),
         nav_steps_count=0,
         nav_steps_summary="无",
-        scroll_info=None,
-        page_text_hit=True,
     )
 
     variables = dict(captured["variables"])

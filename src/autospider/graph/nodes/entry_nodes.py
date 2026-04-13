@@ -486,6 +486,13 @@ def chat_prepare_execution_handoff(state: dict[str, Any]) -> dict[str, Any]:
     task = dict(_conversation_value(state, "clarified_task") or {})
     if not task:
         return _fatal("missing_clarified_task", "缺少澄清任务配置")
+    list_url = str(task.get("list_url") or "").strip()
+    if not list_url:
+        return _fatal("missing_list_url", "澄清任务缺少列表页 URL")
+    try:
+        validate_url(list_url)
+    except Exception:
+        return _fatal("invalid_list_url", "澄清任务的列表页 URL 非法")
 
     dispatch_mode = _resolve_chat_dispatch_mode()
     normalized = build_chat_execution_params(

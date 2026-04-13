@@ -155,7 +155,7 @@ class PlannerVariantResolverMixin:
                         break
 
             if not resolved_url and mark_id is not None:
-                resolved_url = await self._get_href_by_js(mark_id, base_url, snapshot)
+                resolved_url = await self._get_href_by_js(mark_id, base_url, snapshot, link_text=link_text)
                 if resolved_url:
                     lower = resolved_url.strip().lower()
                     if (
@@ -179,6 +179,7 @@ class PlannerVariantResolverMixin:
                     parent_nav_steps=parent_nav_steps,
                     variant_label=self._build_variant_label(child_context) or str(name or "").strip(),
                     child_context=child_context,
+                    link_text=link_text,
                 )
                 if resolved is not None:
                     resolved_url = resolved.resolved_url
@@ -236,7 +237,24 @@ class PlannerVariantResolverMixin:
                     return candidates[0].xpath
         return None
 
-    async def _get_href_by_js(self, mark_id: int, base_url: str, snapshot: object) -> str:
+    async def _get_href_by_js(self, mark_id: int, base_url: str, snapshot: object, link_text: str = "") -> str:
+        # 文本优先：通过可见文本定位元素获取 href
+        if link_text:
+            try:
+                text_locator = self.page.get_by_text(link_text, exact=True)
+                if await text_locator.count() > 0:
+                    href = await text_locator.first.evaluate("""el => {
+                        if (el.href) return el.href;
+                        const anchor = el.closest('a');
+                        if (anchor && anchor.href) return anchor.href;
+                        return null;
+                    }""")
+                    if href:
+                        return urljoin(base_url, href)
+            except Exception as e:
+                logger.debug("[Planner] 文本定位获取 href 失败 ('%s'): %s", link_text, e)
+
+        # 兜底：通过 snapshot 中的 XPath 定位
         xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
         if not xpath:
             return ""
@@ -270,11 +288,9 @@ class PlannerVariantResolverMixin:
         parent_nav_steps: list[dict] | None = None,
         variant_label: str = "",
         child_context: dict[str, str] | None = None,
+        link_text: str = "",
     ):
         xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
-        if not xpath:
-            logger.debug("[Planner]   mark_id=%d 在 snapshot 中无可用 XPath", mark_id)
-            return None
 
         nav_step_record = self._build_nav_click_step(snapshot, mark_id)
         if not nav_step_record:
@@ -282,18 +298,39 @@ class PlannerVariantResolverMixin:
             return None
 
         try:
-            logger.info("[Planner]   触发模拟点击 mark_id=%d (xpath=%s)...", mark_id, xpath[:60])
+            # 文本优先：先通过可见文本定位元素，XPath 兜底，失败则等待重试一次
+            locator = None
+            for attempt in range(2):
+                if link_text:
+                    text_locator = self.page.get_by_text(link_text, exact=True)
+                    if await text_locator.count() > 0:
+                        locator = text_locator.first
+                        logger.info("[Planner]   文本匹配定位成功: '%s' (mark_id=%d)", link_text, mark_id)
+                        break
+
+                if xpath:
+                    xpath_locator = self.page.locator(f"xpath={xpath}")
+                    if await xpath_locator.count() > 0:
+                        locator = xpath_locator.first
+                        logger.info("[Planner]   XPath 定位成功: mark_id=%d (xpath=%s)", mark_id, xpath[:60])
+                        break
+
+                if attempt == 0:
+                    logger.info("[Planner]   首次定位失败，等待页面渲染后重试...")
+                    await self.page.wait_for_timeout(2000)
+
+            if locator is None:
+                logger.warning(
+                    "[Planner]   文本('%s')和 XPath 均未匹配到元素, mark_id=%d",
+                    link_text or "(无)", mark_id,
+                )
+                return None
 
             url_before = self.page.url
             dom_sig_before = await self._get_dom_signature()
-            interaction_state_before = await self._get_element_interaction_state(xpath)
+            interaction_state_before = await self._get_element_interaction_state(xpath) if xpath else {}
 
-            locator = self.page.locator(f"xpath={xpath}")
-            if await locator.count() == 0:
-                logger.warning("[Planner]   XPath 未匹配到元素: %s", xpath[:80])
-                return None
-
-            await locator.first.click(timeout=5000)
+            await locator.click(timeout=5000)
 
             url_after = self.page.url
             old_parsed = urlparse(url_before)
@@ -323,7 +360,7 @@ class PlannerVariantResolverMixin:
                 )
 
             same_page_variant = await self._resolve_same_page_variant_after_click(
-                xpath=xpath,
+                xpath=xpath or "",
                 url_before=url_before,
                 original_url=original_url,
                 parent_nav_steps=parent_nav_steps,

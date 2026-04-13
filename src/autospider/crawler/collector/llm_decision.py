@@ -12,6 +12,8 @@ from ...common.llm.trace_logger import append_llm_trace
 from ...common.utils.prompt_template import render_template
 from ...common.logger import get_logger
 from ...common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
+from ...common.accessibility import get_accessibility_text
+from ...common.decision_context_format import format_decision_context as _format_decision_context
 from ...common.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message,
@@ -58,10 +60,6 @@ def _build_trace_payload(
     return payload
 
 
-def _format_decision_context(decision_context: dict[str, object] | None) -> str:
-    if not decision_context:
-        return "无"
-    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 class LLMDecisionMaker:
@@ -125,6 +123,13 @@ class LLMDecisionMaker:
             else "暂无"
         )
 
+        # 获取无障碍文本锚点
+        accessibility_text = ""
+        try:
+            accessibility_text = await get_accessibility_text(self.page)
+        except Exception:
+            logger.debug("[LLM] 获取 accessibility text 失败，跳过")
+
         # 使用模板引擎加载 user_message
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -136,6 +141,7 @@ class LLMDecisionMaker:
                 "collected_urls_str": collected_urls_str,
                 "execution_brief": format_execution_brief(self.execution_brief),
                 "decision_context": _format_decision_context(self.decision_context),
+                "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )

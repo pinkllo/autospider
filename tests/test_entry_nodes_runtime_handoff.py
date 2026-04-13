@@ -10,6 +10,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 import autospider.graph.nodes.entry_nodes as entry_nodes_module
+from autospider.graph.state_access import request_params as select_request_params
 from autospider.graph.nodes.entry_nodes import (
     chat_history_match,
     chat_prepare_execution_handoff,
@@ -69,6 +70,44 @@ def test_chat_prepare_execution_handoff_exposes_empty_runtime_payload_slots() ->
     assert normalized["world_snapshot"] == {}
     assert normalized["control_snapshot"] == {}
     assert normalized["failure_records"] == []
+
+
+def test_chat_prepare_execution_handoff_rejects_empty_list_url() -> None:
+    state = {
+        "cli_args": {
+            "output_dir": "output",
+            "request": "采集公告",
+        },
+        "conversation": {
+            "clarified_task": {
+                "list_url": "",
+                "task_description": "采集公告",
+                "fields": [{"name": "title", "description": "公告标题", "required": True}],
+            },
+            "selected_skills": [],
+        },
+    }
+
+    result = chat_prepare_execution_handoff(state)
+
+    assert result["node_status"] == "fatal"
+    assert result["error_code"] == "missing_list_url"
+
+
+def test_request_params_falls_back_when_workflow_request_params_is_missing() -> None:
+    state = {
+        "world": {},
+        "normalized_params": {
+            "list_url": "https://example.com/notices",
+            "task_description": "采集公告",
+            "fields": [{"name": "title", "description": "公告标题", "required": True}],
+        },
+    }
+
+    params = select_request_params(state)
+
+    assert params["list_url"] == "https://example.com/notices"
+    assert params["task_description"] == "采集公告"
 
 
 def test_chat_prepare_execution_handoff_normalizes_invalid_grouping_semantics() -> None:

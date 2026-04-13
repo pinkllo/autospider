@@ -99,6 +99,7 @@ class LLMDecider:
         scroll_info: ScrollInfo | None = None,
         page: "Page" | None = None,
         snapshot: "SoMSnapshot" | None = None,
+        page_accessibility_text: str = "",
     ) -> Action:
         """
         根据当前状态和截图决定下一步操作
@@ -119,6 +120,7 @@ class LLMDecider:
             target_found_in_page,
             scroll_info,
             tab_context,
+            page_accessibility_text=page_accessibility_text,
         )
 
         # 构建消息内容（仅包含当前截图）
@@ -367,6 +369,7 @@ class LLMDecider:
         target_found_in_page: bool = False,
         scroll_info: ScrollInfo | None = None,
         tab_context: dict[str, Any] | None = None,
+        page_accessibility_text: str = "",
     ) -> str:
         """构建用户消息（包含历史记录）"""
         parts = []
@@ -436,6 +439,12 @@ class LLMDecider:
         parts.append(
             f"## 当前步骤\n第 {state.step_index + 1} 步（最多 {state.input.max_steps} 步）"
         )
+
+        # 页面可见文本（防止文本漂移）
+        if page_accessibility_text:
+            parts.append(
+                f"## 页面可见文本（target_text 必须逐字来自此处）\n{page_accessibility_text}"
+            )
 
         # 历史操作记录（改进格式，更清晰）
         if self.action_history:

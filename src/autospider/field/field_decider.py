@@ -18,6 +18,8 @@ from ..common.llm.streaming import ainvoke_with_stream
 from ..common.llm.trace_logger import append_llm_trace
 from ..common.utils.prompt_template import render_template
 from ..common.logger import get_logger
+from ..common.accessibility import get_accessibility_text
+from ..common.decision_context_format import format_decision_context as _format_decision_context
 from ..common.utils.paths import get_prompt_path
 from ..common.protocol import (
     coerce_bool,
@@ -38,10 +40,6 @@ PROMPT_TEMPLATE_PATH = get_prompt_path("field_extractor.yaml")
 logger = get_logger(__name__)
 
 
-def _format_decision_context(decision_context: dict[str, object] | None) -> str:
-    if not decision_context:
-        return "无"
-    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 class FieldDecider:
@@ -290,48 +288,9 @@ class FieldDecider:
         field: FieldDefinition,
         nav_steps_count: int = 0,
         nav_steps_summary: str | None = None,
-        scroll_info: "ScrollInfo | None" = None,
-        page_text_hit: bool | None = None,
     ) -> dict | None:
-        """
-        决定导航操作
-
-        根据当前页面状态和目标字段，决定下一步操作：
-        - extract: 已找到目标字段（found=true）
-        - click: 点击元素展开更多
-        - scroll: 向下滚动
-        - extract: 字段不存在（found=false）
-
-        Args:
-            snapshot: SoM 快照
-            screenshot_base64: 截图 Base64
-            field: 目标字段定义
-            nav_steps_count: 已执行的导航步数
-            scroll_info: 滚动状态信息
-
-        Returns:
-            决策结果字典，包含 action 和相关参数
-        """
-        current_url = self.page.url
-
-        logger.info(f"[FieldDecider] 导航决策 - 字段: {field.name}")
-        logger.info(f"[FieldDecider] 当前页面: {current_url[:80]}...")
-        logger.info(f"[FieldDecider] 已执行步数: {nav_steps_count}")
-
-        # 构建滚动状态描述
-        scroll_status = "无滚动信息"
-        if scroll_info:
-            scroll_status = f"滚动进度: {scroll_info.scroll_percent:.0%}"
-            if scroll_info.is_at_bottom:
-                scroll_status += "（已到底部）"
-            elif scroll_info.is_at_top:
-                scroll_status += "（在顶部）"
-
-        page_text_hit_text = "未知"
-        if page_text_hit is True:
-            page_text_hit_text = "是"
-        elif page_text_hit is False:
-            page_text_hit_text = "否"
+        """决定导航操作：判断字段是否可见，决定 extract/click/scroll。"""
+        logger.info(f"[FieldDecider] 导航决策 - 字段: {field.name}, 步数: {nav_steps_count}")
 
         # 加载 Prompt
         system_prompt = render_template(
@@ -339,10 +298,12 @@ class FieldDecider:
             section="navigate_to_field_system_prompt",
         )
 
-        clickable_candidates_text, clickable_candidates_count = (
-            self._build_clickable_candidates_text(snapshot)
-        )
-        input_candidates_text, input_candidates_count = self._build_input_candidates_text(snapshot)
+        # 获取无障碍文本锚点
+        accessibility_text = ""
+        try:
+            accessibility_text = await get_accessibility_text(self.page)
+        except Exception:
+            pass
 
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
@@ -351,16 +312,10 @@ class FieldDecider:
                 "field_name": field.name,
                 "field_description": field.description,
                 "field_example": field.example or "",
-                "current_url": current_url,
                 "nav_steps_count": nav_steps_count,
                 "nav_steps_summary": nav_steps_summary or "无",
-                "scroll_status": scroll_status,
-                "clickable_candidates": clickable_candidates_text,
-                "clickable_candidates_count": clickable_candidates_count,
-                "input_candidates": input_candidates_text,
-                "input_candidates_count": input_candidates_count,
-                "page_text_hit": page_text_hit_text,
                 "decision_context": _format_decision_context(self.decision_context),
+                "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )
@@ -383,20 +338,11 @@ class FieldDecider:
         trace_input = {
             "system_prompt": system_prompt,
             "user_message": user_message,
-            "current_url": current_url,
             "field_name": field.name,
-            "field_description": field.description,
-            "field_example": field.example or "",
             "nav_steps_count": nav_steps_count,
-            "nav_steps_summary": nav_steps_summary or "无",
-            "scroll_status": scroll_status,
-            "page_text_hit": page_text_hit_text,
-            "clickable_candidates_count": clickable_candidates_count,
-            "input_candidates_count": input_candidates_count,
             "decision_context": dict(self.decision_context or {}),
             "selected_skills": list(self.selected_skills or []),
             "screenshot_base64_len": len(screenshot_base64 or ""),
-            "candidate_count": len(getattr(snapshot, "marks", []) or []),
         }
         try:
             response = await ainvoke_with_stream(self.decider.llm, messages)
@@ -465,6 +411,13 @@ class FieldDecider:
             section="extract_field_text_system_prompt",
         )
 
+        # 获取无障碍文本锚点
+        accessibility_text = ""
+        try:
+            accessibility_text = await get_accessibility_text(self.page)
+        except Exception:
+            pass
+
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="extract_field_text_user_message",
@@ -474,6 +427,7 @@ class FieldDecider:
                 "field_data_type": field.data_type,
                 "field_example": field.example or "",
                 "decision_context": _format_decision_context(self.decision_context),
+                "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )

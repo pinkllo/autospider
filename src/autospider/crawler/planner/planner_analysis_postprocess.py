@@ -313,8 +313,9 @@ class PlannerAnalysisPostProcessMixin:
         label = str(name or "").strip()
         if not label:
             return False
-        observations = str(analysis.get("observations") or "").strip()
-        if not observations:
+        current_selected = str(analysis.get("current_selected_category") or "").strip()
+        if not current_selected:
             return False
-        selected_markers = ("当前选中", "当前高亮", "默认", "已选中")
-        return label in observations and any(marker in observations for marker in selected_markers)
+        normalized_label = self._normalize_category_leaf_label(label)
+        normalized_selected = self._normalize_category_leaf_label(current_selected)
+        return bool(normalized_label and normalized_label == normalized_selected)

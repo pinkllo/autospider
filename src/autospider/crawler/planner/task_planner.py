@@ -25,6 +25,7 @@ from ...common.protocol import (
     summarize_llm_payload,
 )
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
+from ...common.accessibility import get_accessibility_text
 from ...domain.planning import (
     ExecutionBrief,
     PlanJournalEntry,
@@ -606,6 +607,13 @@ class TaskPlanner(
             section="analyze_site_system_prompt",
         )
 
+        # 获取无障碍文本锚点
+        accessibility_text = ""
+        try:
+            accessibility_text = await get_accessibility_text(self.page)
+        except Exception:
+            logger.debug("[Planner] 获取 accessibility text 失败，跳过")
+
         user_message = render_template(
             PROMPT_TEMPLATE_PATH,
             section="analyze_site_user_message",
@@ -616,6 +624,7 @@ class TaskPlanner(
                 "recent_actions": self._format_recent_actions(nav_steps),
                 "candidate_elements": self._build_planner_candidates(snapshot),
                 "grouping_semantics": self._format_grouping_semantics(),
+                "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
             },
         )

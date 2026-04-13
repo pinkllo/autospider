@@ -95,7 +95,13 @@ class PlannerPageState:
         nav_steps: list[dict[str, Any]] | None,
     ) -> bool:
         try:
+            await self.page.goto("about:blank", wait_until="domcontentloaded", timeout=5000)
+            await self.page.wait_for_timeout(300)
             await self.page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
             await self.page.wait_for_timeout(1500)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[Planner] 恢复页面 anchor 失败: %s", exc)
@@ -239,6 +245,8 @@ class PlannerPageState:
 
     async def restore_original_page(self, original_url: str) -> None:
         try:
+            await self.page.goto("about:blank", wait_until="domcontentloaded", timeout=5000)
+            await self.page.wait_for_timeout(300)
             await self.page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
             await self.page.wait_for_timeout(2000)
         except Exception as exc:  # noqa: BLE001

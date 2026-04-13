@@ -422,8 +422,6 @@ class FieldExtractor:
                 field=field,
                 nav_steps_count=step,
                 nav_steps_summary=nav_steps_summary,
-                scroll_info=snapshot.scroll_info,
-                page_text_hit=might_contain,
             )
 
             if not decision:

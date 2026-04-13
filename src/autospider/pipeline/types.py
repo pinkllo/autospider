@@ -25,6 +25,13 @@ def _parse_optional_bool(raw_value: Any) -> bool | None:
     raise ValueError(f"invalid_optional_bool: {raw_value}")
 
 
+def _normalize_resume_mode(raw_value: Any) -> "ResumeMode":
+    if isinstance(raw_value, ResumeMode):
+        return raw_value
+    normalized = str(raw_value or ResumeMode.FRESH.value).strip().lower()
+    return ResumeMode(normalized)
+
+
 def _mapping_payload(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -209,7 +216,7 @@ class ExecutionRequest(BaseModel):
             runtime_subtasks_use_main_model=payload.get("runtime_subtasks_use_main_model"),
             serial_mode=bool(payload.get("serial_mode")),
             execution_id=str(payload.get("execution_id") or "").strip(),
-            resume_mode=ResumeMode(str(payload.get("resume_mode") or ResumeMode.FRESH.value).strip().lower()),
+            resume_mode=_normalize_resume_mode(payload.get("resume_mode")),
             global_browser_budget=payload.get("global_browser_budget"),
         )
 

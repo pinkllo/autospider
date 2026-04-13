@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -17,6 +18,8 @@ try:
     _JINJA2_ENV = jinja2.Environment(loader=jinja2.BaseLoader(), autoescape=False)
 except ImportError:
     _JINJA2_ENV = None
+
+_SHARED_RULES_PATH = str(Path(__file__).resolve().parents[2] / "prompts" / "_shared.yaml")
 
 
 def is_jinja2_available() -> bool:
@@ -52,12 +55,34 @@ def render_text(text: str, variables: dict[str, Any] | None = None) -> str:
     return result
 
 
+def render_shared_rules(section_names: list[str] | tuple[str, ...]) -> str:
+    """从 _shared.yaml 加载指定的公共规则片段并拼接。"""
+    if not section_names:
+        return ""
+    try:
+        data = load_template_file(_SHARED_RULES_PATH)
+    except FileNotFoundError:
+        return ""
+    parts: list[str] = []
+    for name in section_names:
+        content = data.get(name, "")
+        if isinstance(content, str) and content.strip():
+            parts.append(content.strip())
+    return "\n\n".join(parts)
+
+
 def render_template(
     file_path: str,
     section: str | None = None,
     variables: dict[str, Any] | None = None,
+    *,
+    append_shared: list[str] | tuple[str, ...] | None = None,
 ) -> str:
-    """加载 YAML 模板并渲染指定 section。"""
+    """加载 YAML 模板并渲染指定 section。
+
+    Args:
+        append_shared: 可选，从 _shared.yaml 追加指定的公共规则片段名称列表。
+    """
     data = load_template_file(file_path)
 
     if section is not None:
@@ -67,7 +92,14 @@ def render_template(
     else:
         content = yaml.dump(data, allow_unicode=True, default_flow_style=False)
 
-    return render_text(content, variables)
+    rendered = render_text(content, variables)
+
+    if append_shared:
+        shared = render_shared_rules(append_shared)
+        if shared:
+            rendered = rendered.rstrip() + "\n\n" + shared
+
+    return rendered
 
 
 def get_template_sections(file_path: str) -> list[str]:

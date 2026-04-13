@@ -262,3 +262,24 @@ def test_planner_prompt_uses_grouping_semantics_instead_of_raw_user_wording() ->
     assert "再判断用户是否要求“按分类分别采集”" not in prompt_text
     assert "只有当用户明确要求“按分类分别采集 / 每类采集 / 各分类采集”" not in prompt_text
     assert "当用户明确点名多个分类" not in prompt_text
+
+
+def test_looks_like_current_category_requires_explicit_current_selected_category() -> None:
+    planner = _PlannerHarness()
+    analysis = {
+        "observations": "当前选中分类为房屋建筑和市政基础设施工程，同时页面包含交通运输工程、水利工程、其他工程等兄弟分类切换入口。",
+        "current_selected_category": "",
+    }
+
+    assert planner._looks_like_current_category("交通运输工程", analysis) is False
+
+
+def test_looks_like_current_category_accepts_explicit_current_selected_category_match() -> None:
+    planner = _PlannerHarness()
+    analysis = {
+        "observations": "当前选中分类为房屋建筑和市政基础设施工程，同时页面包含交通运输工程、水利工程、其他工程等兄弟分类切换入口。",
+        "current_selected_category": "房屋建筑和市政基础设施工程",
+    }
+
+    assert planner._looks_like_current_category("房屋建筑和市政基础设施工程", analysis) is True
+    assert planner._looks_like_current_category("交通运输工程", analysis) is False

@@ -51,6 +51,7 @@ from ...pipeline.helpers import (
 )
 from ...pipeline.runner import run_pipeline
 from ...pipeline.types import AggregationFailure, AggregationReport
+from ...common.validators import validate_url
 
 
 def _ok(
@@ -263,18 +264,22 @@ async def _retry_after_browser_interrupt(
 
 
 async def _plan_request(request) -> dict[str, Any]:
+    planner_url = str(request.site_url or request.list_url or "").strip()
+    if not planner_url:
+        raise RuntimeError("missing_list_url")
+    validate_url(planner_url)
+
     session = BrowserRuntimeSession(**BrowserRuntimeSession.build_options(request))
     await session.start()
     try:
         planner = TaskPlanner(
             page=session.page,
-            site_url=request.site_url or request.list_url,
+            site_url=planner_url,
             user_request=request.request or request.task_description,
             output_dir=request.output_dir,
             planner_intent=request.model_dump(mode="python"),
         )
         runtime = SkillRuntime()
-        planner_url = request.site_url or request.list_url
         selected_skill_meta = (
             await runtime.get_or_select(
                 phase="planner",

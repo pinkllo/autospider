@@ -17,6 +17,8 @@ from ...common.som import (
     build_mark_id_to_xpath_map,
     set_overlay_visibility,
 )
+from ...common.accessibility import get_accessibility_text
+from ...common.decision_context_format import format_decision_context as _format_navigation_decision_context
 from ...common.types import AgentState, RunInput, ActionType
 from ...graph.recovery import build_recovery_directive
 
@@ -29,10 +31,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _format_navigation_decision_context(decision_context: dict[str, object] | None) -> str:
-    if not decision_context:
-        return "无"
-    return json.dumps(decision_context, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def build_navigation_task_plan(
@@ -185,6 +183,13 @@ class NavigationHandler:
                 # 解析滚动信息
                 scroll_info = snapshot.scroll_info if snapshot.scroll_info else None
 
+                # 获取无障碍文本锚点
+                accessibility_text = ""
+                try:
+                    accessibility_text = await get_accessibility_text(self.page)
+                except Exception:
+                    pass
+
                 # 调用 LLM 决策
                 action = await self.decider.decide(
                     agent_state,
@@ -193,6 +198,7 @@ class NavigationHandler:
                     scroll_info=scroll_info,
                     page=self.page,
                     snapshot=snapshot,
+                    page_accessibility_text=accessibility_text,
                 )
 
                 logger.info("[Nav] LLM 决策: %s", action.action.value)

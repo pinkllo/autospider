@@ -103,16 +103,11 @@ async def test_navigation_phase_task_plan_includes_decision_context(
                 "detail": "上一次误入政策解读页",
             }
         ],
-        "current_plan": {
-            "goal": "优先进入采购公告筛选结果",
-            "page_id": "node_002",
-            "stage": "planning_seeded",
-        },
+
     }
 
     assert await handler.run_navigation_phase() is True
     assert decider.task_plan is not None
-    assert "优先进入采购公告筛选结果" in decider.task_plan
     assert "该列表页支持按公告类型和日期联合筛选" in decider.task_plan
     assert "上一次误入政策解读页" in decider.task_plan
 

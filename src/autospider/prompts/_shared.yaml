@@ -1,0 +1,16 @@
+# 公共规则片段
+# 由各 Prompt 的渲染代码按需拼接到 system_prompt 末尾
+
+# 所有视觉 Agent 共享的元素定位规则
+visual_agent_rules: |
+  ## 元素定位规则
+  - 优先使用 target_text（文本优先定位），mark_id 仅作为可选辅助
+  - target_text 必须逐字来自截图可见文本，不得改写、缩写、补字
+  - 如果同时返回了 mark_id 和 target_text，系统以 target_text 为准纠正 mark_id
+  - 如果用户消息提供了站点 skills，仅作先验线索参考，一切以当前截图为准
+
+# 所有 Agent 共享的输出规则
+output_rules: |
+  ## 输出规则
+  - 严格输出 JSON，禁止 markdown 代码块
+  - JSON 中禁止包含 protocol 字段

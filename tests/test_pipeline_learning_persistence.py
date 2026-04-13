@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.common.db.models import Base, TaskRun
 from autospider.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
@@ -33,6 +40,7 @@ def test_task_repository_persists_learning_snapshots() -> None:
         normalized_url="https://example.com/list",
         original_url="https://example.com/list",
         task_description="collect products",
+        semantic_signature="semantic::learning::products",
         execution_id="exec_learning_001",
         world_snapshot={
             "site_profile": {"host": "example.com", "supports_pagination": True},

@@ -39,6 +39,40 @@ class FatalCapabilityError(RuntimeError):
     pass
 
 
+@pytest.mark.asyncio
+async def test_plan_request_fails_fast_when_list_url_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeSession:
+        def __init__(self, **_kwargs) -> None:
+            self.page = object()
+
+        @staticmethod
+        def build_options(_request):
+            return {}
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    class _UnexpectedPlanner:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("TaskPlanner should not be constructed when list_url is empty")
+
+    monkeypatch.setattr(capability_nodes, "BrowserRuntimeSession", _FakeSession)
+    monkeypatch.setattr(capability_nodes, "TaskPlanner", _UnexpectedPlanner)
+
+    request = capability_nodes.build_execution_request(
+        {"list_url": "", "task_description": "采集公告", "fields": []},
+        thread_id="thread-001",
+    )
+
+    with pytest.raises(RuntimeError, match="missing_list_url"):
+        await capability_nodes._plan_request(request)
+
+
 def test_parse_protocol_message_diagnostics_returns_validation_errors() -> None:
     diagnostics = parse_protocol_message_diagnostics({"action": "click", "args": {}})
 
