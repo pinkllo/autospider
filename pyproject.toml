@@ -84,6 +84,7 @@ testpaths = ["tests"]
 norecursedirs = ["tmp*"]
 markers = [
     "smoke: fast developer smoke tests",
+    "benchmark: benchmark scenario and benchmark CLI tests",
     "e2e: end-to-end graph tests",
     "integration: integration tests requiring Redis/PG",
 ]

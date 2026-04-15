@@ -1,0 +1,49 @@
+scenario:
+  id: categories
+  name: "分类分组采集"
+  description: "验证按分类页签分组采集。"
+
+task:
+  request: "采集 {base_url}/scenarios/categories/index.html 中所有产品的 category、product_name、price、brand、specs 和 product_url"
+  cli_overrides:
+    max_pages: 6
+    serial_mode: true
+    headless: true
+    output_dir: ".tmp/benchmark/categories"
+
+ground_truth:
+  file: "ground_truth/categories.jsonl"
+  record_count: 15
+  fields:
+    - name: "category"
+      type: "text"
+      required: true
+    - name: "product_name"
+      type: "text"
+      required: true
+    - name: "price"
+      type: "number"
+      required: true
+    - name: "brand"
+      type: "text"
+      required: true
+    - name: "specs"
+      type: "text"
+      required: true
+    - name: "product_url"
+      type: "url"
+      required: true
+
+evaluation:
+  match_key: "product_name"
+  field_matching:
+    category: exact
+    product_name: exact
+    price: numeric_tolerance
+    brand: exact
+    specs: exact
+    product_url: exact
+  thresholds:
+    min_record_recall: 0.8
+    min_field_f1: 0.7
+    max_steps: 50

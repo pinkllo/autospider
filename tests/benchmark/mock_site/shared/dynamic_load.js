@@ -1,0 +1,1 @@
+document.addEventListener('DOMContentLoaded',()=>{const btn=document.querySelector('.load-more-btn');if(!btn)return;btn.addEventListener('click',()=>{const next=document.querySelector('.load-batch[hidden]');if(!next){btn.disabled=true;return;}next.hidden=false;if(!document.querySelector('.load-batch[hidden]'))btn.disabled=true;});});

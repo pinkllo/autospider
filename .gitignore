@@ -42,6 +42,8 @@ htmlcov/
 logs/
 *.log
 /output/
+/output/benchmark/reports/
+/tests/benchmark/reports/
 /src/output/
 screenshots/
 scripts/

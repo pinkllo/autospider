@@ -1,0 +1,49 @@
+scenario:
+  id: nested
+  name: "嵌套多层导航"
+  description: "验证树形导航与叶子分类采集。"
+
+task:
+  request: "采集 {base_url}/scenarios/nested/index.html 中所有产品的 category_path、product_name、price、brand、specs 和 product_url"
+  cli_overrides:
+    max_pages: 6
+    serial_mode: true
+    headless: true
+    output_dir: ".tmp/benchmark/nested"
+
+ground_truth:
+  file: "ground_truth/nested.jsonl"
+  record_count: 12
+  fields:
+    - name: "category_path"
+      type: "text"
+      required: true
+    - name: "product_name"
+      type: "text"
+      required: true
+    - name: "price"
+      type: "number"
+      required: true
+    - name: "brand"
+      type: "text"
+      required: true
+    - name: "specs"
+      type: "text"
+      required: true
+    - name: "product_url"
+      type: "url"
+      required: true
+
+evaluation:
+  match_key: "product_name"
+  field_matching:
+    category_path: exact
+    product_name: exact
+    price: numeric_tolerance
+    brand: exact
+    specs: exact
+    product_url: exact
+  thresholds:
+    min_record_recall: 0.8
+    min_field_f1: 0.7
+    max_steps: 50
