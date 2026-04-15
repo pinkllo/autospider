@@ -85,4 +85,5 @@ norecursedirs = ["tmp*"]
 markers = [
     "smoke: fast developer smoke tests",
     "e2e: end-to-end graph tests",
+    "integration: integration tests requiring Redis/PG",
 ]

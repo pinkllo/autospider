@@ -12,8 +12,9 @@ from ..common.channel.base import URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
 from ..common.experience import SkillRuntime
-from .types import ExecutionContext, PipelineMode, PipelineRunResult
+from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
 from ..crawler.explore.url_collector import URLCollector
+from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
 from autospider.common.logger import get_logger
 from .finalization import (
@@ -43,11 +44,6 @@ from .orchestration import (
 )
 from .progress_tracker import TaskProgressTracker
 from .run_store_async import (
-    _ack_persisted_item,
-    _claim_persisted_item,
-    _commit_persisted_item,
-    _fail_persisted_item,
-    _persist_run_snapshot,
     _release_inflight_items_for_resume,
     _release_persisted_claim,
 )
@@ -159,7 +155,7 @@ def _promote_staged_output(staging_path: Path, final_path: Path) -> None:
     _promote_staged_output_impl(staging_path, final_path)
 
 
-def _persist_run_snapshot(
+async def _persist_run_snapshot(
     *,
     identity: TaskIdentity,
     fields: list[FieldDefinition],
@@ -176,80 +172,89 @@ def _persist_run_snapshot(
     validation_failures: list[dict[str, Any]] | None = None,
     committed_records: list[dict[str, Any]] | None = None,
 ) -> None:
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository, TaskRunPayload
-    from ..common.storage.task_run_query_service import normalize_url
+    def _save() -> None:
+        from ..common.db.engine import session_scope
+        from ..common.db.repositories import TaskRepository, TaskRunPayload
+        from ..common.storage.task_run_query_service import normalize_url
 
-    payload = TaskRunPayload(
-        normalized_url=normalize_url(str(identity.list_url or "").strip()),
-        original_url=str(identity.list_url or "").strip(),
-        page_state_signature=str(identity.page_state_signature or "").strip(),
-        anchor_url=str(identity.anchor_url or "").strip(),
-        variant_label=str(identity.variant_label or "").strip(),
-        task_description=str(identity.task_description or "").strip(),
-        semantic_signature=str(identity.semantic_signature or "").strip(),
-        strategy_payload=dict(identity.strategy_payload or {}),
-        field_names=[str(field.name or "").strip() for field in fields if str(field.name or "").strip()],
-        execution_id=execution_id,
-        thread_id=thread_id,
-        output_dir=output_dir,
-        pipeline_mode=pipeline_mode.value,
-        execution_state=str(summary.get("execution_state") or "running"),
-        outcome_state=str(summary.get("outcome_state") or ""),
-        promotion_state=str(summary.get("promotion_state") or ""),
-        total_urls=int(summary.get("total_urls", 0) or 0),
-        success_count=int(summary.get("success_count", 0) or 0),
-        failed_count=int(summary.get("failed_count", 0) or 0),
-        validation_failure_count=int(summary.get("validation_failure_count", 0) or 0),
-        success_rate=float(summary.get("success_rate", 0.0) or 0.0),
-        error_message=str(summary.get("error") or ""),
-        summary_json=dict(summary or {}),
-        collection_config=dict(collection_config or {}),
-        extraction_config=dict(extraction_config or {}),
-        plan_knowledge=str(plan_knowledge or ""),
-        task_plan=dict(task_plan or {}),
-        plan_journal=list(plan_journal or []),
-        validation_failures=list(validation_failures or []),
-        committed_records=list(committed_records or []),
-    )
-    with session_scope() as session:
-        TaskRepository(session).save_run(payload)
-
-
-def _claim_persisted_item(*, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
-
-    with session_scope() as session:
-        return TaskRepository(session).claim_item(
+        payload = TaskRunPayload(
+            normalized_url=normalize_url(str(identity.list_url or "").strip()),
+            original_url=str(identity.list_url or "").strip(),
+            page_state_signature=str(identity.page_state_signature or "").strip(),
+            anchor_url=str(identity.anchor_url or "").strip(),
+            variant_label=str(identity.variant_label or "").strip(),
+            task_description=str(identity.task_description or "").strip(),
+            semantic_signature=str(identity.semantic_signature or "").strip(),
+            strategy_payload=dict(identity.strategy_payload or {}),
+            field_names=[str(field.name or "").strip() for field in fields if str(field.name or "").strip()],
             execution_id=execution_id,
-            url=url,
-            worker_id=worker_id,
-            item_data={"url": url},
+            thread_id=thread_id,
+            output_dir=output_dir,
+            pipeline_mode=pipeline_mode.value,
+            execution_state=str(summary.get("execution_state") or "running"),
+            outcome_state=str(summary.get("outcome_state") or ""),
+            promotion_state=str(summary.get("promotion_state") or ""),
+            total_urls=int(summary.get("total_urls", 0) or 0),
+            success_count=int(summary.get("success_count", 0) or 0),
+            failed_count=int(summary.get("failed_count", 0) or 0),
+            validation_failure_count=int(summary.get("validation_failure_count", 0) or 0),
+            success_rate=float(summary.get("success_rate", 0.0) or 0.0),
+            error_message=str(summary.get("error") or ""),
+            summary_json=dict(summary or {}),
+            collection_config=dict(collection_config or {}),
+            extraction_config=dict(extraction_config or {}),
+            plan_knowledge=str(plan_knowledge or ""),
+            task_plan=dict(task_plan or {}),
+            plan_journal=list(plan_journal or []),
+            validation_failures=list(validation_failures or []),
+            committed_records=list(committed_records or []),
         )
+        with session_scope() as session:
+            TaskRepository(session).save_run(payload)
+
+    await asyncio.to_thread(_save)
 
 
-def _commit_persisted_item(
+async def _claim_persisted_item(*, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
+    def _claim() -> dict[str, Any]:
+        from ..common.db.engine import session_scope
+        from ..common.db.repositories import TaskRepository
+
+        with session_scope() as session:
+            return TaskRepository(session).claim_item(
+                execution_id=execution_id,
+                url=url,
+                worker_id=worker_id,
+                item_data={"url": url},
+            )
+
+    return await asyncio.to_thread(_claim)
+
+
+async def _commit_persisted_item(
     *,
     execution_id: str,
     url: str,
     item: dict[str, Any],
     worker_id: str,
 ) -> dict[str, Any]:
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
+    def _commit() -> dict[str, Any]:
+        from ..common.db.engine import session_scope
+        from ..common.db.repositories import TaskRepository
 
-    with session_scope() as session:
-        return TaskRepository(session).commit_item(
-            execution_id=execution_id,
-            url=url,
-            item_data=item,
-            worker_id=worker_id,
-            terminal_reason="success",
-        )
+        with session_scope() as session:
+            return TaskRepository(session).commit_item(
+                execution_id=execution_id,
+                url=url,
+                item_data=item,
+                worker_id=worker_id,
+                terminal_reason="success",
+            )
+
+    return await asyncio.to_thread(_commit)
 
 
-def _fail_persisted_item(
+async def _fail_persisted_item(
     *,
     execution_id: str,
     url: str,
@@ -259,27 +264,33 @@ def _fail_persisted_item(
     terminal_reason: str,
     error_kind: str,
 ) -> dict[str, Any]:
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
+    def _fail() -> dict[str, Any]:
+        from ..common.db.engine import session_scope
+        from ..common.db.repositories import TaskRepository
 
-    with session_scope() as session:
-        return TaskRepository(session).fail_item(
-            execution_id=execution_id,
-            url=url,
-            failure_reason=failure_reason,
-            item_data=item,
-            worker_id=worker_id,
-            terminal_reason=terminal_reason,
-            error_kind=error_kind,
-        )
+        with session_scope() as session:
+            return TaskRepository(session).fail_item(
+                execution_id=execution_id,
+                url=url,
+                failure_reason=failure_reason,
+                item_data=item,
+                worker_id=worker_id,
+                terminal_reason=terminal_reason,
+                error_kind=error_kind,
+            )
+
+    return await asyncio.to_thread(_fail)
 
 
-def _ack_persisted_item(*, execution_id: str, url: str) -> dict[str, Any]:
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
+async def _ack_persisted_item(*, execution_id: str, url: str) -> dict[str, Any]:
+    def _ack() -> dict[str, Any]:
+        from ..common.db.engine import session_scope
+        from ..common.db.repositories import TaskRepository
 
-    with session_scope() as session:
-        return TaskRepository(session).ack_item(execution_id=execution_id, url=url)
+        with session_scope() as session:
+            return TaskRepository(session).ack_item(execution_id=execution_id, url=url)
+
+    return await asyncio.to_thread(_ack)
 
 
 def _merge_extraction_configs(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:

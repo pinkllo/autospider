@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from enum import Enum
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,6 +24,8 @@ def _load_environment() -> None:
 
 
 def normalize_pipeline_mode(value: object) -> str:
+    if isinstance(value, Enum):
+        value = value.value
     normalized = str(value or "").strip().lower()
     if not normalized:
         return REDIS_PIPELINE_MODE
@@ -306,6 +309,38 @@ class PlannerConfig(BaseModel):
     )
 
 
+class TaskPlaneConfig(BaseModel):
+    """TaskPlane 调度平面配置。"""
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv("TASKPLANE_ENABLED", "true").lower() == "true"
+    )
+    store: str = Field(default_factory=lambda: os.getenv("TASKPLANE_STORE", "memory"))
+    redis_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "TASKPLANE_REDIS_URL",
+            os.getenv("GRAPH_REDIS_URL", ""),
+        )
+    )
+    redis_namespace: str = Field(
+        default_factory=lambda: os.getenv("TASKPLANE_REDIS_NAMESPACE", "taskplane")
+    )
+    database_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "TASKPLANE_DATABASE_URL",
+            os.getenv("DATABASE_URL", ""),
+        )
+    )
+
+    @field_validator("store", mode="before")
+    @classmethod
+    def validate_store(cls, value: object) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"memory", "redis", "dual"}:
+            return normalized
+        raise ValueError("taskplane_store_must_be_one_of_memory_redis_dual")
+
+
 class DatabaseConfig(BaseModel):
     """数据库配置（PostgreSQL）"""
 
@@ -338,6 +373,7 @@ class Config(BaseModel):
     field_extractor: FieldExtractorConfig = Field(default_factory=FieldExtractorConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     planner: PlannerConfig = Field(default_factory=PlannerConfig)
+    taskplane: TaskPlaneConfig = Field(default_factory=TaskPlaneConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     @classmethod

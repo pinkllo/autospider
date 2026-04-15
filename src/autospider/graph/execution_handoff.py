@@ -101,7 +101,7 @@ def build_chat_review_payload(
                 "field_validate_count",
                 clarified_task.get("field_validate_count"),
             ),
-            "pipeline_mode": cli_args.get("pipeline_mode") or "默认",
+            "pipeline_mode": cli_args.get("pipeline_mode") or "redis",
             "execution_mode": dispatch_mode,
             "headless": cli_args["headless"] if "headless" in cli_args else None,
             "output_dir": str(cli_args.get("output_dir") or "output"),

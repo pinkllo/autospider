@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from enum import Enum
+
 import pytest
 
 import autospider.common.config as config_module
+from autospider.common.config import normalize_pipeline_mode
 from autospider.common.channel import __all__ as channel_exports
 from autospider.common.channel.factory import create_url_channel
 from autospider.common.channel.redis_channel import RedisURLChannel
@@ -37,6 +40,13 @@ def test_execution_request_normalizes_blank_pipeline_mode_to_redis() -> None:
     request = ExecutionRequest.from_params({"pipeline_mode": "  "})
 
     assert request.pipeline_mode is PipelineMode.REDIS
+
+
+def test_normalize_pipeline_mode_accepts_enum_input() -> None:
+    class _Mode(str, Enum):
+        REDIS = "redis"
+
+    assert normalize_pipeline_mode(_Mode.REDIS) == "redis"
 
 
 @pytest.mark.parametrize(

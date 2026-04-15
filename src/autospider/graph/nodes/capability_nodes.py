@@ -13,7 +13,6 @@ from ...common.browser.runtime import BrowserRuntimeSession
 from ...common.config import config
 from ...common.experience import SkillRuntime
 from ...common.storage.collection_persistence import (
-    CollectionConfig,
     CollectionProgress,
     load_collection_config,
 )
@@ -52,6 +51,7 @@ from ...pipeline.helpers import (
 from ...pipeline.runner import run_pipeline
 from ...pipeline.types import AggregationFailure, AggregationReport
 from ...common.validators import validate_url
+from ...taskplane_adapter.graph_integration import register_taskplane_plan
 
 
 def _ok(
@@ -692,6 +692,12 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
                 "planner_no_subtasks",
                 "规划阶段未生成任何可执行子任务，请检查站点结构识别结果或补充更明确的分类入口。",
             )
+        envelope_id = await register_taskplane_plan(
+            thread_id=_thread_id(state),
+            plan=task_plan,
+            request_params=dict(result.get("request_params") or {}),
+            source_agent="plan_node",
+        )
         return {
             **_ok(_node_payload(result, {"task_plan": task_plan})),
             "world": dict(result.get("world") or {}),
@@ -699,9 +705,11 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
                 **dict(result.get("control") or {}),
                 "task_plan": task_plan,
                 "plan_knowledge": str(result.get("plan_knowledge") or ""),
+                "taskplane_envelope_id": envelope_id,
                 "stage_status": "ok",
             },
             "normalized_params": dict(result.get("request_params") or {}),
+            "taskplane_envelope_id": envelope_id,
         }
 
     node_result = await _execute_with_recovery(

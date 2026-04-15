@@ -226,7 +226,8 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
     ] == "downstream api rejected payload"
 
 
-def test_build_multi_dispatch_subgraph_accepts_control_task_plan_boundary() -> None:
+@pytest.mark.asyncio
+async def test_build_multi_dispatch_subgraph_accepts_control_task_plan_boundary() -> None:
     subgraph = build_multi_dispatch_subgraph()
     plan = TaskPlan(
         plan_id="plan_001",
@@ -241,7 +242,7 @@ def test_build_multi_dispatch_subgraph_accepts_control_task_plan_boundary() -> N
         updated_at="2026-04-12T00:00:00",
     )
 
-    result = subgraph.invoke(
+    result = await subgraph.ainvoke(
         {
             "thread_id": "thread-1",
             "normalized_params": {"output_dir": "output"},

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 from unittest.mock import ANY
 
@@ -13,6 +14,14 @@ from autospider.common.channel.base import URLTask
 from autospider.common.db.models import Base
 from autospider.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
 from autospider.pipeline import runner
+
+
+def test_runner_persistence_helpers_are_async() -> None:
+    assert inspect.iscoroutinefunction(runner._persist_run_snapshot)
+    assert inspect.iscoroutinefunction(runner._claim_persisted_item)
+    assert inspect.iscoroutinefunction(runner._commit_persisted_item)
+    assert inspect.iscoroutinefunction(runner._fail_persisted_item)
+    assert inspect.iscoroutinefunction(runner._ack_persisted_item)
 
 
 class _InterventionExtractor:

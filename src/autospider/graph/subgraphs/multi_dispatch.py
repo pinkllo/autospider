@@ -23,6 +23,13 @@ from ...pipeline.subtask_runtime import (
     subtask_signature,
 )
 from ...pipeline.worker import SubTaskWorker
+from ...taskplane_adapter.graph_integration import (
+    ensure_taskplane_plan_registered,
+    get_taskplane_envelope_id,
+    get_taskplane_scheduler,
+)
+from ...taskplane_adapter.result_bridge import ResultBridge
+from ...taskplane_adapter.subtask_bridge import SubtaskBridge
 
 
 def _use_last(existing: Any, new: Any) -> Any:
@@ -47,12 +54,16 @@ class MultiDispatchState(TypedDict, total=False):
     node_status: str
     node_payload: dict[str, Any]
     node_error: dict[str, str] | None
+    taskplane_envelope_id: Annotated[str, _use_last]
+    taskplane_has_pending: Annotated[bool, _use_last]
 
 
 class SubTaskFlowState(TypedDict, total=False):
+    thread_id: str
     normalized_params: dict[str, Any]
     task_plan: TaskPlan
     plan_knowledge: str
+    taskplane_envelope_id: str
     subtask_payload: dict[str, Any]
     subtask_result: SubTaskRuntimeState
     round_expand_requests: Annotated[list[dict[str, Any]], operator.add]
@@ -78,6 +89,27 @@ def _resolved_plan_knowledge(state: dict[str, Any]) -> str:
     if control.get("plan_knowledge") is not None:
         return str(control.get("plan_knowledge") or "")
     return str(state.get("plan_knowledge") or "")
+
+
+def _resolved_thread_id(state: dict[str, Any], plan: TaskPlan) -> str:
+    return str(state.get("thread_id") or "").strip() or str(plan.plan_id or "")
+
+
+def _taskplane_scheduler(state: dict[str, Any], plan: TaskPlan):
+    return get_taskplane_scheduler(
+        thread_id=_resolved_thread_id(state, plan),
+        plan_id=plan.plan_id,
+    )
+
+
+def _taskplane_envelope_id(state: dict[str, Any], plan: TaskPlan) -> str:
+    envelope_id = str(state.get("taskplane_envelope_id") or "").strip()
+    if envelope_id:
+        return envelope_id
+    return get_taskplane_envelope_id(
+        thread_id=_resolved_thread_id(state, plan),
+        plan_id=plan.plan_id,
+    )
 
 
 def route_after_feedback(state: dict[str, Any]) -> str:
@@ -210,29 +242,40 @@ def _dispatch_state_payload(
     return payload
 
 
-def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
+async def initialize_multi_dispatch(state: MultiDispatchState) -> MultiDispatchState:
     plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法调度执行"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
-    queue = list(state.get("dispatch_queue") or [])
-    if not queue:
-        queue = [subtask_to_payload(subtask) for subtask in plan.subtasks]
+    envelope_id = await ensure_taskplane_plan_registered(
+        thread_id=_resolved_thread_id(state, plan),
+        plan=plan,
+        request_params=_normalized_params(state),
+        source_agent="initialize_multi_dispatch",
+    )
     return {
-        "dispatch_queue": queue,
+        "dispatch_queue": [],
         "current_batch": list(state.get("current_batch") or []),
         "subtask_results": list(state.get("subtask_results") or []),
         "round_subtask_results": [],
         "round_expand_requests": [],
         "node_status": "ok",
         "node_error": None,
+        "taskplane_envelope_id": envelope_id,
+        "taskplane_has_pending": bool(plan.subtasks),
     }
 
 
-def prepare_dispatch_batch(state: MultiDispatchState) -> MultiDispatchState:
-    queue = list(state.get("dispatch_queue") or [])
+async def prepare_dispatch_batch(state: MultiDispatchState) -> MultiDispatchState:
+    plan = _resolved_task_plan(state)
+    if not isinstance(plan, TaskPlan):
+        message = "缺少任务计划，无法准备调度批次"
+        return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
+    scheduler = _taskplane_scheduler(state, plan)
     batch_size = _resolve_dispatch_batch_size(state)
-    return {"current_batch": queue[:batch_size], "dispatch_queue": queue[batch_size:], "round_subtask_results": [], "round_expand_requests": []}
+    tickets = await scheduler.pull(batch_size=batch_size)
+    batch = [subtask_to_payload(SubtaskBridge.from_ticket(ticket)) for ticket in tickets]
+    return {"current_batch": batch, "dispatch_queue": [], "round_subtask_results": [], "round_expand_requests": []}
 
 
 def route_dispatch_batch(state: MultiDispatchState):
@@ -245,9 +288,11 @@ def route_dispatch_batch(state: MultiDispatchState):
         Send(
             "execute_subtask_flow",
             {
+                "thread_id": str(state.get("thread_id") or ""),
                 "normalized_params": params,
                 "task_plan": _resolved_task_plan(state),
                 "plan_knowledge": _resolved_plan_knowledge(state),
+                "taskplane_envelope_id": str(state.get("taskplane_envelope_id") or ""),
                 "subtask_payload": payload,
             },
         )
@@ -259,6 +304,19 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     subtask = _restore_subtask(state.get("subtask_payload") or {})
     params = _subtask_params(state)
     plan = _resolved_task_plan(state)
+    if not isinstance(plan, TaskPlan):
+        raise ValueError("missing_task_plan_for_subtask_worker")
+    await ensure_taskplane_plan_registered(
+        thread_id=_resolved_thread_id(state, plan),
+        plan=plan,
+        request_params=params,
+        source_agent="run_subtask_worker_node",
+    )
+    scheduler = _taskplane_scheduler(state, plan)
+    await scheduler.ack_start(
+        subtask.id,
+        agent_id=f"sub-worker-{str(state.get('thread_id') or '').strip() or 'unknown'}",
+    )
     if subtask.max_pages is None and params.get("max_pages") is not None:
         subtask.max_pages = int(params["max_pages"])
     resolved_target_count = _resolve_subtask_target_url_count(subtask, params)
@@ -312,8 +370,12 @@ async def run_subtask_worker_node(state: SubTaskFlowState):
     }
 
 
-def finalize_subtask_flow(state: SubTaskFlowState) -> SubTaskFlowState:
+async def finalize_subtask_flow(state: SubTaskFlowState) -> SubTaskFlowState:
     result_item = state.get("subtask_result")
+    plan = _resolved_task_plan(state)
+    if isinstance(plan, TaskPlan) and isinstance(result_item, SubTaskRuntimeState):
+        scheduler = _taskplane_scheduler(state, plan)
+        await scheduler.report_result(ResultBridge.to_result(result_item))
     updates: SubTaskFlowState = {"round_subtask_results": [result_item] if result_item else [], "round_expand_requests": list(state.get("round_expand_requests") or [])}
     artifacts = list(state.get("artifacts") or [])
     if artifacts:
@@ -321,22 +383,26 @@ def finalize_subtask_flow(state: SubTaskFlowState) -> SubTaskFlowState:
     return updates
 
 
-def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
+async def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
     plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法合并调度结果"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
     accumulated = list(dict(state.get("execution") or {}).get("subtask_results") or [])
     accumulated.extend(list(state.get("round_subtask_results") or []))
+    scheduler = _taskplane_scheduler(state, plan)
+    envelope_id = _taskplane_envelope_id(state, plan)
     mutation = PlanMutationService().merge_expand_requests(
         plan=plan,
         expand_requests=list(state.get("round_expand_requests") or []),
-        pending_queue=list(state.get("dispatch_queue") or []),
+        pending_queue=[],
         output_dir=_dispatch_output_dir(state),
     )
+    progress = await scheduler.get_envelope_progress(envelope_id)
+    has_pending = (progress.queued + progress.dispatched + progress.running) > 0
     summary = _build_dispatch_summary(mutation.task_plan, accumulated)
     return {
-        "dispatch_queue": list(mutation.dispatch_queue),
+        "dispatch_queue": [],
         "current_batch": [],
         "execution": {
             "subtask_results": accumulated,
@@ -351,24 +417,35 @@ def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
         "round_subtask_results": [],
         "round_expand_requests": [],
         "node_payload": {"dispatch_result": summary},
+        "taskplane_envelope_id": envelope_id,
+        "taskplane_has_pending": has_pending,
     }
 
 
 def route_after_merge(state: MultiDispatchState) -> str:
     if str(state.get("node_status") or "ok") != "ok":
         return "error"
+    if bool(state.get("taskplane_has_pending")):
+        return "dispatch_next_batch"
     return "dispatch_next_batch" if list(state.get("dispatch_queue") or []) else "complete_dispatch"
 
 
-def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
+async def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
     plan = _resolved_task_plan(state)
     if not isinstance(plan, TaskPlan):
         message = "缺少任务计划，无法完成调度"
         return {"node_status": "fatal", "node_error": {"code": "missing_task_plan", "message": message}, "error": {"code": "missing_task_plan", "message": message}}
+    scheduler = _taskplane_scheduler(state, plan)
+    envelope_id = _taskplane_envelope_id(state, plan)
+    progress = await scheduler.get_envelope_progress(envelope_id)
+    has_pending = (progress.queued + progress.dispatched + progress.running) > 0
+    if has_pending:
+        message = "TaskPlane 仍有待处理任务，无法完成调度"
+        return {"node_status": "fatal", "node_error": {"code": "taskplane_incomplete", "message": message}, "error": {"code": "taskplane_incomplete", "message": message}}
     mutation = PlanMutationService().merge_expand_requests(
         plan=plan,
         expand_requests=[],
-        pending_queue=list(state.get("dispatch_queue") or []),
+        pending_queue=[],
         output_dir=_dispatch_output_dir(state),
     )
     result_items = list(dict(state.get("execution") or {}).get("subtask_results") or [])
