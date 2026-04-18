@@ -50,6 +50,13 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "import-linter>=2.0",
+    "syrupy>=4.0",
+    "jsonschema>=4.0",
+    "fakeredis>=2.20",
+    "pre-commit>=3.5",
+    "vulture>=2.10",
+    "deptry>=0.12",
 ]
 all = [
     "autospider[redis,db,spider,dev]",

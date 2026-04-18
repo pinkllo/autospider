@@ -46,7 +46,7 @@ logs/
 /tests/benchmark/reports/
 /src/output/
 screenshots/
-scripts/
+scripts/_generated/
 
 .pytest_tmp*/
 .tmp_pytest*/
