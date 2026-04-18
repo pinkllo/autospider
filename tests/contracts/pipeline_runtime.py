@@ -21,15 +21,7 @@ from autospider.pipeline.helpers import build_execution_context
 from autospider.pipeline.progress_tracker import TaskProgressTracker
 from autospider.pipeline.runner import run_pipeline
 from autospider.pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult
-from .pipeline_artifacts import (
-    build_task_plan,
-    commit_items_file,
-    materialize_output,
-    persist_snapshot,
-    prepare_output,
-    promote_output,
-    write_summary,
-)
+from .pipeline_artifacts import build_task_plan, persist_snapshot
 from .pipeline_fakes import (
     FakeBrowserRuntimeSession,
     FakeDetailPageWorker,
@@ -182,7 +174,7 @@ def run_contract_pipeline(tmp_path: Path) -> ContractRunArtifacts:
         )
         context = _build_context(page_url, output_dir)
         with _patched_pipeline(state):
-            result = _run_pipeline_with_materialized_output(context, state, page_url, output_dir)
+            result = asyncio.run(run_pipeline(context))
     return ContractRunArtifacts(EXECUTION_ID, page_url, output_dir, state.redis_client, result)
 
 
@@ -208,26 +200,6 @@ def _build_context(page_url: str, output_dir: Path):
     return build_execution_context(request, fields=fields)
 
 
-def _run_pipeline_with_materialized_output(
-    context: Any,
-    state: _ContractState,
-    page_url: str,
-    output_dir: Path,
-) -> PipelineRunResult:
-    result = asyncio.run(run_pipeline(context))
-    payload = result.to_payload()
-    payload.pop("export_state", None)
-    materialize_output(
-        output_dir=output_dir,
-        result_payload=payload,
-        records=state.records,
-        page_url=page_url,
-        task_description=TASK_DESCRIPTION,
-        plan_knowledge="# Contract Plan\n\n- source: local-http\n- llm: fake\n",
-    )
-    return PipelineRunResult.from_raw(payload, summary_file=payload["summary_file"])
-
-
 @contextmanager
 def _patched_pipeline(state: _ContractState) -> Iterator[None]:
     tracker_factory = lambda execution_id: _ContractProgressTracker(execution_id, state)
@@ -239,10 +211,6 @@ def _patched_pipeline(state: _ContractState) -> Iterator[None]:
         stack.enter_context(patch("autospider.pipeline.runner.URLCollector", FakeURLCollector))
         stack.enter_context(patch("autospider.pipeline.runner.DetailPageWorker", FakeDetailPageWorker))
         stack.enter_context(patch("autospider.pipeline.runner._persist_run_snapshot", new=persist_snapshot))
-        stack.enter_context(patch("autospider.pipeline.runner._prepare_pipeline_output", new=prepare_output))
-        stack.enter_context(patch("autospider.pipeline.runner._commit_items_file", new=commit_items_file))
-        stack.enter_context(patch("autospider.pipeline.runner._write_summary", new=write_summary))
-        stack.enter_context(patch("autospider.pipeline.runner._promote_staged_output", new=promote_output))
         stack.enter_context(patch("autospider.pipeline.runner._load_persisted_run_records", new=partial(_load_records, state)))
         stack.enter_context(patch("autospider.pipeline.runner._claim_persisted_item", new=partial(_claim_record, state)))
         stack.enter_context(patch("autospider.pipeline.runner._commit_persisted_item", new=partial(_commit_record, state)))

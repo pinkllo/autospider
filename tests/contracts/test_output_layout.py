@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jsonschema import validate
 
-from . import contract_tmp_dir, run_contract_pipeline
+from . import contract_tmp_dir, directory_files, run_contract_pipeline
 
 SUMMARY_SCHEMA = {
     "type": "object",
@@ -69,13 +69,12 @@ def test_output_layout_and_json_schema_match_contract_snapshot() -> None:
         artifacts = run_contract_pipeline(tmp_path)
         output_dir = artifacts.output_dir
 
-        expected_files = [
-            output_dir / "pipeline_extracted_items.jsonl",
-            output_dir / "pipeline_summary.json",
-            output_dir / "plan_knowledge.md",
-            output_dir / "task_plan.json",
+        assert directory_files(output_dir) == [
+            "pipeline_extracted_items.jsonl",
+            "pipeline_summary.json",
+            "plan_knowledge.md",
+            "task_plan.json",
         ]
-        assert all(path.is_file() for path in expected_files)
         validate(instance=_load_json(output_dir / "pipeline_summary.json"), schema=SUMMARY_SCHEMA)
         validate(instance=_load_json(output_dir / "task_plan.json"), schema=TASK_PLAN_SCHEMA)
 
