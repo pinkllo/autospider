@@ -15,6 +15,7 @@ from autospider.platform.observability.log_schema import (
 from autospider.platform.shared_kernel.trace import get_run_id, get_trace_id
 
 RecordPatcher = Callable[[dict[str, Any]], None]
+_active_logger: Any = logger.patch(lambda record: None)
 
 
 def configure_logging(
@@ -22,6 +23,7 @@ def configure_logging(
     *,
     sink: Any | None = None,
 ) -> Any:
+    global _active_logger
     effective_settings = settings or LoggingSettings()
     patched_logger = logger.patch(_build_record_patcher(effective_settings))
     patched_logger.remove()
@@ -32,11 +34,12 @@ def configure_logging(
         backtrace=False,
         diagnose=False,
     )
+    _active_logger = patched_logger
     return patched_logger
 
 
 def get_logger(name: str, *, context: str = DEFAULT_CONTEXT, layer: str = DEFAULT_LAYER) -> Any:
-    return logger.bind(module=name, context=context, layer=layer)
+    return _active_logger.bind(module=name, context=context, layer=layer)
 
 
 def _build_record_patcher(settings: LoggingSettings) -> RecordPatcher:
@@ -49,3 +52,6 @@ def _build_record_patcher(settings: LoggingSettings) -> RecordPatcher:
         extra["trace_id"] = get_trace_id()
 
     return _patch
+
+
+_active_logger = logger.patch(_build_record_patcher(LoggingSettings()))

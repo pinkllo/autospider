@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 
 from redis import ResponseError
@@ -13,7 +12,6 @@ class RedisStreamsMessaging:
     def __init__(self, client, *, max_retries: int = 3) -> None:
         self._client = client
         self._max_retries = max_retries
-        self._delivered: dict[tuple[str, str], set[str]] = {}
 
     async def publish(self, stream: str, event: Event) -> str:
         event_id = await self._client.xadd(stream, self._to_fields(event))
@@ -29,21 +27,16 @@ class RedisStreamsMessaging:
         batch: int = 16,
     ):
         await self._ensure_group(stream, group)
-        _ = consumer
-        seen = self._delivered.setdefault((stream, group), set())
-        rows = await self._client.xrange(stream)
-        yielded = 0
-        for event_id, fields in rows:
-            normalized_id = str(event_id)
-            if normalized_id in seen:
-                continue
-            seen.add(normalized_id)
-            yielded += 1
-            yield self._from_fields(normalized_id, fields)
-            if yielded >= batch:
-                return
-        if yielded == 0 and block_ms > 0:
-            await asyncio.sleep(block_ms / 1000)
+        response = await self._client.xreadgroup(
+            groupname=group,
+            consumername=consumer,
+            streams={stream: ">"},
+            count=batch,
+            block=block_ms,
+        )
+        for _, messages in response:
+            for event_id, fields in messages:
+                yield self._from_fields(str(event_id), fields)
 
     async def ack(self, stream: str, group: str, event_id: str) -> None:
         await self._client.xack(stream, group, event_id)
