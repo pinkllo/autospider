@@ -17,7 +17,7 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
             outcome_type="success",
             result_file=str(artifacts.output_dir / "pipeline_extracted_items.jsonl"),
             collected_count=1,
-            summary=artifacts.result.summary,
+            summary=artifacts.result.summary.model_dump(mode="python"),
         )
         snapshot = {
             "pipeline_run_result": snapshot_shape(artifacts.result.to_payload()),
@@ -28,7 +28,19 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
 
         assert snapshot == {
             "pipeline_run_result": {
-                "collection_config": {"list_url": "str", "llm_backend": "str"},
+                "anchor_url": "str",
+                "collected_urls": "int",
+                "collection_config": {
+                    "anchor_url": "str",
+                    "common_detail_xpath": "str",
+                    "jump_widget_xpath": "NoneType",
+                    "list_url": "str",
+                    "nav_steps": [{"action": "str", "url": "str"}],
+                    "page_state_signature": "str",
+                    "pagination_xpath": "NoneType",
+                    "task_description": "str",
+                    "variant_label": "str",
+                },
                 "committed_records": [{"success": "bool", "url": "str"}],
                 "consumer_concurrency": "int",
                 "durability_state": "str",
@@ -46,21 +58,42 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                             "fixed_value": "NoneType",
                             "name": "str",
                             "required": "bool",
+                            "xpath_fallbacks": [],
                         }
                     ]
                 },
-                "extraction_evidence": [{"success": "bool", "url": "str"}],
+                "extraction_evidence": [
+                    {
+                        "extraction_config": {
+                            "fields": [
+                                {
+                                    "data_type": "str",
+                                    "description": "str",
+                                    "example": "NoneType",
+                                    "extraction_source": "NoneType",
+                                    "fixed_value": "NoneType",
+                                    "name": "str",
+                                    "required": "bool",
+                                }
+                            ]
+                        },
+                        "success": "bool",
+                        "url": "str",
+                    }
+                ],
                 "failed_count": "int",
                 "failure_category": "str",
                 "failure_detail": "str",
-                "field_names": ["str"],
                 "items_file": "str",
                 "list_url": "str",
                 "mode": "str",
                 "outcome_state": "str",
+                "page_state_signature": "str",
                 "promotion_state": "str",
                 "required_field_success_rate": "float",
                 "run_id": "str",
+                "skill_path": "str",
+                "skill_state": "str",
                 "success_count": "int",
                 "success_rate": "float",
                 "summary_file": "str",
@@ -70,6 +103,7 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                 "total_urls": "int",
                 "validation_failure_count": "int",
                 "validation_failures": [],
+                "variant_label": "str",
             },
             "task_result": {
                 "artifacts": [{"label": "str", "path": "str"}],
@@ -78,26 +112,14 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                 "output": {
                     "anchor_url": "str",
                     "collected_count": "int",
-                    "collection_config": {"list_url": "str", "llm_backend": "str"},
+                    "collection_config": {},
                     "context": {},
                     "depth": "int",
                     "error": "str",
                     "execution_brief": {},
                     "expand_request": {},
-                    "extraction_config": {
-                        "fields": [
-                            {
-                                "data_type": "str",
-                                "description": "str",
-                                "example": "NoneType",
-                                "extraction_source": "NoneType",
-                                "fixed_value": "NoneType",
-                                "name": "str",
-                                "required": "bool",
-                            }
-                        ]
-                    },
-                    "extraction_evidence": [{"success": "bool", "url": "str"}],
+                    "extraction_config": {},
+                    "extraction_evidence": [],
                     "journal_entries": [],
                     "list_url": "str",
                     "mode": "str",
@@ -120,8 +142,8 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                         "items_file": "str",
                         "outcome_state": "str",
                         "promotion_state": "str",
-                        "required_field_success_rate": "float",
                         "reliable_for_aggregation": "bool",
+                        "required_field_success_rate": "float",
                         "success_count": "int",
                         "success_rate": "float",
                         "terminal_reason": "str",
@@ -134,7 +156,7 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                 },
                 "result_id": "str",
                 "spawned_tickets": [],
-                "status": "str",
+                "status": "ResultStatus",
                 "ticket_id": "str",
             },
         }
