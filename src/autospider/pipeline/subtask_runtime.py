@@ -91,6 +91,8 @@ def _build_runtime_summary(run_result: PipelineRunResult) -> dict[str, Any]:
         "durability_state": summary.durability_state.value,
         "durably_persisted": summary.durably_persisted,
         "reliable_for_aggregation": _is_reliable({"summary": run_result.to_payload(), "outcome_type": outcome_type}),
+        "failure_category": summary.failure_category,
+        "failure_detail": summary.failure_detail,
     }
 
 

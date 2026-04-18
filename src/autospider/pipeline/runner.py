@@ -16,6 +16,10 @@ from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdenti
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
+from ..graph.failures import (
+    SITE_DEFENSE_CATEGORY,
+    classify_runtime_exception,
+)
 from autospider.common.logger import get_logger
 from .finalization import (
     PipelineFinalizationContext,
@@ -617,6 +621,11 @@ async def run_pipeline(context: ExecutionContext) -> PipelineRunResult:
             runtime_context.runtime_state.terminal_reason = (
                 runtime_context.runtime_state.terminal_reason or "browser_intervention"
             )
+            if not runtime_context.runtime_state.failure_category:
+                runtime_context.runtime_state.failure_category = SITE_DEFENSE_CATEGORY
+                runtime_context.runtime_state.failure_detail = (
+                    runtime_context.runtime_state.failure_detail or "browser_intervention"
+                )
             await tracker.set_runtime_state(
                 {
                     "stage": "interrupted",
@@ -744,6 +753,14 @@ async def _process_task(
         if state is not None:
             _set_state_error(state, f"extractor_system_error: {exc}")
             state.terminal_reason = "extractor_system_error"
+            if not state.failure_category:
+                classified = classify_runtime_exception(
+                    component="pipeline.extractor",
+                    error=exc,
+                    page_id=url,
+                )
+                state.failure_category = str(classified.get("category") or "")
+                state.failure_detail = str(classified.get("detail") or str(exc) or "")
         run_record = await _fail_persisted_item(
             execution_id=execution_id,
             url=url,

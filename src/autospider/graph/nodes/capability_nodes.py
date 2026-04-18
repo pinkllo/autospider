@@ -39,6 +39,7 @@ from ..state_access import (
     subtask_results as select_subtask_results,
     task_plan as select_task_plan,
 )
+from ..workflow_access import coerce_workflow_state
 from ...pipeline.aggregator import ResultAggregator
 from ...pipeline.helpers import (
     build_artifact,
@@ -141,9 +142,17 @@ def build_planning_runtime_payload(
     plan: TaskPlan,
     plan_knowledge: str,
     request_params: dict[str, Any] | None,
+    failure_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     resolved_request_params = dict(request_params or {})
-    world = build_planner_world_payload(plan, request_params=resolved_request_params)
+    # replan 时需要把上一轮失败证据贯穿进 world / request_params，否则下一轮 dispatch
+    # 的 SubTaskWorker 会读到空 failure_records，重蹈覆辙
+    resolved_failures = [dict(item) for item in list(failure_records or [])]
+    world = build_planner_world_payload(
+        plan,
+        request_params=resolved_request_params,
+        failure_records=resolved_failures,
+    )
     control = build_planner_control_payload(plan, request_params=resolved_request_params)
     decision_context = build_decision_context({"world": world, "control": control})
     world_request_params = dict(resolved_request_params)
@@ -269,6 +278,8 @@ async def _plan_request(request) -> dict[str, Any]:
         raise RuntimeError("missing_list_url")
     validate_url(planner_url)
 
+    prior_failures = [dict(item) for item in list(request.failure_records or [])]
+
     session = BrowserRuntimeSession(**BrowserRuntimeSession.build_options(request))
     await session.start()
     try:
@@ -278,6 +289,7 @@ async def _plan_request(request) -> dict[str, Any]:
             user_request=request.request or request.task_description,
             output_dir=request.output_dir,
             planner_intent=request.model_dump(mode="python"),
+            prior_failures=prior_failures,
         )
         runtime = SkillRuntime()
         selected_skill_meta = (
@@ -316,6 +328,8 @@ async def _plan_request(request) -> dict[str, Any]:
         plan=plan,
         plan_knowledge=planner.render_plan_knowledge(plan),
         request_params=request.model_dump(mode="python"),
+        # 让 replan 链路上的失败证据继续流到下一轮 dispatch 的 SubTaskWorker
+        failure_records=prior_failures,
     )
     return {
         "task_plan": plan,
@@ -698,16 +712,21 @@ async def plan_node(state: dict[str, Any]) -> dict[str, Any]:
             request_params=dict(result.get("request_params") or {}),
             source_agent="plan_node",
         )
+        prior_control = dict(coerce_workflow_state(state).get("control") or state.get("control") or {})
+        merged_control = {
+            **dict(result.get("control") or {}),
+            "task_plan": task_plan,
+            "plan_knowledge": str(result.get("plan_knowledge") or ""),
+            "taskplane_envelope_id": envelope_id,
+            "stage_status": "ok",
+        }
+        # 保留 feedback 决策写入的 active_strategy（含 replan_count），避免 replan 预算被覆盖
+        if "active_strategy" in prior_control:
+            merged_control["active_strategy"] = dict(prior_control["active_strategy"])
         return {
             **_ok(_node_payload(result, {"task_plan": task_plan})),
             "world": dict(result.get("world") or {}),
-            "control": {
-                **dict(result.get("control") or {}),
-                "task_plan": task_plan,
-                "plan_knowledge": str(result.get("plan_knowledge") or ""),
-                "taskplane_envelope_id": envelope_id,
-                "stage_status": "ok",
-            },
+            "control": merged_control,
             "normalized_params": dict(result.get("request_params") or {}),
             "taskplane_envelope_id": envelope_id,
         }

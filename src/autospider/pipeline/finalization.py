@@ -19,6 +19,7 @@ from ..common.experience import (
 )
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
+from ..graph.failures import FATAL_CATEGORY
 
 if TYPE_CHECKING:
     from ..domain.fields import FieldDefinition
@@ -133,11 +134,15 @@ def classify_pipeline_result(
     state_error: object,
     validation_failures: list[dict],
     terminal_reason: str = "",
+    failure_category: str = "",
+    failure_detail: str = "",
 ) -> dict[str, object]:
     failed_count = max(total_urls - success_count, 0)
     success_rate = (success_count / total_urls) if total_urls > 0 else 0.0
     validation_failure_count = len(validation_failures)
     normalized_reason = str(terminal_reason or "").strip()
+    normalized_failure_category = str(failure_category or "").strip()
+    normalized_failure_detail = str(failure_detail or "").strip()
 
     if normalized_reason == "browser_intervention":
         execution_state = EXECUTION_STATE_INTERRUPTED
@@ -167,6 +172,13 @@ def classify_pipeline_result(
     else:
         promotion_state = "rejected"
 
+    if not normalized_failure_category and outcome_state in {
+        OUTCOME_STATE_SYSTEM_FAILURE,
+        OUTCOME_STATE_INTERRUPTED,
+    }:
+        # 兜底：未打分类但 outcome 已是失败/中断，用 reason 作为 detail 方便上层展示。
+        normalized_failure_detail = normalized_failure_detail or normalized_reason
+
     return {
         "execution_state": execution_state,
         "outcome_state": outcome_state,
@@ -176,6 +188,8 @@ def classify_pipeline_result(
         "failed_count": failed_count,
         "required_field_success_rate": round(success_rate, 4),
         "validation_failure_count": validation_failure_count,
+        "failure_category": normalized_failure_category,
+        "failure_detail": normalized_failure_detail,
     }
 
 
@@ -259,6 +273,8 @@ def _refresh_summary_classification(
     summary: dict[str, Any],
     state_error: object,
     validation_failures: list[dict[str, Any]],
+    failure_category: str = "",
+    failure_detail: str = "",
 ) -> None:
     summary.update(
         classifier(
@@ -267,6 +283,8 @@ def _refresh_summary_classification(
             state_error=_resolve_pipeline_error(state_error=state_error, summary=summary),
             validation_failures=validation_failures,
             terminal_reason=str(summary.get("terminal_reason") or ""),
+            failure_category=str(failure_category or summary.get("failure_category") or ""),
+            failure_detail=str(failure_detail or summary.get("failure_detail") or ""),
         )
     )
 
@@ -718,11 +736,23 @@ class PipelineFinalizer:
                 or context.runtime_state.terminal_reason
                 or ""
             )
+            context.summary["failure_category"] = str(
+                context.summary.get("failure_category")
+                or context.runtime_state.failure_category
+                or ""
+            )
+            context.summary["failure_detail"] = str(
+                context.summary.get("failure_detail")
+                or context.runtime_state.failure_detail
+                or ""
+            )
             _refresh_summary_classification(
                 classifier=self._deps.classify_pipeline_result,
                 summary=context.summary,
                 state_error=context.runtime_state.error,
                 validation_failures=context.runtime_state.validation_failures,
+                failure_category=context.runtime_state.failure_category,
+                failure_detail=context.runtime_state.failure_detail,
             )
             try:
                 self._deps.commit_items_file(context.staging_items_path, committed_records)
@@ -736,11 +766,19 @@ class PipelineFinalizer:
                 context.summary["terminal_reason"] = str(
                     context.summary.get("terminal_reason") or "export_failed"
                 )
+                context.summary["failure_category"] = str(
+                    context.summary.get("failure_category") or FATAL_CATEGORY
+                )
+                context.summary["failure_detail"] = str(
+                    context.summary.get("failure_detail") or "export_failed"
+                )
                 _refresh_summary_classification(
                     classifier=self._deps.classify_pipeline_result,
                     summary=context.summary,
                     state_error=context.summary["error"],
                     validation_failures=context.runtime_state.validation_failures,
+                    failure_category=str(context.summary.get("failure_category") or ""),
+                    failure_detail=str(context.summary.get("failure_detail") or ""),
                 )
                 try:
                     self._deps.write_summary(context.summary_path, context.summary)

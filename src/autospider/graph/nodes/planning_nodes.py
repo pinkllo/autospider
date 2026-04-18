@@ -77,5 +77,10 @@ def plan_strategy_node(state: dict[str, Any]) -> dict[str, Any]:
         reason = str(active_strategy.get("reason") or REPLAN_STRATEGY_REASON)
     else:
         reason = str(active_strategy.get("reason") or INITIAL_STRATEGY_REASON)
-    control["active_strategy"] = {"name": strategy_name, "reason": reason}
+    # 保留 replan_count 等可观测字段，供下游 decision context 透传。
+    payload: dict[str, Any] = {"name": strategy_name, "reason": reason}
+    for key in ("replan_count", "max_replans", "degraded_from"):
+        if key in active_strategy:
+            payload[key] = active_strategy[key]
+    control["active_strategy"] = payload
     return {"control": control}

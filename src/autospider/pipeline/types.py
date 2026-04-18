@@ -230,6 +230,8 @@ class PipelineRunSummary(BaseModel):
     execution_id: str = ""
     durability_state: DurabilityState = DurabilityState.STAGED
     durably_persisted: bool = False
+    failure_category: str = ""
+    failure_detail: str = ""
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any], *, summary_file: str = "") -> "PipelineRunSummary":
@@ -254,6 +256,8 @@ class PipelineRunSummary(BaseModel):
             execution_id=str(raw.get("execution_id") or ""),
             durability_state=DurabilityState(durability),
             durably_persisted=durability == DurabilityState.DURABLE.value,
+            failure_category=str(raw.get("failure_category") or ""),
+            failure_detail=str(raw.get("failure_detail") or ""),
         )
 
 
@@ -306,6 +310,8 @@ class PipelineRunResult(BaseModel):
                 "execution_id": self.summary.execution_id,
                 "durability_state": self.summary.durability_state.value,
                 "durably_persisted": self.summary.durably_persisted,
+                "failure_category": self.summary.failure_category,
+                "failure_detail": self.summary.failure_detail,
                 "collection_config": dict(self.collection_config),
                 "extraction_config": dict(self.extraction_config),
                 "validation_failures": list(self.validation_failures),

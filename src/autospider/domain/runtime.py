@@ -23,6 +23,8 @@ class SubTaskRuntimeSummary(BaseModel):
     durability_state: str = ""
     durably_persisted: bool = False
     reliable_for_aggregation: bool = False
+    failure_category: str = ""
+    failure_detail: str = ""
 
 
 class SubTaskRuntimeState(BaseModel):

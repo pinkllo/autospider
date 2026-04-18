@@ -401,6 +401,15 @@ async def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
     progress = await scheduler.get_envelope_progress(envelope_id)
     has_pending = (progress.queued + progress.dispatched + progress.running) > 0
     summary = _build_dispatch_summary(mutation.task_plan, accumulated)
+    prior_control = _control_state(state)
+    merged_control: dict[str, Any] = {
+        "current_plan": dict(prior_control.get("current_plan") or {}),
+        "task_plan": mutation.task_plan,
+        "plan_knowledge": mutation.plan_knowledge,
+        "stage_status": "ok",
+    }
+    if "active_strategy" in prior_control:
+        merged_control["active_strategy"] = dict(prior_control["active_strategy"])
     return {
         "dispatch_queue": [],
         "current_batch": [],
@@ -408,12 +417,7 @@ async def merge_dispatch_round(state: MultiDispatchState) -> MultiDispatchState:
             "subtask_results": accumulated,
             "dispatch_summary": summary,
         },
-        "control": {
-            "current_plan": dict(_control_state(state).get("current_plan") or {}),
-            "task_plan": mutation.task_plan,
-            "plan_knowledge": mutation.plan_knowledge,
-            "stage_status": "ok",
-        },
+        "control": merged_control,
         "round_subtask_results": [],
         "round_expand_requests": [],
         "node_payload": {"dispatch_result": summary},
@@ -450,17 +454,21 @@ async def complete_dispatch(state: MultiDispatchState) -> MultiDispatchState:
     )
     result_items = list(dict(state.get("execution") or {}).get("subtask_results") or [])
     summary = _build_dispatch_summary(mutation.task_plan, result_items)
+    prior_control = _control_state(state)
+    merged_control: dict[str, Any] = {
+        "current_plan": dict(prior_control.get("current_plan") or {}),
+        "task_plan": mutation.task_plan,
+        "plan_knowledge": mutation.plan_knowledge,
+        "stage_status": "ok",
+    }
+    if "active_strategy" in prior_control:
+        merged_control["active_strategy"] = dict(prior_control["active_strategy"])
     return {
         "execution": {
             "subtask_results": result_items,
             "dispatch_summary": summary,
         },
-        "control": {
-            "current_plan": dict(_control_state(state).get("current_plan") or {}),
-            "task_plan": mutation.task_plan,
-            "plan_knowledge": mutation.plan_knowledge,
-            "stage_status": "ok",
-        },
+        "control": merged_control,
         "node_status": "ok",
         "node_error": None,
         "node_payload": {"dispatch_result": summary},

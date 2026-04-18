@@ -162,6 +162,7 @@ def _resolve_recovery_policy() -> dict[str, Any]:
     default = build_default_recovery_policy()
     return {
         "max_retries": default.max_retries,
+        "max_replans": default.max_replans,
         "fail_fast": default.fail_fast,
         "escalation_categories": list(default.escalation_categories),
         "reason": "使用默认恢复策略等待执行阶段累积失败记录后再调整",
@@ -172,11 +173,15 @@ def build_planner_world_payload(
     plan: TaskPlan,
     *,
     request_params: Mapping[str, Any] | None = None,
+    failure_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    # 保持历史 failure 证据：replan 时由上游传入，确保后续 dispatch 轮次下游 SubTaskWorker
+    # 仍能读到引发本次 replan 的失败，避免反复踩同一坑。
+    resolved_failures = [dict(item) for item in list(failure_records or [])]
     world_model = build_initial_world_model(
         request_params=request_params,
         page_models=_build_page_models(plan),
-        failure_records=[],
+        failure_records=list(resolved_failures),
     )
     entry_node = _select_entry_node(plan)
     if entry_node is not None and entry_node.node_id not in world_model.page_models:
@@ -192,7 +197,7 @@ def build_planner_world_payload(
     return {
         "request_params": dict(request_params or {}),
         "world_model": world_model_to_payload(world_model),
-        "failure_records": [],
+        "failure_records": list(resolved_failures),
     }
 
 
@@ -250,6 +255,7 @@ class TaskPlanner(
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         planner_intent: PlannerIntent | dict[str, Any] | None = None,
+        prior_failures: list[dict[str, Any]] | None = None,
     ):
         """初始化任务规划器。
 
@@ -259,6 +265,7 @@ class TaskPlanner(
             user_request: 用户的原始采集需求描述。
             output_dir: 规划结果（TaskPlan）的保存目录，默认为 "output"。
             use_main_model: 是否强制使用主模型配置（用于执行阶段权限下放）。
+            prior_failures: 上一轮调度累积的 FailureRecord 列表，用于 replan 时告知 LLM 需要规避哪些策略。
         """
         self.page = page
         self.site_url = site_url
@@ -266,6 +273,7 @@ class TaskPlanner(
         self.output_dir = output_dir
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
+        self.prior_failures = [dict(item) for item in list(prior_failures or [])]
         self.planner_intent = (
             planner_intent
             if isinstance(planner_intent, PlannerIntent)
@@ -561,6 +569,33 @@ class TaskPlanner(
             ]
         )
 
+    def _format_prior_failures(self, *, limit: int = 5) -> str:
+        """渲染上一轮失败证据供 planner 规避。replan 时由外部注入。
+
+        注意：当历史长度超过 ``limit`` 时保留**最近**产生的若干条，最旧的证据会被截断。
+        长 replan 链条下只有最近的失败信号对下一步策略有指导意义。
+        """
+        if not self.prior_failures:
+            return "（无）"
+        total = len(self.prior_failures)
+        recent = self.prior_failures[-limit:] if total > limit else list(self.prior_failures)
+        lines: list[str] = []
+        for record in recent:
+            category = str(record.get("category") or "unknown").strip()
+            detail = str(record.get("detail") or "").strip()
+            metadata = dict(record.get("metadata") or {})
+            subtask_id = str(metadata.get("subtask_id") or record.get("page_id") or "").strip()
+            terminal = str(metadata.get("terminal_reason") or "").strip()
+            snippet = f"- [{category}] {detail}"
+            if subtask_id:
+                snippet += f" (subtask={subtask_id})"
+            if terminal and terminal != detail:
+                snippet += f" reason={terminal}"
+            lines.append(snippet)
+        if total > limit:
+            lines.append(f"- ...（共 {total} 条失败证据，仅展示最近 {limit} 条）")
+        return "\n".join(lines)
+
     def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
         """构造 URL + nav_steps 的稳定状态签名。"""
         return self._page_state.build_page_state_signature(current_url, nav_steps)
@@ -626,6 +661,7 @@ class TaskPlanner(
                 "grouping_semantics": self._format_grouping_semantics(),
                 "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "prior_failure_evidence": self._format_prior_failures(),
             },
         )
 

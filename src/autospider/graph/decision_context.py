@@ -60,6 +60,7 @@ def _coerce_recovery_policy(value: Any) -> RecoveryDirective:
     categories = payload.get("escalation_categories") or default.escalation_categories
     return RecoveryDirective(
         max_retries=int(payload.get("max_retries", default.max_retries) or 0),
+        max_replans=int(payload.get("max_replans", default.max_replans) or 0),
         fail_fast=_parse_bool(payload.get("fail_fast"), default=default.fail_fast),
         escalation_categories=tuple(str(item) for item in categories),
         reason=str(payload.get("reason") or ""),
@@ -189,6 +190,7 @@ def _summarize_dispatch_policy(policy: DispatchDecision) -> dict[str, Any]:
 def _summarize_recovery_policy(policy: RecoveryDirective) -> dict[str, Any]:
     return {
         "max_retries": policy.max_retries,
+        "max_replans": policy.max_replans,
         "fail_fast": policy.fail_fast,
         "escalation_categories": list(policy.escalation_categories),
         "reason": policy.reason,

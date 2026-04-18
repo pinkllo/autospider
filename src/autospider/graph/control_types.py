@@ -8,6 +8,7 @@ from typing import Any
 DEFAULT_DISPATCH_STRATEGY = "sequential"
 DEFAULT_MAX_CONCURRENCY = 1
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_MAX_REPLANS = 2
 DEFAULT_ESCALATION_CATEGORIES = ("system_failure",)
 
 
@@ -29,6 +30,7 @@ class DispatchDecision:
 @dataclass(frozen=True, slots=True)
 class RecoveryDirective:
     max_retries: int = DEFAULT_MAX_RETRIES
+    max_replans: int = DEFAULT_MAX_REPLANS
     fail_fast: bool = True
     escalation_categories: tuple[str, ...] = DEFAULT_ESCALATION_CATEGORIES
     reason: str = ""

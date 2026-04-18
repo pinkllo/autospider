@@ -12,6 +12,7 @@ from ..common.config import config
 from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
 from ..domain.fields import FieldDefinition
+from ..graph.failures import classify_runtime_exception
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)
@@ -37,6 +38,8 @@ class PipelineRuntimeState:
     extraction_evidence: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     terminal_reason: str = ""
+    failure_category: str = ""
+    failure_detail: str = ""
 
 
 @dataclass(slots=True)
@@ -157,6 +160,14 @@ class ProducerService:
         except Exception as exc:  # noqa: BLE001
             self.deps.set_state_error(self.context.runtime_state, f"producer_error: {exc}")
             self.context.runtime_state.terminal_reason = "producer_error"
+            if not self.context.runtime_state.failure_category:
+                classified = classify_runtime_exception(
+                    component="pipeline.producer",
+                    error=exc,
+                    page_id=str(self.context.list_url or ""),
+                )
+                self.context.runtime_state.failure_category = str(classified.get("category") or "")
+                self.context.runtime_state.failure_detail = str(classified.get("detail") or str(exc) or "")
             await self.context.channel.close_with_error(f"producer_error: {exc}")
             logger.info("[Pipeline] Producer failed: %s", exc)
 

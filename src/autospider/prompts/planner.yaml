@@ -82,6 +82,15 @@ analyze_site_user_message: |
   ## 已选中的站点 skills
   {{selected_skills_context}}
 
+  ## 上一轮失败证据（replan 时由系统注入；首次规划时为"（无）"）
+  {{prior_failure_evidence}}
+
+  若上方给出了失败证据，请避免重复产生同类策略：
+  - `rule_stale`：意味着之前生成的 XPath/选择器已失效，请选择语义锚点更稳定的入口或改用导航步骤
+  - `state_mismatch`：意味着 DOM 结构在交互中抖动，请降低对单个 mark_id 的依赖，多使用文本/层级复合证据
+  - `site_defense`：意味着被反爬拦截，请降低并发/避开频繁触发拦截的入口；不要生成仍会命中反爬的策略
+  - `contract_violation`：意味着上次输出 JSON 不合规，请严格按输出格式返回
+
   ## 去环要求
   - 不要把祖先/当前已选分类、回到上级的入口当作新的子分类
   - SPA 同一 URL 下的兄弟切换属于页面内状态切换，不是新层级
