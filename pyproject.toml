@@ -17,6 +17,7 @@ dependencies = [
     "langchain-openai>=1.1.6",
     "playwright>=1.57.0",
     "pydantic>=2.12.5",
+    "pydantic-settings>=2.10.1",
     "pillow>=12.1.0",
     "rich>=14.2.0",
     "typer>=0.21.0",
