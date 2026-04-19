@@ -7,6 +7,11 @@ from .config_repository import (
     coerce_collection_config,
     load_collection_config,
 )
+from .field_xpath_repository import (
+    FieldXPathQueryService,
+    FieldXPathWriteService,
+    normalize_xpath_domain,
+)
 from .progress_repository import (
     CollectionProgress,
     ProgressPersistence,
@@ -18,8 +23,11 @@ __all__ = [
     "CollectionConfigLoadError",
     "CollectionProgress",
     "ConfigPersistence",
+    "FieldXPathQueryService",
+    "FieldXPathWriteService",
     "ProgressPersistence",
     "coerce_collection_config",
     "coerce_collection_progress",
     "load_collection_config",
+    "normalize_xpath_domain",
 ]

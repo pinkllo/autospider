@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from autospider.common.logger import get_logger
-from autospider.common.storage.field_xpath_query_service import FieldXPathQueryService
-from autospider.common.storage.field_xpath_write_service import FieldXPathWriteService
+from autospider.contexts.collection.infrastructure.repositories.field_xpath_repository import (
+    FieldXPathQueryService,
+    FieldXPathWriteService,
+)
 from autospider.domain.fields import FieldDefinition
 
 from .batch_xpath_extractor import BatchXPathExtractor

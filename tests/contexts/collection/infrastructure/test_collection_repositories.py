@@ -7,6 +7,9 @@ from autospider.contexts.collection.infrastructure.repositories.config_repositor
     ConfigPersistence,
     coerce_collection_config,
 )
+from autospider.contexts.collection.infrastructure.repositories.field_xpath_repository import (
+    normalize_xpath_domain,
+)
 from autospider.contexts.collection.infrastructure.repositories.progress_repository import (
     CollectionProgress,
     ProgressPersistence,
@@ -62,3 +65,7 @@ def test_progress_persistence_round_trip() -> None:
     assert loaded.last_updated
     assert persistence.has_checkpoint() is True
     assert coerce_collection_progress(loaded).to_payload()["status"] == "RUNNING"
+
+
+def test_normalize_xpath_domain_removes_www_prefix() -> None:
+    assert normalize_xpath_domain("https://www.example.com/path?q=1") == "example.com"
