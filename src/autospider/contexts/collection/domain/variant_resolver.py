@@ -1,10 +1,18 @@
+"""Collection domain — planner variant resolution policies.
+
+This mixin drives Playwright-based discovery when a planner expands a
+category entry into concrete subtask variants. The behaviour (link text
+resolution, URL strategies, same-page activation detection) belongs to
+collection decision-making, so it lives in the collection context.
+"""
+
 from __future__ import annotations
 
 from urllib.parse import urljoin, urlparse
 
-from ...common.config import config
-from ...common.logger import get_logger
-from ...common.som.text_first import resolve_single_mark_id
+from autospider.common.config import config
+from autospider.common.logger import get_logger
+from autospider.common.som.text_first import resolve_single_mark_id
 
 logger = get_logger(__name__)
 _STATE_CHANGE_POLL_INTERVALS_MS = (0, 200, 300, 400, 600)
@@ -238,7 +246,6 @@ class PlannerVariantResolverMixin:
         return None
 
     async def _get_href_by_js(self, mark_id: int, base_url: str, snapshot: object, link_text: str = "") -> str:
-        # 文本优先：通过可见文本定位元素获取 href
         if link_text:
             try:
                 text_locator = self.page.get_by_text(link_text, exact=True)
@@ -254,7 +261,6 @@ class PlannerVariantResolverMixin:
             except Exception as e:
                 logger.debug("[Planner] 文本定位获取 href 失败 ('%s'): %s", link_text, e)
 
-        # 兜底：通过 snapshot 中的 XPath 定位
         xpath = self._get_best_xpath_for_mark(snapshot, mark_id)
         if not xpath:
             return ""
@@ -298,7 +304,6 @@ class PlannerVariantResolverMixin:
             return None
 
         try:
-            # 文本优先：先通过可见文本定位元素，XPath 兜底，失败则等待重试一次
             locator = None
             for attempt in range(2):
                 if link_text:
