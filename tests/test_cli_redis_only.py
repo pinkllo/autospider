@@ -1,29 +1,19 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from tests.cli_test_support import fresh_import_cli
 
-from typer.testing import CliRunner
-
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from autospider.cli import app
 from autospider.graph.execution_handoff import build_chat_execution_params
 from autospider.pipeline.types import ExecutionRequest
 
-runner = CliRunner()
-
 
 def test_cli_help_exposes_only_current_public_commands() -> None:
-    result = runner.invoke(app, ["--help"])
+    cli = fresh_import_cli()
+    command_names = {command.name for command in cli.app.registered_commands}
 
-    assert result.exit_code == 0
-    assert "chat-pipeline" in result.stdout
-    assert "db-init" in result.stdout
-    assert "resume" in result.stdout
-    assert "multi-pipeline" not in result.stdout
+    assert "chat-pipeline" in command_names
+    assert "db-init" in command_names
+    assert "resume" in command_names
+    assert "multi-pipeline" not in command_names
 
 
 def test_cli_originated_grouped_handoff_preserves_category_semantics() -> None:

@@ -173,7 +173,7 @@ def test_benchmark_command_supports_short_s_alias_and_repeatable_scenarios() -> 
 
     scenario_default = inspect.signature(cli.benchmark_command).parameters["scenario"].default
 
-    assert scenario_default.default == ()
+    assert scenario_default.default == []
     assert "--scenario" in scenario_default.param_decls
     assert "-s" in scenario_default.param_decls
 
@@ -193,7 +193,9 @@ def test_render_latest_benchmark_report_fails_without_history(
     repo_tmp_dir: Path,
 ) -> None:
     cli = _fresh_import_cli()
-    monkeypatch.setattr(cli, "_benchmark_reports_dir", lambda: repo_tmp_dir)
+    benchmark_module = inspect.getmodule(cli._render_latest_benchmark_report)
+    assert benchmark_module is not None
+    monkeypatch.setattr(benchmark_module, "_benchmark_reports_dir", lambda: repo_tmp_dir)
 
     with pytest.raises(FileNotFoundError, match="No benchmark reports found"):
         cli._render_latest_benchmark_report()
@@ -206,7 +208,9 @@ def test_compare_latest_benchmark_reports_fails_without_history(
     repo_tmp_dir: Path,
 ) -> None:
     cli = _fresh_import_cli()
-    monkeypatch.setattr(cli, "_benchmark_reports_dir", lambda: repo_tmp_dir)
+    benchmark_module = inspect.getmodule(cli._compare_latest_benchmark_reports)
+    assert benchmark_module is not None
+    monkeypatch.setattr(benchmark_module, "_benchmark_reports_dir", lambda: repo_tmp_dir)
 
     with pytest.raises(FileNotFoundError, match="Need at least two benchmark reports"):
         cli._compare_latest_benchmark_reports()
@@ -219,17 +223,19 @@ def test_benchmark_command_runs_then_compares_when_compare_last_is_combined(
 ) -> None:
     cli = _fresh_import_cli()
     calls: list[tuple[str, object]] = []
+    benchmark_module = inspect.getmodule(cli.benchmark_command)
+    assert benchmark_module is not None
 
     monkeypatch.setattr(cli.cli_runtime, "bootstrap_cli_logging", lambda **kwargs: calls.append(("log", kwargs)))
-    monkeypatch.setattr(cli, "_list_benchmark_scenarios", lambda: ["products", "categories"])
+    monkeypatch.setattr(benchmark_module, "_list_benchmark_scenarios", lambda: ["products", "categories"])
     monkeypatch.setattr(
-        cli,
+        benchmark_module,
         "_run_benchmark_and_write_reports",
         lambda selected: calls.append(("run", list(selected)))
         or (Path("previous.json"), Path("latest.md")),
     )
     monkeypatch.setattr(
-        cli,
+        benchmark_module,
         "_compare_new_benchmark_report",
         lambda path: calls.append(("compare", path)) or {"products": {"status": "pass"}},
     )
@@ -251,10 +257,12 @@ def test_benchmark_command_accepts_multiple_scenarios(
 ) -> None:
     cli = _fresh_import_cli()
     captured: list[str] = []
+    benchmark_module = inspect.getmodule(cli.benchmark_command)
+    assert benchmark_module is not None
 
     monkeypatch.setattr(cli.cli_runtime, "bootstrap_cli_logging", lambda **kwargs: None)
     monkeypatch.setattr(
-        cli,
+        benchmark_module,
         "_run_benchmark_and_write_reports",
         lambda selected: captured.extend(selected) or (Path("latest.json"), Path("latest.md")),
     )

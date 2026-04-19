@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import importlib
-
-from . import normalize_help_surface
+from tests.cli_test_support import fresh_import_cli, help_surface
 
 ROOT_SNAPSHOT = {
     "usage": "Usage: autospider [OPTIONS] COMMAND [ARGS]...",
@@ -59,14 +57,13 @@ BENCHMARK_SNAPSHOT = {
 
 
 def test_cli_help_surfaces_match_contract_snapshots() -> None:
-    cli_module = importlib.import_module("autospider.cli")
-    runner = _load_cli_runner()
+    cli_module = fresh_import_cli()
     commands = {
-        "root": [],
-        "chat-pipeline": ["chat-pipeline"],
-        "resume": ["resume"],
-        "doctor": ["doctor"],
-        "benchmark": ["benchmark"],
+        "root": None,
+        "chat-pipeline": "chat-pipeline",
+        "resume": "resume",
+        "doctor": "doctor",
+        "benchmark": "benchmark",
     }
     snapshots = {
         "root": ROOT_SNAPSHOT,
@@ -76,13 +73,5 @@ def test_cli_help_surfaces_match_contract_snapshots() -> None:
         "benchmark": BENCHMARK_SNAPSHOT,
     }
 
-    for name, args in commands.items():
-        result = runner.invoke(cli_module.app, [*args, "--help"])
-        assert result.exit_code == 0
-        assert normalize_help_surface(result.stdout) == snapshots[name]
-
-
-def _load_cli_runner():
-    from typer.testing import CliRunner
-
-    return CliRunner()
+    for name, command_name in commands.items():
+        assert help_surface(cli_module, command_name) == snapshots[name]
