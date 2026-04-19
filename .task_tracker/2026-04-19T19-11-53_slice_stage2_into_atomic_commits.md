@@ -2,7 +2,7 @@
 
 - Timestamp: 2026-04-19T19:11:53+08:00
 - Task: 将当前分支已暂存的阶段 2（Chat/Experience/Planning/Collection-domain）改动切成一组原子 commit
-- Status: in_progress
+- Status: completed
 
 ## User Constraints
 
@@ -56,9 +56,16 @@
 ## Progress
 
 - [x] 持久化切片计划
-- [ ] c1 task_tracker 记录 commit
-- [ ] c2 阶段 2 聚合 migration commit
-- [ ] 聚合验证：ruff + pytest
+- [x] c1 task_tracker 记录 commit — `bea9447`
+- [x] c2 阶段 2 聚合 migration commit — `44b2762`
+- [x] 聚合验证：ruff baseline 对比（pre-refactor 125 → post-refactor 112，不增不降为负数）；`pytest -m smoke` 2 处 pre-existing 失败，与本 commit 无关；`pytest tests/contexts -q` 46 通过
+
+## Line Stats (non-test, 非测试文件)
+
+- c2 `src/**`: 112 files changed, 4158 insertions(+), 2917 deletions(-)
+- c2 `tests/**`（仅供参考，统计排除）: 43 files changed, 1536 insertions(+), 15 deletions(-)
+- 非测试净新增：+1241 行
+- 清理工作室中临时复位产生的文件已移入 `.task_trash/2026-04-19T19-11-53_accidental_restore/`
 
 ## Risks
 
