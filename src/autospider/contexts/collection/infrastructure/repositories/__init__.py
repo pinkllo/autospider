@@ -12,11 +12,13 @@ from .field_xpath_repository import (
     FieldXPathWriteService,
     normalize_xpath_domain,
 )
+from .page_result_repository import PageResultRepository
 from .progress_repository import (
     CollectionProgress,
     ProgressPersistence,
     coerce_collection_progress,
 )
+from .run_repository import RunRepository, TaskRunPayload
 
 __all__ = [
     "CollectionConfig",
@@ -25,7 +27,10 @@ __all__ = [
     "ConfigPersistence",
     "FieldXPathQueryService",
     "FieldXPathWriteService",
+    "PageResultRepository",
     "ProgressPersistence",
+    "RunRepository",
+    "TaskRunPayload",
     "coerce_collection_config",
     "coerce_collection_progress",
     "load_collection_config",

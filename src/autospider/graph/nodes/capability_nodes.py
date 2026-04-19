@@ -11,6 +11,11 @@ from langgraph.types import interrupt
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.browser.runtime import BrowserRuntimeSession
 from ...common.config import config
+from ...contexts.collection.application.use_cases.collect_urls import collect_detail_urls
+from ...contexts.collection.application.use_cases.extract_fields_batch import (
+    run_field_pipeline,
+)
+from ...contexts.collection.application.use_cases.finalize_run import ResultAggregator
 from ...contexts.collection.infrastructure.repositories import (
     CollectionProgress,
     load_collection_config,
@@ -21,7 +26,6 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 )
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
-from ...crawler.explore.url_collector import collect_detail_urls
 from ...contexts.planning.infrastructure.adapters.task_planner import (
     TaskPlanner,
     build_planner_control_payload,
@@ -29,7 +33,6 @@ from ...contexts.planning.infrastructure.adapters.task_planner import (
 )
 from ...contexts.planning.domain import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
-from ...field import run_field_pipeline
 from ..control_types import build_default_recovery_policy
 from ...contexts.planning.domain import classify_runtime_exception
 from ..recovery import RETRY_ACTION, build_recovery_directive
@@ -43,7 +46,6 @@ from ..state_access import (
     task_plan as select_task_plan,
 )
 from ..workflow_access import coerce_workflow_state
-from ...pipeline.aggregator import ResultAggregator
 from ...pipeline.helpers import (
     build_artifact,
     build_execution_context,

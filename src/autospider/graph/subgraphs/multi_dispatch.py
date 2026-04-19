@@ -22,7 +22,7 @@ from ...pipeline.subtask_runtime import (
     subtask_to_payload,
     subtask_signature,
 )
-from ...pipeline.worker import SubTaskWorker
+from ...contexts.collection.application.use_cases.run_subtask import SubTaskWorker
 from ...taskplane_adapter.graph_integration import (
     ensure_taskplane_plan_registered,
     get_taskplane_envelope_id,

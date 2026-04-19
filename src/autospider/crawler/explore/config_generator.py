@@ -10,7 +10,6 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.config import config
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...contexts.collection.infrastructure.repositories.config_repository import (
@@ -22,6 +21,7 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
     SkillRepository as ExperienceSkillRepository,
 )
 from ..collector import (
+    DetailPageVisit,
     XPathExtractor,
     LLMDecisionMaker,
     URLExtractor,

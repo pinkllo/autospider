@@ -11,19 +11,21 @@ from ..common.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
-from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
+from autospider.contexts.collection.application.use_cases.collect_urls import URLCollector
+from autospider.contexts.collection.application.use_cases.extract_fields import (
+    DetailPageWorker,
+)
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
-from ..field import DetailPageWorker
 from ..contexts.planning.domain import (
     SITE_DEFENSE_CATEGORY,
     classify_runtime_exception,
 )
 from autospider.common.logger import get_logger
+from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
 from .finalization import (
     PipelineFinalizationContext,
     PipelineFinalizationDependencies,
