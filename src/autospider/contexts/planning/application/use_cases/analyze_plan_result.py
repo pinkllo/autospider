@@ -1,6 +1,8 @@
+"""Post-process planner analysis results into normalized subtask candidates."""
+
 from __future__ import annotations
 
-from ...contexts.planning.domain import PlannerCategoryCandidate
+from autospider.contexts.planning.domain.model import PlannerCategoryCandidate
 
 
 class PlannerAnalysisPostProcessMixin:

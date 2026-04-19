@@ -46,6 +46,9 @@ from ...graph.control_types import (
 from ...graph.world_model import build_initial_world_model, upsert_page_model, world_model_to_payload
 from ...pipeline.runtime_controls import resolve_concurrency_settings
 from autospider.contexts.collection.domain.variant_resolver import PlannerVariantResolverMixin
+from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
+    PlannerAnalysisPostProcessMixin,
+)
 from autospider.contexts.planning.domain.page_state import PlannerPageState
 from autospider.contexts.planning.domain.services import (
     PlannerCategorySemanticsMixin,
@@ -54,8 +57,6 @@ from autospider.contexts.planning.domain.services import (
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
-
-from .planner_analysis_postprocess import PlannerAnalysisPostProcessMixin
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

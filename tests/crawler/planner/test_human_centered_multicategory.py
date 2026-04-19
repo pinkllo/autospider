@@ -8,7 +8,7 @@ SRC_ROOT = Path(__file__).resolve().parents[3] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.crawler.planner.planner_analysis_postprocess import (
+from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
     PlannerAnalysisPostProcessMixin,
 )
 from autospider.contexts.planning.domain.services import (
