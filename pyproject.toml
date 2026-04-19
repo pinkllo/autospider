@@ -65,7 +65,7 @@ all = [
 ]
 
 [project.scripts]
-autospider = "autospider.cli:main"
+autospider = "autospider.interface.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autospider"]
