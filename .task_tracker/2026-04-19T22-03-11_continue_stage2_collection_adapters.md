@@ -2,7 +2,7 @@
 
 - Timestamp: 2026-04-19T22:03:11+08:00
 - Task: 继续推进阶段 2，迁移 Collection Context 的 adapter 层并归档已切走的旧实现
-- Status: in_progress
+- Status: completed 2026-04-19T22:19:00+08:00
 
 ## User Constraints
 
@@ -35,4 +35,17 @@
 - [x] 归档旧 `field_xpath_query_service.py` / `field_xpath_write_service.py` / `llm_decision.py` 到 `.task_trash/stage2_collection_archive/`
 - [x] `ruff check` 覆盖 adapter 迁移相关文件通过
 - [x] `pytest -q tests\\test_decision_context_wiring.py tests\\contexts\\collection\\infrastructure\\test_collection_repositories.py` 通过（7 passed）
-- [ ] 迁移并拆分 `script_generator.py`
+- [x] 新增 `contexts/collection/infrastructure/adapters/{_scrapy_script_template,scrapy_generator}.py`
+- [x] 更新 `crawler/explore/url_collector.py` 到新 `scrapy_generator` 路径
+- [x] 为 `scrapy_generator` 补充 2 条基础测试
+- [x] 归档旧 `crawler/output/script_generator.py` 到 `.task_trash/stage2_collection_archive/`
+
+## Verification
+
+- `ruff check` 覆盖 `collection` adapter 与相关测试文件通过
+- `pytest -q tests\\test_decision_context_wiring.py tests\\contexts\\collection\\infrastructure\\test_collection_repositories.py` 通过（7 passed）
+- `rg -n "crawler\\.collector\\.llm_decision|field_xpath_query_service|field_xpath_write_service|crawler\\.output\\.script_generator" src tests .task_trash` 仅剩 `.task_trash/` 归档文件与新实现
+
+## Line Stats
+
+- 非测试文件：+556 / -7

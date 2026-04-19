@@ -15,6 +15,9 @@ from autospider.contexts.collection.infrastructure.repositories.progress_reposit
     ProgressPersistence,
     coerce_collection_progress,
 )
+from autospider.contexts.collection.infrastructure.adapters.scrapy_generator import (
+    ScriptGenerator,
+)
 
 
 def _workspace_tmp(name: str) -> Path:
@@ -69,3 +72,31 @@ def test_progress_persistence_round_trip() -> None:
 
 def test_normalize_xpath_domain_removes_www_prefix() -> None:
     assert normalize_xpath_domain("https://www.example.com/path?q=1") == "example.com"
+
+
+def test_script_generator_extracts_common_detail_xpath() -> None:
+    generator = ScriptGenerator()
+    visits = [
+        {"clicked_element_xpath_candidates": [{"xpath": "/html/body/div[1]/a[1]", "priority": 1}]},
+        {"clicked_element_xpath_candidates": [{"xpath": "/html/body/div[2]/a[1]", "priority": 1}]},
+    ]
+
+    assert generator._extract_detail_xpath(visits) == "/html/body/div/a"
+
+
+def test_script_generator_hydrates_missing_config() -> None:
+    output_dir = _workspace_tmp("script_generator")
+    ConfigPersistence(config_dir=output_dir).save(
+        CollectionConfig(
+            nav_steps=[{"action": "click", "target_text": "News"}],
+            common_detail_xpath="//a[@class='detail']",
+            list_url="https://example.com/list",
+            task_description="collect items",
+        )
+    )
+    generator = ScriptGenerator(output_dir=str(output_dir))
+
+    nav_steps, detail_xpath = generator._hydrate_missing_config([], None)
+
+    assert nav_steps == [{"action": "click", "target_text": "News"}]
+    assert detail_xpath == "//a[@class='detail']"

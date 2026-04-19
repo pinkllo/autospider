@@ -28,7 +28,9 @@ from ..collector import (
     XPathExtractor,
     smart_scroll,
 )
-from ..output.script_generator import ScriptGenerator
+from ...contexts.collection.infrastructure.adapters.scrapy_generator import (
+    ScriptGenerator,
+)
 from .shared_workflow import (
     build_detail_visit,
     extract_mark_id_text_map,
