@@ -8,8 +8,10 @@ from typing import Any, Callable
 
 from ...common.browser.runtime import BrowserRuntimeSession
 from ...contexts.planning.domain import PlanJournalEntry, SubTask, SubTaskMode, TaskPlan
+from ...contexts.planning.infrastructure.repositories.artifact_store import (
+    ArtifactPlanRepository,
+)
 from ...pipeline.types import ExpandRequest
-from .planner_artifacts import PlannerArtifacts
 from .task_planner import TaskPlanner
 
 
@@ -154,7 +156,7 @@ class PlanMutationService:
     def __init__(
         self,
         *,
-        artifact_factory: Callable[..., PlannerArtifacts] = PlannerArtifacts,
+        artifact_factory: Callable[..., ArtifactPlanRepository] = ArtifactPlanRepository,
     ) -> None:
         self._artifact_factory = artifact_factory
 
