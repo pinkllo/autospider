@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autospider.crawler.planner.planner_state import PlannerPageState
+from autospider.contexts.planning.domain.page_state import PlannerPageState
 
 
 class _FakeCandidate:

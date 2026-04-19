@@ -6,21 +6,14 @@ import hashlib
 import json
 from typing import Any
 
-from ...common.logger import get_logger
+from autospider.common.logger import get_logger
 
 logger = get_logger(__name__)
+
 _ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
 _SAME_PAGE_ROLES = {"tab", "option", "menuitem", "menuitemradio", "treeitem"}
 _SAME_PAGE_TAGS = {"button"}
 _EMPTY_HREF_VALUES = {"", "#", "javascript:void(0)", "javascript:void(0);", "javascript:;"}
-
-
-def normalize_planner_nav_step(step: dict[str, Any]) -> dict[str, Any]:
-    return PlannerPageState(page=None).stable_nav_step_payload(dict(step or {}))
-
-
-def normalize_planner_nav_steps(nav_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return PlannerPageState(page=None).normalize_nav_steps(nav_steps)
 
 
 class PlannerPageState:
@@ -129,7 +122,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from ..collector.navigation_handler import NavigationHandler
+        from autospider.crawler.collector.navigation_handler import NavigationHandler
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
@@ -148,7 +141,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from ..collector.navigation_handler import NavigationHandler
+        from autospider.crawler.collector.navigation_handler import NavigationHandler
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
