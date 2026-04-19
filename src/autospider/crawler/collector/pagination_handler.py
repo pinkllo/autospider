@@ -21,7 +21,7 @@ from ...common.protocol import coerce_bool
 if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
-    from .llm_decision import LLMDecisionMaker
+    from ...contexts.collection.infrastructure.adapters.llm_navigator import LLMDecisionMaker
 
 
 logger = get_logger(__name__)

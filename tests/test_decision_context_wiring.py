@@ -11,9 +11,11 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.crawler.collector.llm_decision import LLMDecisionMaker
-from autospider.field.field_decider import FieldDecider
-from autospider.pipeline.orchestration import (
+from autospider.contexts.collection.infrastructure.adapters.llm_navigator import (  # noqa: E402
+    LLMDecisionMaker,
+)
+from autospider.field.field_decider import FieldDecider  # noqa: E402
+from autospider.pipeline.orchestration import (  # noqa: E402
     ConsumerPool,
     PipelineRuntimeContext,
     PipelineRuntimeDependencies,
@@ -26,7 +28,7 @@ from autospider.pipeline.orchestration import (
 async def test_llm_decision_maker_injects_decision_context_into_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.crawler.collector.llm_decision as decision_module
+    import autospider.contexts.collection.infrastructure.adapters._llm_decision as decision_module
 
     captured: dict[str, object] = {}
 
