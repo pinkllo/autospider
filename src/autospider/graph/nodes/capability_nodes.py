@@ -22,8 +22,8 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
 from ...crawler.explore.url_collector import collect_detail_urls
-from ...crawler.planner import TaskPlanner
-from ...crawler.planner.task_planner import (
+from ...contexts.planning.infrastructure.adapters.task_planner import (
+    TaskPlanner,
     build_planner_control_payload,
     build_planner_world_payload,
 )

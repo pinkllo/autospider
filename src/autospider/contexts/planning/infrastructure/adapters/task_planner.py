@@ -15,18 +15,24 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ...common.config import config
-from ...common.llm.streaming import ainvoke_with_stream
-from ...common.llm.trace_logger import append_llm_trace
-from ...common.logger import get_logger
-from ...common.protocol import (
+from autospider.common.accessibility import get_accessibility_text
+from autospider.common.config import config
+from autospider.common.llm.streaming import ainvoke_with_stream
+from autospider.common.llm.trace_logger import append_llm_trace
+from autospider.common.logger import get_logger
+from autospider.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     summarize_llm_payload,
 )
-from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
-from ...common.accessibility import get_accessibility_text
-from ...contexts.planning.domain import (
+from autospider.common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
+from autospider.common.utils.paths import get_prompt_path
+from autospider.common.utils.prompt_template import render_template
+from autospider.contexts.collection.domain.variant_resolver import PlannerVariantResolverMixin
+from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
+    PlannerAnalysisPostProcessMixin,
+)
+from autospider.contexts.planning.domain import (
     ExecutionBrief,
     PlanJournalEntry,
     PlanNode,
@@ -36,19 +42,6 @@ from ...contexts.planning.domain import (
     SubTaskMode,
     TaskPlan,
 )
-from ...common.utils.paths import get_prompt_path
-from ...common.utils.prompt_template import render_template
-from ...graph.control_types import (
-    PlanSpec,
-    build_default_dispatch_policy,
-    build_default_recovery_policy,
-)
-from ...graph.world_model import build_initial_world_model, upsert_page_model, world_model_to_payload
-from ...pipeline.runtime_controls import resolve_concurrency_settings
-from autospider.contexts.collection.domain.variant_resolver import PlannerVariantResolverMixin
-from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
-    PlannerAnalysisPostProcessMixin,
-)
 from autospider.contexts.planning.domain.page_state import PlannerPageState
 from autospider.contexts.planning.domain.services import (
     PlannerCategorySemanticsMixin,
@@ -57,6 +50,17 @@ from autospider.contexts.planning.domain.services import (
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
+from autospider.graph.control_types import (
+    PlanSpec,
+    build_default_dispatch_policy,
+    build_default_recovery_policy,
+)
+from autospider.graph.world_model import (
+    build_initial_world_model,
+    upsert_page_model,
+    world_model_to_payload,
+)
+from autospider.pipeline.runtime_controls import resolve_concurrency_settings
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

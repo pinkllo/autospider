@@ -63,8 +63,10 @@ class RuntimeExpansionService:
     def _resolve_planner_cls(self) -> type:
         if self._planner_cls is not None:
             return self._planner_cls
-        # Deferred import: TaskPlanner still lives in crawler.planner until its own migration.
-        from autospider.crawler.planner.task_planner import TaskPlanner
+        # Deferred import avoids pulling TaskPlanner's heavy dependencies at module import time.
+        from autospider.contexts.planning.infrastructure.adapters.task_planner import (
+            TaskPlanner,
+        )
 
         return TaskPlanner
 
