@@ -11,10 +11,8 @@ if str(SRC_ROOT) not in sys.path:
 from autospider.crawler.planner.planner_analysis_postprocess import (
     PlannerAnalysisPostProcessMixin,
 )
-from autospider.crawler.planner.planner_category_semantics import (
+from autospider.contexts.planning.domain.services import (
     PlannerCategorySemanticsMixin,
-)
-from autospider.crawler.planner.planner_subtask_builder import (
     PlannerSubtaskBuilderMixin,
 )
 from autospider.contexts.planning.domain import SubTaskMode

@@ -46,13 +46,15 @@ from ...graph.control_types import (
 from ...graph.world_model import build_initial_world_model, upsert_page_model, world_model_to_payload
 from ...pipeline.runtime_controls import resolve_concurrency_settings
 from autospider.contexts.planning.domain.page_state import PlannerPageState
+from autospider.contexts.planning.domain.services import (
+    PlannerCategorySemanticsMixin,
+    PlannerSubtaskBuilderMixin,
+)
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
 
 from .planner_analysis_postprocess import PlannerAnalysisPostProcessMixin
-from .planner_category_semantics import PlannerCategorySemanticsMixin
-from .planner_subtask_builder import PlannerSubtaskBuilderMixin
 from .planner_variant_resolver import PlannerVariantResolverMixin
 
 if TYPE_CHECKING:
