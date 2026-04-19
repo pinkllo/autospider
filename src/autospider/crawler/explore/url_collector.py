@@ -6,12 +6,15 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from ...common.config import config
-from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
 from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
 from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..base.base_collector import BaseCollector
 from ..collector import (
     CommonPattern,
@@ -79,7 +82,7 @@ class URLCollector(BaseCollector):
 
         self.explore_count = explore_count
         self.max_nav_steps = max_nav_steps
-        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.initial_nav_steps = list(initial_nav_steps or [])

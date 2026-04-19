@@ -1,1 +1,59 @@
-"""Package module."""
+"""Planning domain exports."""
+
+from .model import (
+    ExecutionBrief,
+    PlanJournalEntry,
+    PlanNode,
+    PlanNodeType,
+    PlannerCategoryCandidate,
+    PlannerIntent,
+    SubTask,
+    SubTaskMode,
+    SubTaskStatus,
+    TaskPlan,
+    format_execution_brief,
+)
+from .policies import (
+    CONTRACT_VIOLATION_CATEGORY,
+    FATAL_CATEGORY,
+    INVALID_PROTOCOL_DETAIL,
+    RULE_STALE_CATEGORY,
+    SITE_DEFENSE_CATEGORY,
+    STATE_MISMATCH_CATEGORY,
+    TRANSIENT_CATEGORY,
+    UNKNOWN_EXCEPTION_REASON,
+    FailureClassifier,
+    ReplanStrategy,
+    build_failure_record,
+    classify_protocol_violation,
+    classify_runtime_exception,
+)
+from .ports import PlanRepository
+
+__all__ = [
+    "build_failure_record",
+    "classify_protocol_violation",
+    "classify_runtime_exception",
+    "CONTRACT_VIOLATION_CATEGORY",
+    "ExecutionBrief",
+    "FATAL_CATEGORY",
+    "FailureClassifier",
+    "INVALID_PROTOCOL_DETAIL",
+    "PlanJournalEntry",
+    "PlanNode",
+    "PlanNodeType",
+    "PlanRepository",
+    "PlannerCategoryCandidate",
+    "PlannerIntent",
+    "ReplanStrategy",
+    "RULE_STALE_CATEGORY",
+    "SITE_DEFENSE_CATEGORY",
+    "STATE_MISMATCH_CATEGORY",
+    "SubTask",
+    "SubTaskMode",
+    "SubTaskStatus",
+    "TaskPlan",
+    "TRANSIENT_CATEGORY",
+    "UNKNOWN_EXCEPTION_REASON",
+    "format_execution_brief",
+]

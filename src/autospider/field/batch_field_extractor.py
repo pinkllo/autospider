@@ -15,10 +15,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
-from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..common.storage import RedisQueueManager
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..domain.fields import FieldDefinition
 
 from .models import (
@@ -73,7 +76,7 @@ class BatchFieldExtractor:
         self.explore_count = explore_count
         self.validate_count = validate_count
         self.output_dir = Path(output_dir)
-        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)

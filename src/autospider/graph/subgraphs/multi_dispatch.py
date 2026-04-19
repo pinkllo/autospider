@@ -9,7 +9,7 @@ from langgraph.types import Send, interrupt
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.config import config
 from ...crawler.planner.runtime import PlanMutationService
-from ...domain.planning import TaskPlan
+from ...contexts.planning.domain import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
 from ...pipeline.runtime_controls import resolve_concurrency_settings
 from ...pipeline.subtask_runtime import (

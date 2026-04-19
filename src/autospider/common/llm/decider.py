@@ -18,7 +18,7 @@ from ..protocol import (
 from ..som.text_first import resolve_single_mark_id
 from ..utils.paths import get_prompt_path
 from ..utils.prompt_template import render_template
-from ...graph.failures import classify_protocol_violation
+from ...contexts.planning.domain import classify_protocol_violation
 from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 

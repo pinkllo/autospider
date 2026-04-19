@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..common.config import config
-from ..common.experience import SkillRuntime
 from ..common.storage.idempotent_io import write_json_idempotent
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..domain.fields import FieldDefinition
 from .batch_xpath_extractor import BatchXPathExtractor
 from .field_extractor import FieldExtractor
@@ -217,7 +220,7 @@ async def run_field_pipeline(
 ) -> dict:
     explore_count = explore_count or config.field_extractor.explore_count
     validate_count = validate_count or config.field_extractor.validate_count
-    skill_runtime = SkillRuntime()
+    skill_runtime = SkillRuntime(ExperienceSkillRepository())
 
     unique_urls: list[str] = []
     seen: set[str] = set()

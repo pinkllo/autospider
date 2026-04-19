@@ -9,10 +9,10 @@ from typing import Any, Awaitable, Callable
 from ..common.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLChannel, URLTask
 from ..common.config import config
-from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from ..domain.fields import FieldDefinition
-from ..graph.failures import classify_runtime_exception
+from ..contexts.planning.domain import classify_runtime_exception
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)

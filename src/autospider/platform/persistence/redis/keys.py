@@ -36,6 +36,10 @@ def skill_index_by_host_key(host: str) -> str:
     return _build_key("skill", "index", "by_host", _require_text(host, "host"))
 
 
+def chat_session_key(session_id: str) -> str:
+    return _build_key("chat", "session", _require_text(session_id, "session_id"))
+
+
 def checkpoint_key(thread_id: str) -> str:
     return _build_key("ckpt", _require_text(thread_id, "thread_id"))
 

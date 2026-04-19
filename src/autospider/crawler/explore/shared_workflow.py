@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...common.config import config
-from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
 from ...common.som.text_first import resolve_mark_ids_from_map, resolve_single_mark_id
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from ..collector import DetailPageVisit, smart_scroll
 
 if TYPE_CHECKING:

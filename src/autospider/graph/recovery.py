@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .failures import (
+from ..contexts.planning.domain import (
     CONTRACT_VIOLATION_CATEGORY,
     FATAL_CATEGORY,
     RULE_STALE_CATEGORY,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from ...domain.planning import ExecutionBrief, PlanNodeType, SubTask, SubTaskMode
+from ...contexts.planning.domain import ExecutionBrief, PlanNodeType, SubTask, SubTaskMode
 
 
 class PlannerSubtaskBuilderMixin:

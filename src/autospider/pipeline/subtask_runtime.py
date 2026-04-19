@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..domain.planning import ExecutionBrief, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
+from ..contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
 from ..domain.runtime import SubTaskRuntimeState
 from .types import PipelineRunResult, PipelineRunSummary, SubtaskOutcomeType
 

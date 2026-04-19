@@ -12,7 +12,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from autospider.common.types import Action, ActionType
 from autospider.crawler.collector.navigation_handler import NavigationHandler
-from autospider.graph.failures import classify_protocol_violation
+from autospider.contexts.planning.domain import classify_protocol_violation
 
 
 class _FakePage:

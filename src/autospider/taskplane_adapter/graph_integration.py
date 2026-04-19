@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..common.config import config
-from ..domain.planning import TaskPlan
+from ..contexts.planning.domain import TaskPlan
 from ..taskplane.scheduler import TaskScheduler
 from ..taskplane.store.base import TaskStore
 from ..taskplane.store.dual_store import DualLayerStore

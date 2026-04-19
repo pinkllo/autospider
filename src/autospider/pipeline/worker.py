@@ -16,7 +16,7 @@ from pathlib import Path
 from ..common.config import config
 from ..common.logger import get_logger
 from ..domain.fields import FieldDefinition
-from ..domain.planning import SubTask, SubTaskMode, format_execution_brief
+from ..contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
 from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload

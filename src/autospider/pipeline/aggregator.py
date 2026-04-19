@@ -15,7 +15,7 @@ from .types import (
     AggregationReport,
     AggregationSubtaskDetail,
 )
-from ..domain.planning import SubTask, SubTaskStatus, TaskPlan
+from ..contexts.planning.domain import SubTask, SubTaskStatus, TaskPlan
 from ..domain.runtime import SubTaskRuntimeState
 
 logger = get_logger(__name__)

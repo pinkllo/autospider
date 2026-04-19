@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...domain.planning import PlannerCategoryCandidate
+from ...contexts.planning.domain import PlannerCategoryCandidate
 
 
 class PlannerAnalysisPostProcessMixin:

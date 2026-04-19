@@ -20,7 +20,7 @@ from autospider.graph.control_types import (
     build_default_recovery_policy,
 )
 from autospider.graph.decision_context import build_decision_context
-from autospider.domain.planning import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
+from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
 from autospider.graph.world_model import build_initial_world_model, upsert_page_model
 
 
@@ -232,7 +232,7 @@ async def test_run_pipeline_passes_learning_snapshots_into_finalization(
 
     monkeypatch.setattr(runner_module, "create_url_channel", lambda **_kwargs: _FakeChannel())
     monkeypatch.setattr(runner_module, "BrowserRuntimeSession", _FakeSession)
-    monkeypatch.setattr(runner_module, "SkillRuntime", lambda: object())
+    monkeypatch.setattr(runner_module, "SkillRuntime", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(runner_module, "TaskProgressTracker", _FakeTracker)
     monkeypatch.setattr(runner_module, "_prepare_pipeline_output", lambda **_kwargs: None)
 

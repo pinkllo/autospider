@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from ...common.browser.runtime import BrowserRuntimeSession
-from ...domain.planning import PlanJournalEntry, SubTask, SubTaskMode, TaskPlan
+from ...contexts.planning.domain import PlanJournalEntry, SubTask, SubTaskMode, TaskPlan
 from ...pipeline.types import ExpandRequest
 from .planner_artifacts import PlannerArtifacts
 from .task_planner import TaskPlanner

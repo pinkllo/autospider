@@ -1,4 +1,4 @@
-from autospider.domain.planning import SubTask
+from autospider.contexts.planning.domain import SubTask
 from autospider.taskplane_adapter.subtask_bridge import SubtaskBridge
 
 

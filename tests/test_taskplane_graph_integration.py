@@ -10,7 +10,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.common.config import config
-from autospider.domain.planning import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
+from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
 from autospider.domain.runtime import SubTaskRuntimeState
 from autospider.graph.subgraphs.multi_dispatch import (
     finalize_subtask_flow,

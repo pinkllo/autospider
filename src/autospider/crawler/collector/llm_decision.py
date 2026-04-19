@@ -20,7 +20,7 @@ from ...common.protocol import (
     summarize_llm_payload,
 )
 from ...common.utils.paths import get_prompt_path
-from ...domain.planning import format_execution_brief
+from ...contexts.planning.domain import format_execution_brief
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

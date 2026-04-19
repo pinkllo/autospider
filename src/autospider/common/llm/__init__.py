@@ -1,6 +1,6 @@
 """LLM package exports."""
 
-from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
+from ...contexts.chat.domain.model import ClarificationResult, ClarifiedTask, DialogueMessage
 from .decider import LLMDecider
 from .task_clarifier import TaskClarifier
 

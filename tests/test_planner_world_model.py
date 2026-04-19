@@ -11,7 +11,7 @@ from autospider.crawler.planner.task_planner import (
     build_planner_control_payload,
     build_planner_world_payload,
 )
-from autospider.domain.planning import (
+from autospider.contexts.planning.domain import (
     ExecutionBrief,
     PlanJournalEntry,
     PlanNode,

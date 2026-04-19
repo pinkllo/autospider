@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...common.browser import ActionExecutor
 from ...common.browser.click_utils import click_and_capture_new_page
 from ...common.logger import get_logger
-from ...domain.planning import format_execution_brief
+from ...contexts.planning.domain import format_execution_brief
 from ...common.som import (
     clear_overlay,
     inject_and_scan,

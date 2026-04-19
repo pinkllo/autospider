@@ -1,10 +1,11 @@
-"""Failure classification helpers for graph runtime and contracts."""
-
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
+
+from autospider.contexts.planning.domain.model import PlanJournalEntry, TaskPlan
 
 TRANSIENT_CATEGORY = "transient"
 CONTRACT_VIOLATION_CATEGORY = "contract_violation"
@@ -12,21 +13,12 @@ STATE_MISMATCH_CATEGORY = "state_mismatch"
 SITE_DEFENSE_CATEGORY = "site_defense"
 RULE_STALE_CATEGORY = "rule_stale"
 FATAL_CATEGORY = "fatal"
-
 INVALID_PROTOCOL_DETAIL = "invalid_protocol_message"
 
 _TIMEOUT_HINTS = ("timeout", "timed out", "超时")
 _STATE_MISMATCH_HINTS = ("state mismatch", "dom changed", "element detached")
 _RULE_STALE_HINTS = ("rule stale", "selector stale", "xpath stale", "规则失效")
-_SITE_DEFENSE_HINTS = (
-    "captcha",
-    "challenge",
-    "too many requests",
-    "429",
-    "access denied",
-    "forbidden",
-    "bot detected",
-)
+_SITE_DEFENSE_HINTS = ("captcha", "challenge", "429", "access denied", "forbidden", "bot detected")
 _FATAL_HINTS = ("fatal", "schema corrupted", "invalid schema", "unsupported")
 UNKNOWN_EXCEPTION_REASON = "unknown_exception"
 
@@ -35,6 +27,10 @@ def _snake_case(name: str) -> str:
     normalized = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
     normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
     return normalized.strip().lower()
+
+
+def _message(error: BaseException) -> str:
+    return str(error or "").strip().lower()
 
 
 def build_failure_record(
@@ -55,55 +51,21 @@ def build_failure_record(
     }
 
 
-def _exception_name(error: BaseException) -> str:
-    return _snake_case(type(error).__name__)
-
-
-def _exception_message(error: BaseException) -> str:
-    return str(error or "").strip().lower()
-
-
-def _has_hint(value: str, hints: tuple[str, ...]) -> bool:
-    return any(hint in value for hint in hints)
-
-
-def _is_timeout_error(error: BaseException) -> bool:
-    return isinstance(error, TimeoutError) or _has_hint(
-        f"{_exception_name(error)} {_exception_message(error)}",
-        _TIMEOUT_HINTS,
-    )
-
-
-def _is_state_mismatch_error(error: BaseException) -> bool:
-    name = _exception_name(error)
-    return "state_mismatch" in name or _has_hint(_exception_message(error), _STATE_MISMATCH_HINTS)
-
-
-def _is_rule_stale_error(error: BaseException) -> bool:
-    name = _exception_name(error)
-    return "rule_stale" in name or _has_hint(_exception_message(error), _RULE_STALE_HINTS)
-
-
-def _is_site_defense_error(error: BaseException) -> bool:
-    name = _exception_name(error)
-    return "site_defense" in name or _has_hint(_exception_message(error), _SITE_DEFENSE_HINTS)
-
-
-def _is_fatal_error(error: BaseException) -> bool:
-    name = _exception_name(error)
-    return "fatal" in name or _has_hint(_exception_message(error), _FATAL_HINTS)
+def _matches(error: BaseException, hints: tuple[str, ...]) -> bool:
+    payload = f"{_snake_case(type(error).__name__)} {_message(error)}"
+    return any(hint in payload for hint in hints)
 
 
 def _classify_exception_category(error: BaseException) -> tuple[str, str]:
-    if _is_timeout_error(error):
+    if isinstance(error, TimeoutError) or _matches(error, _TIMEOUT_HINTS):
         return TRANSIENT_CATEGORY, "timeout"
-    if _is_state_mismatch_error(error):
+    if _matches(error, _STATE_MISMATCH_HINTS):
         return STATE_MISMATCH_CATEGORY, "state_mismatch"
-    if _is_rule_stale_error(error):
+    if _matches(error, _RULE_STALE_HINTS):
         return RULE_STALE_CATEGORY, "rule_stale"
-    if _is_site_defense_error(error):
+    if _matches(error, _SITE_DEFENSE_HINTS):
         return SITE_DEFENSE_CATEGORY, "site_defense"
-    if _is_fatal_error(error):
+    if _matches(error, _FATAL_HINTS):
         return FATAL_CATEGORY, "fatal"
     return FATAL_CATEGORY, UNKNOWN_EXCEPTION_REASON
 
@@ -136,16 +98,54 @@ def classify_runtime_exception(
     error: BaseException,
     page_id: str = "",
 ) -> dict[str, Any]:
-    category, classification_reason = _classify_exception_category(error)
-    metadata = {
-        "exception_type": type(error).__name__,
-        "message": str(error),
-        "classification_reason": classification_reason,
-    }
+    category, reason = _classify_exception_category(error)
     return build_failure_record(
         category=category,
-        detail=_exception_name(error),
+        detail=_snake_case(type(error).__name__),
         component=component,
         page_id=page_id,
-        metadata=metadata,
+        metadata={
+            "exception_type": type(error).__name__,
+            "message": str(error),
+            "classification_reason": reason,
+        },
     )
+
+
+class FailureClassifier:
+    def classify_runtime_exception(self, *, component: str, error: BaseException) -> dict[str, Any]:
+        payload = classify_runtime_exception(component=component, error=error)
+        payload.pop("page_id", None)
+        return payload
+
+    def classify_protocol_violation(self, *, component: str, diagnostics: dict[str, Any] | None) -> dict[str, Any]:
+        payload = classify_protocol_violation(component=component, diagnostics=diagnostics)
+        payload.pop("page_id", None)
+        return payload
+
+
+class ReplanStrategy:
+    def apply(
+        self,
+        *,
+        plan: TaskPlan,
+        reason: str,
+        failed_subtask_id: str | None = None,
+    ) -> TaskPlan:
+        journal = list(plan.journal)
+        journal.append(
+            PlanJournalEntry(
+                entry_id=f"replan-{len(journal) + 1}",
+                node_id=failed_subtask_id,
+                phase="planning",
+                action="replan",
+                reason=reason,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+        )
+        return plan.model_copy(
+            update={
+                "journal": journal,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        )

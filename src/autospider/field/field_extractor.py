@@ -23,11 +23,14 @@ from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
 from ..common.types import Action, ActionType
 from ..common.config import config
-from ..common.experience import SkillRuntime
 from ..common.logger import get_logger
 from ..common.protocol import coerce_bool
 from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..domain.fields import FieldDefinition
 
 from .field_config import resolve_field_definition_value
@@ -85,7 +88,7 @@ class FieldExtractor:
         self.fields = fields
         self.output_dir = Path(output_dir)
         self.max_nav_steps = max_nav_steps
-        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
         self.selected_skills_context = ""
         self.selected_skills: list[dict[str, str]] = []
         self.decision_context = dict(decision_context or {})

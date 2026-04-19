@@ -11,10 +11,13 @@ from langgraph.types import interrupt
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.browser.runtime import BrowserRuntimeSession
 from ...common.config import config
-from ...common.experience import SkillRuntime
 from ...common.storage.collection_persistence import (
     CollectionProgress,
     load_collection_config,
+)
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
 )
 from ...crawler.batch.batch_collector import batch_collect_urls
 from ...crawler.explore.config_generator import generate_collection_config
@@ -24,11 +27,11 @@ from ...crawler.planner.task_planner import (
     build_planner_control_payload,
     build_planner_world_payload,
 )
-from ...domain.planning import TaskPlan
+from ...contexts.planning.domain import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState
 from ...field import run_field_pipeline
 from ..control_types import build_default_recovery_policy
-from ..failures import classify_runtime_exception
+from ...contexts.planning.domain import classify_runtime_exception
 from ..recovery import RETRY_ACTION, build_recovery_directive
 from ..decision_context import build_decision_context
 from ..state_access import (
@@ -291,7 +294,7 @@ async def _plan_request(request) -> dict[str, Any]:
             planner_intent=request.model_dump(mode="python"),
             prior_failures=prior_failures,
         )
-        runtime = SkillRuntime()
+        runtime = SkillRuntime(ExperienceSkillRepository())
         selected_skill_meta = (
             await runtime.get_or_select(
                 phase="planner",

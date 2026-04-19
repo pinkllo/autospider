@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import sys
 from pathlib import Path
@@ -12,12 +13,21 @@ if str(SRC_ROOT) not in sys.path:
 import autospider.graph.nodes.entry_nodes as entry_nodes_module
 from autospider.graph.state_access import request_params as select_request_params
 from autospider.graph.nodes.entry_nodes import (
+    chat_clarify,
     chat_history_match,
     chat_prepare_execution_handoff,
     chat_review_task,
     normalize_pipeline_params,
 )
+from autospider.contexts.chat.domain.model import (
+    ClarificationResult,
+    ClarificationSession,
+    ClarifiedTask,
+    DialogueMessage,
+    RequestedField,
+)
 from autospider.pipeline.helpers import build_semantic_signature
+from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
 
 def test_normalize_pipeline_params_exposes_empty_runtime_payload_slots() -> None:
@@ -141,6 +151,131 @@ def test_chat_prepare_execution_handoff_normalizes_invalid_grouping_semantics() 
     assert normalized["category_discovery_mode"] == "auto"
     assert normalized["requested_categories"] == []
     assert normalized["category_examples"] == []
+
+
+@pytest.mark.asyncio
+async def test_chat_clarify_uses_chat_context_start_use_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_run_context(run_id=None, trace_id="trace-chat-node-start")
+
+    class _FakeRuntime:
+        def __init__(self, _repository) -> None:
+            return None
+
+        def discover_by_url(self, _url: str) -> list[object]:
+            return []
+
+        async def get_or_select(self, **_kwargs) -> list[object]:
+            return []
+
+        def format_selected_skills_context(self, _bodies) -> str:
+            return ""
+
+        def load_selected_bodies(self, _items) -> list[str]:
+            return []
+
+    class _FakeClarifierAdapter:
+        llm = object()
+
+        async def clarify(self, history, **kwargs):
+            assert len(history) == 1
+            assert kwargs["available_skills"] == []
+            return ClarificationResult(
+                status="need_clarification",
+                intent="collect notices",
+                confidence=0.4,
+                next_question="请提供列表页 URL。",
+                reason="",
+                task=None,
+            )
+
+    monkeypatch.setattr(entry_nodes_module, "SkillRuntime", _FakeRuntime)
+    monkeypatch.setattr(entry_nodes_module, "TaskClarifierAdapter", _FakeClarifierAdapter)
+
+    result = await chat_clarify({"cli_args": {"request": "采集公告"}})
+    conversation = result["conversation"]
+
+    assert result["node_status"] == "ok"
+    assert conversation["flow_state"] == "needs_input"
+    assert conversation["pending_question"] == "请提供列表页 URL。"
+    assert conversation["chat_session_id"]
+    assert conversation["chat_session"]["turns"][-1]["role"] == "assistant"
+    clear_run_context()
+
+
+@pytest.mark.asyncio
+async def test_chat_clarify_uses_chat_context_advance_use_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_run_context(run_id=None, trace_id="trace-chat-node-advance")
+
+    class _FakeRuntime:
+        def __init__(self, _repository) -> None:
+            return None
+
+        def discover_by_url(self, _url: str) -> list[object]:
+            return []
+
+        async def get_or_select(self, **_kwargs) -> list[object]:
+            return []
+
+        def format_selected_skills_context(self, _bodies) -> str:
+            return ""
+
+        def load_selected_bodies(self, _items) -> list[str]:
+            return []
+
+    class _FakeClarifierAdapter:
+        llm = object()
+
+        async def clarify(self, history, **_kwargs):
+            assert history[-1].content == "抓取标题和时间"
+            return ClarificationResult(
+                status="ready",
+                intent="collect notices",
+                confidence=0.9,
+                next_question="",
+                reason="",
+                task=ClarifiedTask(
+                    intent="collect notices",
+                    list_url="https://example.com/notices",
+                    task_description="采集公告",
+                    fields=(RequestedField(name="title", description="标题"),),
+                ),
+            )
+
+    monkeypatch.setattr(entry_nodes_module, "SkillRuntime", _FakeRuntime)
+    monkeypatch.setattr(entry_nodes_module, "TaskClarifierAdapter", _FakeClarifierAdapter)
+
+    session = ClarificationSession(
+        session_id="session-1",
+        turns=(
+            DialogueMessage(role="user", content="采集公告"),
+            DialogueMessage(role="assistant", content="请提供列表页 URL。"),
+        ),
+    )
+    result = await chat_clarify(
+        {
+            "cli_args": {"request": "采集公告"},
+            "conversation": {
+                "chat_session_id": "session-1",
+                "chat_session": session.to_payload(),
+                "chat_history": [
+                    {"role": "user", "content": "采集公告"},
+                    {"role": "assistant", "content": "请提供列表页 URL。"},
+                    {"role": "user", "content": "抓取标题和时间"},
+                ],
+            },
+        }
+    )
+    conversation = result["conversation"]
+
+    assert result["node_status"] == "ok"
+    assert conversation["flow_state"] == "ready"
+    assert conversation["clarified_task"]["list_url"] == "https://example.com/notices"
+    assert conversation["chat_session"]["status"] == "finalized"
+    clear_run_context()
 
 
 @pytest.mark.asyncio

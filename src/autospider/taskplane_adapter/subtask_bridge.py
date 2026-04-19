@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..domain.planning import SubTask
+from ..contexts.planning.domain import SubTask
 from ..taskplane.protocol import TaskTicket
 
 

@@ -17,7 +17,7 @@ from autospider.crawler.planner.planner_category_semantics import (
 from autospider.crawler.planner.planner_subtask_builder import (
     PlannerSubtaskBuilderMixin,
 )
-from autospider.domain.planning import SubTaskMode
+from autospider.contexts.planning.domain import SubTaskMode
 
 
 class _PlannerHarness(

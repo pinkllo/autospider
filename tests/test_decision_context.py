@@ -222,7 +222,7 @@ def test_build_decision_context_includes_structured_page_metadata_and_current_pl
 
 
 def test_build_planning_runtime_payload_enriches_request_params_with_execution_context() -> None:
-    from autospider.domain.planning import (
+    from autospider.contexts.planning.domain import (
         ExecutionBrief,
         PlanJournalEntry,
         PlanNode,

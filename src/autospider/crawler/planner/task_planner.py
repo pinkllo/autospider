@@ -26,7 +26,7 @@ from ...common.protocol import (
 )
 from ...common.som import inject_and_scan, capture_screenshot_with_marks, clear_overlay
 from ...common.accessibility import get_accessibility_text
-from ...domain.planning import (
+from ...contexts.planning.domain import (
     ExecutionBrief,
     PlanJournalEntry,
     PlanNode,

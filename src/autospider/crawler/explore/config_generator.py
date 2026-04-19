@@ -11,10 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...common.config import config
-from ...common.experience import SkillRuntime
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..collector import (
     XPathExtractor,
     LLMDecisionMaker,
@@ -78,7 +81,7 @@ class ConfigGenerator:
         self.max_nav_steps = max_nav_steps
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.skill_runtime = skill_runtime or SkillRuntime()
+        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
 

@@ -10,7 +10,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.domain.planning import ExecutionBrief, SubTask, SubTaskMode
+from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode
 from autospider.pipeline.types import PipelineRunResult
 from autospider.pipeline.worker import SubTaskWorker
 

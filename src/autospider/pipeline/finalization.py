@@ -12,14 +12,19 @@ from urllib.parse import urlparse
 
 import yaml
 
-from ..common.experience import (
-    SkillPromotionContext,
-    SkillSedimentationPayload,
+from autospider.contexts.experience.application.handlers import (
+    CollectionFinalizedHandler,
+    CollectionFinalizedPayload,
+)
+from autospider.contexts.experience.application.skill_promotion import (
     SkillSedimenter,
+)
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
 )
 from ..common.logger import get_logger
 from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
-from ..graph.failures import FATAL_CATEGORY
+from ..contexts.planning.domain import FATAL_CATEGORY
 
 if TYPE_CHECKING:
     from ..domain.fields import FieldDefinition
@@ -56,19 +61,19 @@ def prepare_fields_config(
     missing_required: list[str] = []
     missing_optional: list[str] = []
 
-    for field in fields_config:
-        if not isinstance(field, dict):
+    for field_config in fields_config:
+        if not isinstance(field_config, dict):
             continue
 
-        field_name = str(field.get("name") or "").strip() or "<unknown>"
-        xpath = field.get("xpath")
-        required = bool(field.get("required", True))
-        data_type = str(field.get("data_type") or "").strip().lower()
-        source = str(field.get("extraction_source") or "").strip().lower()
-        fixed_value = field.get("fixed_value")
+        field_name = str(field_config.get("name") or "").strip() or "<unknown>"
+        xpath = field_config.get("xpath")
+        required = bool(field_config.get("required", True))
+        data_type = str(field_config.get("data_type") or "").strip().lower()
+        source = str(field_config.get("extraction_source") or "").strip().lower()
+        fixed_value = field_config.get("fixed_value")
 
         if _is_valid_xpath(xpath):
-            normalized = dict(field)
+            normalized = dict(field_config)
             normalized["xpath"] = str(xpath).strip()
             valid_fields.append(normalized)
             continue
@@ -76,7 +81,7 @@ def prepare_fields_config(
         if source in {"constant", "subtask_context"}:
             value = "" if fixed_value is None else str(fixed_value).strip()
             if value:
-                normalized = dict(field)
+                normalized = dict(field_config)
                 normalized["xpath"] = None
                 normalized["extraction_source"] = source
                 normalized["fixed_value"] = value
@@ -84,7 +89,7 @@ def prepare_fields_config(
                 continue
 
         if data_type == "url":
-            normalized = dict(field)
+            normalized = dict(field_config)
             normalized["xpath"] = None
             normalized["extraction_source"] = "task_url"
             valid_fields.append(normalized)
@@ -249,16 +254,6 @@ def strip_draft_markers_from_skill_content(content: str) -> str:
     return cleaned
 
 
-def _stringify_context_map(raw_context: dict[str, Any] | None) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for key, value in dict(raw_context or {}).items():
-        name = str(key or "").strip()
-        text = str(value or "").strip()
-        if name and text:
-            normalized[name] = text
-    return normalized
-
-
 def _resolve_pipeline_error(*, state_error: object, summary: dict[str, Any]) -> str | None:
     state_message = str(state_error or "").strip()
     if state_message:
@@ -288,30 +283,6 @@ def _refresh_summary_classification(
         )
     )
 
-
-def _build_skill_sedimentation_payload(
-    context: "PipelineFinalizationContext",
-) -> SkillSedimentationPayload:
-    return SkillSedimentationPayload(
-        list_url=context.list_url,
-        task_description=context.task_description,
-        fields=[field.model_dump(mode="python") for field in context.fields],
-        promotion_context=SkillPromotionContext(
-            anchor_url=str(context.anchor_url or ""),
-            page_state_signature=str(context.page_state_signature or ""),
-            variant_label=str(context.variant_label or ""),
-            context=_stringify_context_map(context.execution_brief),
-        ),
-        collection_config=dict(context.runtime_state.collection_config or {}),
-        extraction_config=dict(context.runtime_state.extraction_config or {}),
-        extraction_evidence=list(context.runtime_state.extraction_evidence or []),
-        summary=dict(context.summary or {}),
-        validation_failures=list(context.runtime_state.validation_failures or []),
-        plan_knowledge=str(context.plan_knowledge or ""),
-        status="validated",
-    )
-
-
 def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | None:
     if not should_promote_skill(
         state_error=context.runtime_state.error,
@@ -326,8 +297,19 @@ def promote_pipeline_skill(context: "PipelineFinalizationContext") -> Path | Non
         )
         return None
 
-    promoted_path = SkillSedimenter().sediment_from_pipeline_result(
-        _build_skill_sedimentation_payload(context)
+    promoted_path = CollectionFinalizedHandler(
+        SkillSedimenter(ExperienceSkillRepository())
+    ).handle(
+        CollectionFinalizedPayload(
+            run_id=str(
+                context.summary.get("execution_id")
+                or context.summary.get("run_id")
+                or ""
+            ),
+            plan_id=str(context.task_plan.get("plan_id") or ""),
+            status=str(context.summary.get("outcome_state") or context.summary.get("execution_state") or ""),
+            artifacts_dir=context.output_dir,
+        )
     )
     if promoted_path is None:
         logger.warning(
@@ -507,8 +489,8 @@ def promote_staged_output(staging_path: Path, final_path: Path) -> None:
 
 def _coerce_field_names(fields: list["FieldDefinition"]) -> list[str]:
     names: list[str] = []
-    for field in fields:
-        name = str(getattr(field, "name", "") or "").strip()
+    for field_definition in fields:
+        name = str(getattr(field_definition, "name", "") or "").strip()
         if name:
             names.append(name)
     return names

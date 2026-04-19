@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 from ...common.logger import get_logger
 from ...common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
-from ...common.experience import SkillCandidate
-from ...domain.planning import PlanJournalEntry, PlanNode, PlanNodeType, SubTask, TaskPlan
+from autospider.contexts.experience.application.skill_promotion import SkillCandidate
+from ...contexts.planning.domain import PlanJournalEntry, PlanNode, PlanNodeType, SubTask, TaskPlan
 
 logger = get_logger(__name__)
 

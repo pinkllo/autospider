@@ -15,7 +15,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.crawler.planner.task_planner import build_planner_world_payload
-from autospider.domain.planning import TaskPlan
+from autospider.contexts.planning.domain import TaskPlan
 from autospider.graph.nodes.capability_nodes import build_planning_runtime_payload
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from ..common.experience import SkillRuntime
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from ..domain.fields import FieldDefinition
 from .field_config import ensure_field_definition, field_to_payload
 

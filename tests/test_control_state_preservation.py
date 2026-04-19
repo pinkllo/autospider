@@ -18,7 +18,7 @@ if str(SRC_ROOT) not in sys.path:
 
 import pytest
 
-from autospider.domain.planning import TaskPlan
+from autospider.contexts.planning.domain import TaskPlan
 from autospider.graph.subgraphs.multi_dispatch import (
     complete_dispatch,
     merge_dispatch_round,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
 import re
@@ -13,9 +12,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
 from ...common.config import config
-from ...common.experience import SkillRuntime
 from ...common.grouping_semantics import normalize_grouping_semantics
-from ...common.llm import TaskClarifier
 from ...common.llm.streaming import ainvoke_with_stream
 from ...common.llm.trace_logger import append_llm_trace
 from ...common.logger import get_logger
@@ -25,8 +22,22 @@ from ...common.protocol import (
     summarize_llm_payload,
 )
 from ...common.storage.task_run_query_service import TaskRunQueryService
-from ...domain.chat import ClarifiedTask, DialogueMessage
-from ...domain.fields import FieldDefinition
+from autospider.contexts.chat.application.dto import (
+    AdvanceDialogueInput,
+    StartClarificationInput,
+)
+from autospider.contexts.chat.application.use_cases import AdvanceDialogue, StartClarification
+from autospider.contexts.chat.infrastructure.adapters import TaskClarifierAdapter
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
+from ...contexts.chat.domain.model import (
+    ClarificationSession,
+    ClarifiedTask,
+    DialogueMessage,
+    RequestedField,
+)
 from ...pipeline.helpers import resolve_semantic_identity
 from ...common.validators import validate_task_description, validate_url
 from ...graph.execution_handoff import build_chat_execution_params, build_chat_review_payload
@@ -79,8 +90,8 @@ def _resolve_chat_dispatch_mode(mode: str | None = None) -> str:
 
 
 def _field_to_dict(field: Any) -> dict[str, Any]:
-    if isinstance(field, FieldDefinition):
-        return dataclasses.asdict(field)
+    if isinstance(field, RequestedField):
+        return field.to_payload()
     if isinstance(field, dict):
         return {
             "name": str(field.get("name") or ""),
@@ -134,6 +145,30 @@ def _history_from_state(raw_history: Any, initial_request: str) -> list[Dialogue
 
 def _history_to_state(history: list[DialogueMessage]) -> list[dict[str, str]]:
     return [{"role": item.role, "content": item.content} for item in history]
+
+
+def _latest_user_message(history: list[DialogueMessage]) -> str:
+    for item in reversed(history):
+        if item.role == "user" and item.content.strip():
+            return item.content.strip()
+    return ""
+
+
+class _ConversationSessionRepository:
+    def __init__(self, raw_session: Any) -> None:
+        self.saved_session: ClarificationSession | None = None
+        if isinstance(raw_session, dict):
+            self.saved_session = ClarificationSession.from_payload(raw_session)
+
+    async def get(self, session_id: str) -> ClarificationSession | None:
+        if self.saved_session is None:
+            return None
+        if self.saved_session.session_id != session_id:
+            return None
+        return self.saved_session
+
+    async def save(self, session: ClarificationSession) -> None:
+        self.saved_session = session
 
 
 def _extract_urls_from_history(history: list[DialogueMessage]) -> list[str]:
@@ -321,8 +356,9 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
 
     max_turns = _to_positive_int(_conversation_value(state, "chat_max_turns"), _to_positive_int(cli_args.get("max_turns"), 6))
     turn_count = _to_non_negative_int(_conversation_value(state, "chat_turn_count"), 0)
-    clarifier = TaskClarifier()
-    runtime = SkillRuntime()
+    session_repository = _ConversationSessionRepository(_conversation_value(state, "chat_session"))
+    clarifier = TaskClarifierAdapter()
+    runtime = SkillRuntime(ExperienceSkillRepository())
     latest_url = _latest_history_url(history)
     matched_skill_meta = runtime.discover_by_url(latest_url) if latest_url else []
     matched_skills = _serialize_skill_metadata(matched_skill_meta)
@@ -339,49 +375,79 @@ async def chat_clarify(state: dict[str, Any]) -> dict[str, Any]:
     selected_context = runtime.format_selected_skills_context(
         runtime.load_selected_bodies(selected_skill_meta)
     )
+    chat_session_id = str(_conversation_value(state, "chat_session_id") or "").strip()
+    if chat_session_id:
+        latest_user_message = _latest_user_message(history)
+        result_envelope = await AdvanceDialogue(session_repository, clarifier).run(
+            AdvanceDialogueInput(
+                session_id=chat_session_id,
+                user_message=latest_user_message,
+                available_skills=matched_skills,
+                selected_skills=selected_skills,
+                selected_skills_context=selected_context,
+            )
+        )
+    else:
+        result_envelope = await StartClarification(session_repository, clarifier).run(
+            StartClarificationInput(
+                initial_request=initial_request,
+                available_skills=matched_skills,
+                selected_skills=selected_skills,
+                selected_skills_context=selected_context,
+            )
+        )
+    if result_envelope.status == "failed" or result_envelope.data is None:
+        error = result_envelope.errors[0] if result_envelope.errors else None
+        return _fatal(
+            error.code if error else "chat.clarification_failed",
+            error.message if error else "chat clarification failed",
+        )
+    session_data = result_envelope.data
+    result = session_data.result
+    if session_repository.saved_session is None:
+        return _fatal("chat.session_not_saved", "chat session was not persisted")
+    conversation_payload = {
+        "status": "ok",
+        "chat_session_id": session_data.session_id,
+        "chat_session": session_repository.saved_session.to_payload(),
+        "chat_history": [item.model_dump() for item in session_data.turns],
+        "chat_turn_count": turn_count,
+        "chat_max_turns": max_turns,
+        "matched_skills": matched_skills,
+        "selected_skills": selected_skills,
+    }
 
-    result = await clarifier.clarify(
-        history,
-        available_skills=matched_skills,
-        selected_skills=selected_skills,
-        selected_skills_context=selected_context,
-    )
     if result.status == "reject":
         return _fatal("clarifier_reject", result.reason or "该任务暂不支持自动执行")
 
     if result.status == "ready" and result.task is not None:
-        clarified_payload = _clarified_task_to_dict(result.task)
-        return {
-            **_ok({"clarified": True, "source": "llm"}),
-            "conversation": {
-                "status": "ok",
+        clarified_payload = result.task.model_dump()
+        conversation_payload.update(
+            {
                 "flow_state": "ready",
                 "clarified_task": clarified_payload,
-                "chat_history": _history_to_state(history),
-                "chat_turn_count": turn_count,
-                "chat_max_turns": max_turns,
                 "pending_question": "",
-                "matched_skills": matched_skills,
-                "selected_skills": selected_skills,
-            },
+            }
+        )
+        return {
+            **_ok({"clarified": True, "source": "chat_context"}),
+            "conversation": conversation_payload,
         }
 
     if turn_count >= max_turns:
         return _fatal("clarifier_incomplete", "在限定轮数内仍未澄清完成")
 
     question = result.next_question or "请补充更明确的采集目标、URL 或字段要求。"
+    conversation_payload.update(
+        {
+            "flow_state": "needs_input",
+            "pending_question": question,
+            "chat_turn_count": turn_count + 1,
+        }
+    )
     return {
         **_ok({"clarified": False, "next_question": question}),
-        "conversation": {
-            "status": "ok",
-            "flow_state": "needs_input",
-            "chat_history": _history_to_state(history),
-            "chat_turn_count": turn_count + 1,
-            "chat_max_turns": max_turns,
-            "pending_question": question,
-            "matched_skills": matched_skills,
-            "selected_skills": selected_skills,
-        },
+        "conversation": conversation_payload,
     }
 
 

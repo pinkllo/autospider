@@ -7,8 +7,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ...domain.chat import ClarificationResult, ClarifiedTask, DialogueMessage
-from ...domain.fields import FieldDefinition
+from ...contexts.chat.domain.model import (
+    ClarificationResult,
+    ClarifiedTask,
+    DialogueMessage,
+    RequestedField,
+)
 from ..config import config
 from ..grouping_semantics import normalize_grouping_semantics
 from ..llm_contracts import validate_task_clarifier_payload
@@ -299,13 +303,13 @@ class TaskClarifier:
             intent=intent,
             list_url=list_url,
             task_description=task_description,
-            fields=fields,
+            fields=tuple(fields),
             group_by=grouping["group_by"],
             per_group_target_count=grouping["per_group_target_count"],
             total_target_count=grouping["total_target_count"],
             category_discovery_mode=grouping["category_discovery_mode"],
-            requested_categories=grouping["requested_categories"],
-            category_examples=grouping["category_examples"],
+            requested_categories=tuple(grouping["requested_categories"]),
+            category_examples=tuple(grouping["category_examples"]),
             max_pages=max_pages,
             target_url_count=target_url_count,
             consumer_concurrency=consumer_concurrency,
@@ -313,7 +317,7 @@ class TaskClarifier:
             field_validate_count=field_validate_count,
         )
 
-    def _parse_fields(self, value: Any) -> list[FieldDefinition]:
+    def _parse_fields(self, value: Any) -> list[RequestedField]:
         """
         将列表数据解析为字段定义对象列表。
         
@@ -321,12 +325,12 @@ class TaskClarifier:
             value: 原始字段数据列表。
             
         Returns:
-            list[FieldDefinition]: 解析后的字段定义列表。
+            list[RequestedField]: 解析后的字段定义列表。
         """
         if not isinstance(value, list):
             return []
 
-        fields: list[FieldDefinition] = []
+        fields: list[RequestedField] = []
         for item in value:
             if not isinstance(item, dict):
                 continue
@@ -347,7 +351,7 @@ class TaskClarifier:
                 example = None
 
             fields.append(
-                FieldDefinition(
+                RequestedField(
                     name=name,
                     description=description,
                     required=bool(item.get("required", True)),

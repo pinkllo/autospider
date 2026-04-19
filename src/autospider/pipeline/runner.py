@@ -11,12 +11,15 @@ from ..common.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLTask
 from ..common.channel.factory import create_url_channel
 from ..common.config import config
-from ..common.experience import SkillRuntime
 from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
+from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    SkillRepository as ExperienceSkillRepository,
+)
 from ..crawler.explore.url_collector import URLCollector
 from ..domain.fields import FieldDefinition
 from ..field import DetailPageWorker
-from ..graph.failures import (
+from ..contexts.planning.domain import (
     SITE_DEFENSE_CATEGORY,
     classify_runtime_exception,
 )
@@ -490,7 +493,7 @@ async def run_pipeline(context: ExecutionContext) -> PipelineRunResult:
     summary_path = output_path / "pipeline_summary.json"
     staging_items_path = output_path / "pipeline_extracted_items.next.jsonl"
     staging_summary_path = output_path / "pipeline_summary.next.json"
-    skill_runtime = SkillRuntime()
+    skill_runtime = SkillRuntime(ExperienceSkillRepository())
 
     _prepare_pipeline_output(
         output_path=output_path,
