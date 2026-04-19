@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING
 from ...common.config import config
 from ...common.logger import get_logger
 from ...common.llm import LLMDecider
-from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
+from ...contexts.collection.infrastructure.repositories.config_repository import (
+    CollectionConfig,
+    ConfigPersistence,
+)
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,

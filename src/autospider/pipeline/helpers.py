@@ -14,7 +14,10 @@ from ..common.grouping_semantics import (
     has_semantic_signature_inputs,
     normalize_field_names,
 )
-from ..common.storage.collection_persistence import CollectionConfig, coerce_collection_config
+from ..contexts.collection.infrastructure.repositories.config_repository import (
+    CollectionConfig,
+    coerce_collection_config,
+)
 from ..common.storage.idempotent_io import write_json_idempotent
 from ..domain.fields import FieldDefinition, build_field_definitions as build_domain_field_definitions
 from .runtime_controls import resolve_concurrency_settings

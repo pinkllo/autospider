@@ -10,7 +10,10 @@ from ...common.logger import get_logger
 from ...common.llm import LLMDecider
 from ...common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
 from ...common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
-from ...common.storage.collection_persistence import CollectionConfig, ConfigPersistence
+from ...contexts.collection.infrastructure.repositories.config_repository import (
+    CollectionConfig,
+    ConfigPersistence,
+)
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,

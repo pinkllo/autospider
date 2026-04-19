@@ -11,7 +11,7 @@ from langgraph.types import interrupt
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.browser.runtime import BrowserRuntimeSession
 from ...common.config import config
-from ...common.storage.collection_persistence import (
+from ...contexts.collection.infrastructure.repositories import (
     CollectionProgress,
     load_collection_config,
 )

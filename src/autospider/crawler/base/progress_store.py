@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ...common.storage.collection_persistence import CollectionProgress, ProgressPersistence
+from ...contexts.collection.infrastructure.repositories.progress_repository import (
+    CollectionProgress,
+    ProgressPersistence,
+)
 
 
 class ProgressStore:

@@ -17,7 +17,9 @@ from langchain_openai import ChatOpenAI
 from ...common.config import config
 from ...common.utils.prompt_template import render_template
 from ...common.utils.paths import get_prompt_path
-from ...common.storage.collection_persistence import ConfigPersistence
+from ...contexts.collection.infrastructure.repositories.config_repository import (
+    ConfigPersistence,
+)
 
 if TYPE_CHECKING:
     from typing import Any

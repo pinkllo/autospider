@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...common.logger import get_logger
-from ...common.storage.collection_persistence import (
+from ...contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
     ConfigPersistence,
     load_collection_config,
