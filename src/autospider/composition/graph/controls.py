@@ -1,4 +1,4 @@
-from autospider.composition.legacy.graph.control_types import (
+from autospider.composition.graph.control_types import (
     DispatchDecision,
     PlanSpec,
     RecoveryDirective,

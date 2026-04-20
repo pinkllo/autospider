@@ -14,7 +14,7 @@ from autospider.composition.graph.world_model import (
     upsert_page_model,
     world_model_to_payload,
 )
-from autospider.composition.legacy.pipeline.runtime_controls import resolve_concurrency_settings
+from autospider.composition.pipeline.runtime_controls import resolve_concurrency_settings
 
 ENTRY_JOURNAL_LIMIT = 3
 PLANNER_STAGE = "planning_seeded"

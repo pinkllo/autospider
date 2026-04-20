@@ -16,7 +16,7 @@ from autospider.contexts.planning.domain.model import (
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
-from autospider.composition.legacy.pipeline.types import ExpandRequest
+from autospider.composition.pipeline.types import ExpandRequest
 from autospider.platform.shared_kernel.result import ResultEnvelope
 
 

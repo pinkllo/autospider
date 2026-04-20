@@ -1,3 +1,3 @@
-from autospider.composition.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
+from autospider.composition.graph._multi_dispatch import route_after_feedback
 
 __all__ = ["route_after_feedback"]

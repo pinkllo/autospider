@@ -1,3 +1,3 @@
-from autospider.composition.legacy.graph.subgraphs import build_multi_dispatch_subgraph
+from autospider.composition.graph._multi_dispatch import build_multi_dispatch_subgraph
 
 __all__ = ["build_multi_dispatch_subgraph"]

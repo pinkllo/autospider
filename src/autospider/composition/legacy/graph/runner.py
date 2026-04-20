@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from langgraph.types import Command
@@ -38,6 +39,9 @@ class GraphRunner:
             if GraphRunner._compiled_graph is None:
                 GraphRunner._compiled_graph = build_main_graph()
         return GraphRunner._compiled_graph
+
+    def _invoke_supports_trace_id(self) -> bool:
+        return "trace_id" in inspect.signature(self._invoke_with_graph).parameters
 
     @staticmethod
     def _invoke_config(thread_id: str, checkpoint_id: str | None = None) -> dict[str, Any]:
@@ -263,12 +267,13 @@ class GraphRunner:
             "error_code": "",
             "error_message": "",
         }
-        return await self._invoke_with_graph(
-            initial_state,
-            thread_id=graph_input.thread_id,
-            expected_entry_mode=graph_input.entry_mode,
-            trace_id=graph_input.request_id,
-        )
+        invoke_kwargs: dict[str, Any] = {
+            "thread_id": graph_input.thread_id,
+            "expected_entry_mode": graph_input.entry_mode,
+        }
+        if self._invoke_supports_trace_id():
+            invoke_kwargs["trace_id"] = graph_input.request_id
+        return await self._invoke_with_graph(initial_state, **invoke_kwargs)
 
     async def inspect(self, *, thread_id: str) -> GraphResult:
         """读取已持久化线程的当前状态。"""
