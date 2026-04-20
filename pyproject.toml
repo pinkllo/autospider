@@ -76,11 +76,54 @@ include = ["src/autospider"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-extend-exclude = ["src/output"]
+src = ["src", "tests"]
+exclude = [
+    ".venv", ".git", "__pycache__", "build", "dist",
+    "src/autospider/prompts",
+    "src/autospider/legacy",
+    "src/output",
+    "tests/benchmark/mock_site",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "TID",
+    "TCH",
+    "PL",
+    "C90",
+    "N",
+    "RUF",
+]
+ignore = [
+    "E501",
+    "PLR0913",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 50
+max-branches = 12
+max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["E402"]
+"tests/**" = ["PLR2004", "S101", "E402"]
 "tests/**/__init__.py" = ["F401"]
+"src/autospider/platform/shared_kernel/**" = ["PLR0911"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["autospider"]
 
 [tool.black]
 line-length = 100
@@ -90,12 +133,66 @@ target-version = ["py310"]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+strict_equality = true
 ignore_missing_imports = true
+pretty = true
 exclude = ["^src/autospider/legacy/", "^src/output/"]
 
+# 核心领域层：严格模式
+[[tool.mypy.overrides]]
+module = [
+    "autospider.contexts.*.domain.*",
+    "autospider.platform.shared_kernel.*",
+]
+strict = true
+disallow_untyped_defs = true
+disallow_any_explicit = false
+
+# application 层：半严格
+[[tool.mypy.overrides]]
+module = [
+    "autospider.contexts.*.application.*",
+]
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+# infrastructure / composition / interface：渐进
+[[tool.mypy.overrides]]
+module = [
+    "autospider.contexts.*.infrastructure.*",
+    "autospider.composition.*",
+    "autospider.interface.*",
+]
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+# legacy：跳过（阶段 4 遗留，未物理删除）
 [[tool.mypy.overrides]]
 module = ["autospider.legacy", "autospider.legacy.*"]
 follow_imports = "skip"
+
+# 测试宽松
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+[tool.deptry]
+extend_exclude = [
+    "tests/",
+    "refactor/",
+    "scripts/",
+    "src/autospider/prompts/",
+    "src/autospider/legacy/",
+]
+ignore = ["DEP002"]
+
+[tool.deptry.package_module_name_map]
+"langgraph-checkpoint-redis" = "langgraph_checkpoint_redis"
+"opencv-python-headless" = "cv2"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
