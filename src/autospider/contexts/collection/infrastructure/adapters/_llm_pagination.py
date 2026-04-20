@@ -2,22 +2,24 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.common.llm.streaming import ainvoke_with_stream
-from autospider.common.llm.trace_logger import append_llm_trace
-from autospider.common.logger import get_logger
-from autospider.common.protocol import (
+from autospider.legacy.common.llm.streaming import ainvoke_with_stream
+from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message,
     summarize_llm_payload,
 )
-from autospider.common.utils.prompt_template import render_template
+from autospider.legacy.common.utils.prompt_template import render_template
 from autospider.contexts.collection.infrastructure.adapters._llm_shared import build_trace_payload
 
 logger = get_logger(__name__)
 
 
 class CollectorPaginationMixin:
-    async def extract_jump_widget_with_llm(self, snapshot: object, screenshot_base64: str) -> dict | None:
+    async def extract_jump_widget_with_llm(
+        self, snapshot: object, screenshot_base64: str
+    ) -> dict | None:
         return await self._detect_visual_widget(
             snapshot=snapshot,
             screenshot_base64=screenshot_base64,
@@ -27,7 +29,9 @@ class CollectorPaginationMixin:
             log_prefix="[Extract-JumpWidget-LLM]",
         )
 
-    async def extract_pagination_with_llm(self, snapshot: object, screenshot_base64: str) -> dict | None:
+    async def extract_pagination_with_llm(
+        self, snapshot: object, screenshot_base64: str
+    ) -> dict | None:
         return await self._detect_visual_widget(
             snapshot=snapshot,
             screenshot_base64=screenshot_base64,
@@ -52,7 +56,8 @@ class CollectorPaginationMixin:
             self.prompt_template_path,
             section=user_section,
             variables={
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
             },
         )
         messages = [

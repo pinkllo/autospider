@@ -9,8 +9,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.runner import GraphRunner
-from autospider.graph.types import GraphInput, GraphResult
+from autospider.legacy.graph.runner import GraphRunner
+from autospider.legacy.graph.types import GraphInput, GraphResult
 
 
 @pytest.mark.asyncio

@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autospider.taskplane.protocol import TaskTicket
-from autospider.taskplane.strategy import (
+from autospider.legacy.taskplane.protocol import TaskTicket
+from autospider.legacy.taskplane.strategy import (
     BatchAwareStrategy,
     FIFOStrategy,
     PriorityStrategy,

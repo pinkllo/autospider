@@ -11,6 +11,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+
 def _database_url() -> str:
     configured = config.get_main_option("sqlalchemy.url")
     return getenv("AUTOSPIDER_DB_URL") or configured

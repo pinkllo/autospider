@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.common.llm_contracts import validate_task_clarifier_payload
+from autospider.legacy.common.llm_contracts import validate_task_clarifier_payload
 
 
 def test_validate_task_clarifier_payload_accepts_grouping_semantics() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from autospider.common.utils.string_maps import normalize_string_map
+from autospider.legacy.common.utils.string_maps import normalize_string_map
 from autospider.contexts.planning.domain.model import (
     ExecutionBrief,
     PlanNodeType,
@@ -84,8 +84,7 @@ class PlannerCategorySemanticsMixin:
     ) -> str:
         normalized_url = str(current_url or "").strip()
         semantic_path = [
-            self._normalize_semantic_label(item)
-            for item in self._extract_category_path(context)
+            self._normalize_semantic_label(item) for item in self._extract_category_path(context)
         ]
         semantic_path = [item for item in semantic_path if item]
         if not semantic_path:
@@ -157,7 +156,9 @@ class PlannerCategorySemanticsMixin:
     def _get_current_category_label(self, context: dict[str, str] | None) -> str:
         raw_path = str((context or {}).get(CATEGORY_PATH_KEY) or "").strip()
         if raw_path:
-            raw_parts = [item.strip() for item in raw_path.split(CATEGORY_PATH_SEPARATOR) if item.strip()]
+            raw_parts = [
+                item.strip() for item in raw_path.split(CATEGORY_PATH_SEPARATOR) if item.strip()
+            ]
             if raw_parts:
                 return raw_parts[-1]
         return str((context or {}).get("category_name") or "").strip()
@@ -206,10 +207,9 @@ class PlannerSubtaskBuilderMixin:
             name = str(raw.get("name") or variant.variant_label or f"分类_{idx + 1}").strip()
             sanitized_context = self._sanitize_context(variant.context)
             scope = self._build_subtask_scope(raw=raw, context=sanitized_context)
-            task_desc = (
-                str(raw.get("task_description") or "").strip()
-                or self._build_task_description_for_mode(sanitized_context, mode)
-            )
+            task_desc = str(
+                raw.get("task_description") or ""
+            ).strip() or self._build_task_description_for_mode(sanitized_context, mode)
             execution_brief = self._build_execution_brief(
                 context=sanitized_context,
                 mode=mode,
@@ -228,7 +228,8 @@ class PlannerSubtaskBuilderMixin:
                     list_url=variant.resolved_url,
                     anchor_url=variant.anchor_url,
                     page_state_signature=page_state_signature,
-                    variant_label=variant.variant_label or self._build_variant_label(variant.context),
+                    variant_label=variant.variant_label
+                    or self._build_variant_label(variant.context),
                     task_description=task_desc,
                     priority=idx,
                     max_pages=raw.get("estimated_pages"),
@@ -331,7 +332,7 @@ class PlannerSubtaskBuilderMixin:
 
     def _build_collect_task_description(self, context: dict[str, str] | None) -> str:
         scope = self._format_context_path(context)
-        count_text = self._resolve_requested_count_text(prefix='前')
+        count_text = self._resolve_requested_count_text(prefix="前")
         quantity = f"{count_text}" if count_text else "相关"
         return f"采集当前“{scope}”范围下{quantity}项目记录，提取项目名称与所属分类名称。"
 
@@ -367,7 +368,11 @@ class PlannerSubtaskBuilderMixin:
         parent_execution_brief: ExecutionBrief | None = None,
     ) -> ExecutionBrief:
         category_path = self._extract_category_path(context)
-        current_scope = category_path[-1] if category_path else str((context or {}).get("category_name") or "").strip()
+        current_scope = (
+            category_path[-1]
+            if category_path
+            else str((context or {}).get("category_name") or "").strip()
+        )
         parent_chain = [item for item in category_path[:-1] if item]
         if parent_execution_brief and not parent_chain:
             parent_chain = list(parent_execution_brief.parent_chain or [])
@@ -420,7 +425,9 @@ class PlannerSubtaskBuilderMixin:
         for subtask in subtasks:
             category_path = self._extract_category_path(subtask.context)
             parent_signature = self._build_parent_category_signature(category_path)
-            leaf_label = self._normalize_category_leaf_label(category_path[-1] if category_path else "")
+            leaf_label = self._normalize_category_leaf_label(
+                category_path[-1] if category_path else ""
+            )
             if not parent_signature or not leaf_label:
                 continue
             registry.setdefault(parent_signature, set()).add(leaf_label)

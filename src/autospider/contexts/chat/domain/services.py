@@ -38,7 +38,9 @@ class ClarificationSessionService:
 
         if result.status == "reject":
             if not result.reason:
-                raise DomainError("reject result requires reason", code="chat.reject_without_reason")
+                raise DomainError(
+                    "reject result requires reason", code="chat.reject_without_reason"
+                )
             return replace(session, status="abandoned"), None
 
         if not result.next_question:

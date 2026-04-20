@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from autospider.common.logger import get_logger
-from autospider.common.utils.paths import get_prompt_path
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.utils.paths import get_prompt_path
 from autospider.contexts.collection.infrastructure.adapters._llm_decision import (
     CollectorDecisionMixin,
 )
@@ -14,7 +14,7 @@ from autospider.contexts.collection.infrastructure.adapters._llm_pagination impo
 )
 
 if TYPE_CHECKING:
-    from autospider.common.llm import LLMDecider
+    from autospider.legacy.common.llm import LLMDecider
     from playwright.async_api import Page
 
 logger = get_logger(__name__)

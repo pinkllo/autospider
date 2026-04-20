@@ -62,7 +62,9 @@ class InMemoryMessaging:
         payload["retry_count"] = stored.retry_count + 1
         payload["failure_reason"] = reason
         if stored.retry_count + 1 > self._max_retries and stream == subtask_queue_key():
-            await self.publish(subtask_dead_queue_key(), stored.event.model_copy(update={"payload": payload}))
+            await self.publish(
+                subtask_dead_queue_key(), stored.event.model_copy(update={"payload": payload})
+            )
             return
         updated = stored.event.model_copy(update={"id": "", "payload": payload})
         self._streams.setdefault(stream, []).append(_StoredEvent(updated, stored.retry_count + 1))

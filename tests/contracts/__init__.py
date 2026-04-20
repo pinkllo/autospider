@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .pipeline_runtime import ContractRunArtifacts, run_contract_pipeline
+from .pipeline_runtime import (
+    ContractRunArtifacts as ContractRunArtifacts,
+    run_contract_pipeline as run_contract_pipeline,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMP_ROOT = REPO_ROOT / ".tmp" / "contracts"
@@ -34,9 +37,7 @@ def snapshot_shape(value: Any) -> Any:
 
 def directory_files(root: Path) -> list[str]:
     return sorted(
-        str(path.relative_to(root)).replace("\\", "/")
-        for path in root.rglob("*")
-        if path.is_file()
+        str(path.relative_to(root)).replace("\\", "/") for path in root.rglob("*") if path.is_file()
     )
 
 

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from autospider.common.logger import get_logger
-from autospider.common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som import (
+    capture_screenshot_with_marks,
+    clear_overlay,
+    inject_and_scan,
+)
 from autospider.contexts.planning.domain import SubTask, SubTaskMode, TaskPlan
 
 logger = get_logger(__name__)
@@ -103,7 +107,9 @@ class PlannerEntryPlanningMixin:
                 "observations": observations,
                 "children_count": 0,
                 "is_leaf": False,
-                "task_description": str(analysis.get("task_description", self.user_request) or self.user_request),
+                "task_description": str(
+                    analysis.get("task_description", self.user_request) or self.user_request
+                ),
                 "context": {},
                 "nav_steps": [],
                 "subtask_id": None,
@@ -132,7 +138,9 @@ class PlannerEntryPlanningMixin:
         collect_desc = str(analysis.get("task_description") or "").strip()
         if not collect_desc:
             collect_desc = self._build_collect_task_description(current_context)
-        collect_brief = self._build_collect_execution_brief(current_context, task_description=collect_desc)
+        collect_brief = self._build_collect_execution_brief(
+            current_context, task_description=collect_desc
+        )
         subtask = SubTask(
             id="leaf_001",
             name=str(analysis.get("name", "")).strip() or "入口页面",

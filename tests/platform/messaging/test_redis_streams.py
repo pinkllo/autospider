@@ -60,6 +60,8 @@ async def test_redis_streams_ack_marks_event_complete() -> None:
 
     pending = await client.xpending(stream, "workers")
     assert int(pending["pending"]) == 0
-    redelivered = [item async for item in messaging.subscribe(stream, "workers", "consumer-3", block_ms=0)]
+    redelivered = [
+        item async for item in messaging.subscribe(stream, "workers", "consumer-3", block_ms=0)
+    ]
     assert redelivered == []
     await client.aclose()

@@ -9,19 +9,19 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.common.config import config
+from autospider.legacy.common.config import config
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
-from autospider.domain.runtime import SubTaskRuntimeState
-from autospider.graph.subgraphs.multi_dispatch import (
+from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.legacy.graph.subgraphs.multi_dispatch import (
     finalize_subtask_flow,
     initialize_multi_dispatch,
     prepare_dispatch_batch,
 )
-from autospider.taskplane_adapter.graph_integration import (
+from autospider.legacy.taskplane_adapter.graph_integration import (
     get_taskplane_scheduler,
     register_taskplane_plan,
 )
-import autospider.taskplane_adapter.graph_integration as graph_integration_module
+import autospider.legacy.taskplane_adapter.graph_integration as graph_integration_module
 
 
 def _plan(plan_id: str = "plan-taskplane") -> TaskPlan:
@@ -78,7 +78,12 @@ async def test_multi_dispatch_nodes_pull_and_report_via_taskplane() -> None:
     base_state = {
         "thread_id": "thread-dispatch",
         "normalized_params": {"output_dir": "output"},
-        "control": {"task_plan": plan, "plan_knowledge": "", "current_plan": {}, "stage_status": "ok"},
+        "control": {
+            "task_plan": plan,
+            "plan_knowledge": "",
+            "current_plan": {},
+            "stage_status": "ok",
+        },
         "execution": {"subtask_results": [], "dispatch_summary": {}},
     }
 
@@ -111,7 +116,9 @@ async def test_multi_dispatch_nodes_pull_and_report_via_taskplane() -> None:
 
 
 @pytest.mark.asyncio
-async def test_register_taskplane_plan_rejects_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_register_taskplane_plan_rejects_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(config.taskplane, "enabled", False)
     with pytest.raises(ValueError, match="taskplane_disabled"):
         await register_taskplane_plan(

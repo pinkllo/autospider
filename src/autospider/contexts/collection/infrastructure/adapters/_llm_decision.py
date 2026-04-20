@@ -5,23 +5,27 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.common.accessibility import get_accessibility_text
-from autospider.common.decision_context_format import format_decision_context as _format_decision_context
-from autospider.common.llm.streaming import ainvoke_with_stream
-from autospider.common.llm.trace_logger import append_llm_trace
-from autospider.common.logger import get_logger
-from autospider.common.protocol import (
+from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.legacy.common.decision_context_format import (
+    format_decision_context as _format_decision_context,
+)
+from autospider.legacy.common.llm.streaming import ainvoke_with_stream
+from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message,
     summarize_llm_payload,
 )
-from autospider.common.som.text_first import disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text
-from autospider.common.utils.prompt_template import render_template
+from autospider.legacy.common.som.text_first import (
+    disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text,
+)
+from autospider.legacy.common.utils.prompt_template import render_template
 from autospider.contexts.collection.infrastructure.adapters._llm_shared import build_trace_payload
 from autospider.contexts.planning.domain import format_execution_brief
 
 if TYPE_CHECKING:
-    from autospider.common.types import ElementMark, SoMSnapshot
+    from autospider.legacy.common.types import ElementMark, SoMSnapshot
 
 logger = get_logger(__name__)
 
@@ -40,7 +44,9 @@ class CollectorDecisionMixin:
         if validation_feedback:
             logger.info("[LLM] 包含验证反馈信息（重新选择）")
 
-        system_prompt = render_template(self.prompt_template_path, section="ask_llm_decision_system_prompt")
+        system_prompt = render_template(
+            self.prompt_template_path, section="ask_llm_decision_system_prompt"
+        )
         user_message = await self._build_decision_user_message(current_url, validation_feedback)
         messages = self._build_visual_messages(system_prompt, user_message, screenshot_base64)
         trace_input = self._build_decision_trace_input(
@@ -84,7 +90,8 @@ class CollectorDecisionMixin:
                 "execution_brief": format_execution_brief(self.execution_brief),
                 "decision_context": _format_decision_context(self.decision_context),
                 "page_accessibility_text": accessibility_text or "无",
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
             },
         )
         if validation_feedback:

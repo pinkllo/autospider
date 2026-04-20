@@ -15,7 +15,9 @@ class UpdateSkillStats:
     def __init__(self, service: SkillDocumentService | None = None) -> None:
         self._service = service or SkillDocumentService()
 
-    async def run(self, command: UpdateSkillStatsInput) -> ResultEnvelope[UpdateSkillStatsResultDTO]:
+    async def run(
+        self, command: UpdateSkillStatsInput
+    ) -> ResultEnvelope[UpdateSkillStatsResultDTO]:
         trace_id = _require_trace_id()
         try:
             document = to_domain_skill_document(command.document)

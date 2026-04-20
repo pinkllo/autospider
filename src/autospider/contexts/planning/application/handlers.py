@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
-from autospider.common.browser.runtime import BrowserRuntimeSession
+from autospider.legacy.common.browser.runtime import BrowserRuntimeSession
 from autospider.contexts.planning.application.dto import ReplanInput, TaskPlanDTO
 from autospider.contexts.planning.application.use_cases.replan import Replan
 from autospider.contexts.planning.domain.model import (
@@ -16,7 +16,7 @@ from autospider.contexts.planning.domain.model import (
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
-from autospider.pipeline.types import ExpandRequest
+from autospider.legacy.pipeline.types import ExpandRequest
 from autospider.platform.shared_kernel.result import ResultEnvelope
 
 

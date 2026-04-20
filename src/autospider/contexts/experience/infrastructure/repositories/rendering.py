@@ -13,7 +13,9 @@ def render_skill_document(document: SkillDocument) -> str:
     if rules.description:
         frontmatter["description"] = rules.description
     lines = ["---"]
-    lines.extend(yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip().splitlines())
+    lines.extend(
+        yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip().splitlines()
+    )
     lines.extend(["---", "", document.title or f"# {rules.domain} 采集指南", ""])
     lines.extend(_render_basic_info(rules))
     lines.extend(_render_navigation(rules))

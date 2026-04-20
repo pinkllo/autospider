@@ -16,8 +16,12 @@ def test_query_service_and_index_repository_lookup_metadata() -> None:
     workspace = _create_local_test_dir()
     try:
         repository = SkillRepository(skills_dir=workspace)
-        repository.save_document("example.com", _build_document(domain="example.com", name="example.com 站点采集"))
-        repository.save_document("foo.com", _build_document(domain="foo.com", name="foo.com 站点采集"))
+        repository.save_document(
+            "example.com", _build_document(domain="example.com", name="example.com 站点采集")
+        )
+        repository.save_document(
+            "foo.com", _build_document(domain="foo.com", name="foo.com 站点采集")
+        )
 
         index_repository = SkillIndexRepository(skills_dir=workspace)
         query_service = SkillQueryService(index_repository)

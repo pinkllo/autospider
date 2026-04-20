@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from autospider.contexts.planning.domain.model import ExecutionBrief, PlannerIntent, format_execution_brief
+from autospider.contexts.planning.domain.model import (
+    ExecutionBrief,
+    PlannerIntent,
+    format_execution_brief,
+)
 
 
 def test_planner_intent_normalizes_none_grouping() -> None:

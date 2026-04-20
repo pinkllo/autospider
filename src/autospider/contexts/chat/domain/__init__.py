@@ -1,4 +1,5 @@
 """Package module."""
+
 from .events import TaskClarified
 from .model import (
     ClarificationResult,

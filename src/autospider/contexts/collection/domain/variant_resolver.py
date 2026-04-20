@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from urllib.parse import urljoin, urlparse
 
-from autospider.common.config import config
-from autospider.common.logger import get_logger
-from autospider.common.som.text_first import resolve_single_mark_id
+from autospider.legacy.common.config import config
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som.text_first import resolve_single_mark_id
 
 logger = get_logger(__name__)
 _STATE_CHANGE_POLL_INTERVALS_MS = (0, 200, 300, 400, 600)
@@ -86,7 +86,9 @@ class PlannerVariantResolverMixin:
                 continue
             if normalized_haystack == normalized_target:
                 exact_candidates.append(mark.mark_id)
-            elif normalized_target in normalized_haystack or normalized_haystack in normalized_target:
+            elif (
+                normalized_target in normalized_haystack or normalized_haystack in normalized_target
+            ):
                 fuzzy_candidates.append(mark.mark_id)
 
         if len(exact_candidates) == 1:
@@ -149,21 +151,34 @@ class PlannerVariantResolverMixin:
                         href_lower = str(mark.href).strip().lower()
                         if href_lower.startswith("javascript:") or href_lower in ("#", ""):
                             logger.info(
-                                "[Planner] [%s] 策略1：mark href 无效（已过滤）: %s", name, mark.href[:80]
+                                "[Planner] [%s] 策略1：mark href 无效（已过滤）: %s",
+                                name,
+                                mark.href[:80],
                             )
                             break
                         resolved_url = urljoin(base_url, mark.href)
-                        if resolved_url.lower() == base_url.lower() or resolved_url.lower() == original_url.lower():
+                        if (
+                            resolved_url.lower() == base_url.lower()
+                            or resolved_url.lower() == original_url.lower()
+                        ):
                             logger.info(
-                                "[Planner] [%s] 策略1：mark href 指向当前页（已过滤）: %s", name, resolved_url[:80]
+                                "[Planner] [%s] 策略1：mark href 指向当前页（已过滤）: %s",
+                                name,
+                                resolved_url[:80],
                             )
                             resolved_url = ""
                             break
-                        logger.info("[Planner] [%s] 策略1：从 mark href 获取 URL: %s", name, resolved_url[:80])
+                        logger.info(
+                            "[Planner] [%s] 策略1：从 mark href 获取 URL: %s",
+                            name,
+                            resolved_url[:80],
+                        )
                         break
 
             if not resolved_url and mark_id is not None:
-                resolved_url = await self._get_href_by_js(mark_id, base_url, snapshot, link_text=link_text)
+                resolved_url = await self._get_href_by_js(
+                    mark_id, base_url, snapshot, link_text=link_text
+                )
                 if resolved_url:
                     lower = resolved_url.strip().lower()
                     if (
@@ -173,11 +188,15 @@ class PlannerVariantResolverMixin:
                         or lower == original_url.lower()
                     ):
                         logger.info(
-                            "[Planner] [%s] 策略2：JS 返回无效 URL（已过滤）: %s", name, resolved_url[:80]
+                            "[Planner] [%s] 策略2：JS 返回无效 URL（已过滤）: %s",
+                            name,
+                            resolved_url[:80],
                         )
                         resolved_url = ""
                     else:
-                        logger.info("[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, resolved_url[:80])
+                        logger.info(
+                            "[Planner] [%s] 策略2：从 JS 属性获取 URL: %s", name, resolved_url[:80]
+                        )
 
             if not resolved_url and mark_id is not None:
                 resolved = await self._get_url_by_navigation(
@@ -185,7 +204,8 @@ class PlannerVariantResolverMixin:
                     original_url,
                     snapshot,
                     parent_nav_steps=parent_nav_steps,
-                    variant_label=self._build_variant_label(child_context) or str(name or "").strip(),
+                    variant_label=self._build_variant_label(child_context)
+                    or str(name or "").strip(),
                     child_context=child_context,
                     link_text=link_text,
                 )
@@ -228,7 +248,8 @@ class PlannerVariantResolverMixin:
                     anchor_url=original_url,
                     nav_steps=variant_nav_steps,
                     page_state_signature=page_state_signature,
-                    variant_label=self._build_variant_label(child_context) or str(name or "").strip(),
+                    variant_label=self._build_variant_label(child_context)
+                    or str(name or "").strip(),
                     context=child_context,
                     same_page_variant=same_page_variant,
                 )
@@ -245,17 +266,21 @@ class PlannerVariantResolverMixin:
                     return candidates[0].xpath
         return None
 
-    async def _get_href_by_js(self, mark_id: int, base_url: str, snapshot: object, link_text: str = "") -> str:
+    async def _get_href_by_js(
+        self, mark_id: int, base_url: str, snapshot: object, link_text: str = ""
+    ) -> str:
         if link_text:
             try:
                 text_locator = self.page.get_by_text(link_text, exact=True)
                 if await text_locator.count() > 0:
-                    href = await text_locator.first.evaluate("""el => {
+                    href = await text_locator.first.evaluate(
+                        """el => {
                         if (el.href) return el.href;
                         const anchor = el.closest('a');
                         if (anchor && anchor.href) return anchor.href;
                         return null;
-                    }""")
+                    }"""
+                    )
                     if href:
                         return urljoin(base_url, href)
             except Exception as e:
@@ -310,14 +335,18 @@ class PlannerVariantResolverMixin:
                     text_locator = self.page.get_by_text(link_text, exact=True)
                     if await text_locator.count() > 0:
                         locator = text_locator.first
-                        logger.info("[Planner]   文本匹配定位成功: '%s' (mark_id=%d)", link_text, mark_id)
+                        logger.info(
+                            "[Planner]   文本匹配定位成功: '%s' (mark_id=%d)", link_text, mark_id
+                        )
                         break
 
                 if xpath:
                     xpath_locator = self.page.locator(f"xpath={xpath}")
                     if await xpath_locator.count() > 0:
                         locator = xpath_locator.first
-                        logger.info("[Planner]   XPath 定位成功: mark_id=%d (xpath=%s)", mark_id, xpath[:60])
+                        logger.info(
+                            "[Planner]   XPath 定位成功: mark_id=%d (xpath=%s)", mark_id, xpath[:60]
+                        )
                         break
 
                 if attempt == 0:
@@ -327,13 +356,16 @@ class PlannerVariantResolverMixin:
             if locator is None:
                 logger.warning(
                     "[Planner]   文本('%s')和 XPath 均未匹配到元素, mark_id=%d",
-                    link_text or "(无)", mark_id,
+                    link_text or "(无)",
+                    mark_id,
                 )
                 return None
 
             url_before = self.page.url
             dom_sig_before = await self._get_dom_signature()
-            interaction_state_before = await self._get_element_interaction_state(xpath) if xpath else {}
+            interaction_state_before = (
+                await self._get_element_interaction_state(xpath) if xpath else {}
+            )
 
             await locator.click(timeout=5000)
 
@@ -346,8 +378,8 @@ class PlannerVariantResolverMixin:
                 "[Planner]   URL 比较: before=%s | after=%s | fragment: %s -> %s | changed=%s",
                 url_before[:80],
                 url_after[:80],
-                old_parsed.fragment[:40] if old_parsed.fragment else '(none)',
-                new_parsed.fragment[:40] if new_parsed.fragment else '(none)',
+                old_parsed.fragment[:40] if old_parsed.fragment else "(none)",
+                new_parsed.fragment[:40] if new_parsed.fragment else "(none)",
                 url_changed,
             )
 

@@ -1,14 +1,14 @@
 import pytest
 
-from autospider.taskplane.protocol import (
+from autospider.legacy.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
     TaskTicket,
     TicketStatus,
 )
-from autospider.taskplane.store.memory_store import MemoryStore
-from autospider.taskplane.strategy import PriorityStrategy
+from autospider.legacy.taskplane.store.memory_store import MemoryStore
+from autospider.legacy.taskplane.strategy import PriorityStrategy
 
 
 @pytest.fixture

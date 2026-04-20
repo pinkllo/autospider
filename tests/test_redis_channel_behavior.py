@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.common.channel.redis_channel import RedisURLChannel
+from autospider.legacy.common.channel.redis_channel import RedisURLChannel
 
 
 class _FakeRedisManager:

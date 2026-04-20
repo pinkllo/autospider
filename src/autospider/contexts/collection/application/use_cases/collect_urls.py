@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from autospider.common.config import config
-from autospider.common.llm import LLMDecider
-from autospider.common.logger import get_logger
-from autospider.common.som import (
+from autospider.legacy.common.config import config
+from autospider.legacy.common.llm import LLMDecider
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from autospider.common.storage.idempotent_io import (
+from autospider.legacy.common.storage.idempotent_io import (
     write_json_idempotent,
     write_text_if_changed,
 )
@@ -34,8 +34,8 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from autospider.crawler.base.base_collector import BaseCollector
-from autospider.crawler.collector import (
+from autospider.legacy.crawler.base.base_collector import BaseCollector
+from autospider.legacy.crawler.collector import (
     CommonPattern,
     DetailPageVisit,
     LLMDecisionMaker,
@@ -48,8 +48,8 @@ from autospider.crawler.collector import (
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
-    from autospider.common.channel.base import URLChannel
-    from autospider.common.types import SoMSnapshot
+    from autospider.legacy.common.channel.base import URLChannel
+    from autospider.legacy.common.types import SoMSnapshot
 
 
 logger = get_logger(__name__)
@@ -186,7 +186,9 @@ class URLCollector(BaseCollector):
                         pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
                         if pagination_xpath:
                             logger.info("[URLCollector] ✓ 分页控件 XPath: %s", pagination_xpath)
-                        jump_widget_xpath = await self.pagination_handler.extract_jump_widget_xpath()
+                        jump_widget_xpath = (
+                            await self.pagination_handler.extract_jump_widget_xpath()
+                        )
                         if jump_widget_xpath:
                             logger.info("[URLCollector] ✓ 跳转控件已提取")
                         self._save_config()
@@ -268,10 +270,14 @@ class URLCollector(BaseCollector):
             await clear_overlay(self.page)
             snapshot = await inject_and_scan(self.page)
             _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
-            llm_decision = await self.llm_decision_maker.ask_for_decision(snapshot, screenshot_base64)
+            llm_decision = await self.llm_decision_maker.ask_for_decision(
+                snapshot, screenshot_base64
+            )
 
             if llm_decision and llm_decision.get("action") == "select":
-                args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+                args = (
+                    llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+                )
                 purpose = (args.get("purpose") or "").lower()
                 if purpose in {"detail_links", "detail_link", "detail"}:
                     page_urls_delta, visits_delta = await self._collect_selected_detail_links(
@@ -417,7 +423,9 @@ class URLCollector(BaseCollector):
                 normalized.add(value)
         return normalized
 
-    def _measure_url_rule_quality(self, *, llm_set: set[str], xpath_set: set[str]) -> tuple[float, float]:
+    def _measure_url_rule_quality(
+        self, *, llm_set: set[str], xpath_set: set[str]
+    ) -> tuple[float, float]:
         if not llm_set or not xpath_set:
             return 0.0, 0.0
         overlap = len(llm_set & xpath_set)

@@ -54,5 +54,7 @@ async def test_in_memory_messaging_ack_clears_pending_event() -> None:
     event = await _collect_first(messaging.subscribe(stream, "workers", "consumer-2", block_ms=0))
     await messaging.ack(stream, "workers", event.id)
 
-    remaining = [item async for item in messaging.subscribe(stream, "workers", "consumer-2", block_ms=0)]
+    remaining = [
+        item async for item in messaging.subscribe(stream, "workers", "consumer-2", block_ms=0)
+    ]
     assert remaining == []

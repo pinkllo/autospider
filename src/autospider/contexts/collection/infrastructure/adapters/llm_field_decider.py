@@ -13,34 +13,32 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.common.accessibility import get_accessibility_text
-from autospider.common.decision_context_format import (
+from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_decision_context,
 )
-from autospider.common.llm.streaming import ainvoke_with_stream
-from autospider.common.llm.trace_logger import append_llm_trace
-from autospider.common.logger import get_logger
-from autospider.common.protocol import (
+from autospider.legacy.common.llm.streaming import ainvoke_with_stream
+from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import (
     coerce_bool,
     extract_response_text_from_llm_payload,
     parse_protocol_message,
     summarize_llm_payload,
 )
-from autospider.common.utils.paths import get_prompt_path
-from autospider.common.utils.prompt_template import render_template
-from autospider.domain.fields import FieldDefinition
+from autospider.legacy.common.utils.paths import get_prompt_path
+from autospider.legacy.common.utils.prompt_template import render_template
+from autospider.legacy.domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from autospider.common.llm import LLMDecider
-    from autospider.common.types import ElementMark, SoMSnapshot
+    from autospider.legacy.common.llm import LLMDecider
+    from autospider.legacy.common.types import ElementMark, SoMSnapshot
 
 
 # Prompt 模板文件路径
 PROMPT_TEMPLATE_PATH = get_prompt_path("field_extractor.yaml")
 logger = get_logger(__name__)
-
-
 
 
 class FieldDecider:
@@ -317,7 +315,8 @@ class FieldDecider:
                 "nav_steps_summary": nav_steps_summary or "无",
                 "decision_context": _format_decision_context(self.decision_context),
                 "page_accessibility_text": accessibility_text or "无",
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
             },
         )
 
@@ -429,7 +428,8 @@ class FieldDecider:
                 "field_example": field.example or "",
                 "decision_context": _format_decision_context(self.decision_context),
                 "page_accessibility_text": accessibility_text or "无",
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
             },
         )
 
@@ -545,7 +545,8 @@ class FieldDecider:
                 "field_description": field.description,
                 "candidates": candidates,
                 "decision_context": _format_decision_context(self.decision_context),
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
             },
         )
 

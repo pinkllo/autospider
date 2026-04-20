@@ -20,8 +20,8 @@ if str(SRC_ROOT) not in sys.path:
 
 
 def _reload_trace_module():
-    config_module = importlib.import_module("autospider.common.config")
-    trace_logger = importlib.import_module("autospider.common.llm.trace_logger")
+    config_module = importlib.import_module("autospider.legacy.common.config")
+    trace_logger = importlib.import_module("autospider.legacy.common.llm.trace_logger")
 
     config_module.get_config(reload=True)
     return importlib.reload(trace_logger)
@@ -34,9 +34,7 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
 
 @pytest.fixture()
 def repo_tmp_dir() -> Path:
-    base_dir = REPO_ROOT / "artifacts" / "test_tmp"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    path = Path(tempfile.mkdtemp(prefix="trace-tests-", dir=base_dir))
+    path = Path(tempfile.mkdtemp(prefix="trace-tests-"))
     try:
         yield path
     finally:

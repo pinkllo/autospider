@@ -113,7 +113,9 @@ def _records_match_exactly(
     field_matching: dict[str, str],
 ) -> bool:
     for field_name, strategy in field_matching.items():
-        if not field_match(actual_record.get(field_name), expected_record.get(field_name), strategy=strategy):
+        if not field_match(
+            actual_record.get(field_name), expected_record.get(field_name), strategy=strategy
+        ):
             return False
     return True
 

@@ -21,7 +21,7 @@ class CliRuntimeProxy:
         overrides = object.__getattribute__(self, "_overrides")
         if name in overrides:
             return overrides[name]
-        module = importlib.import_module("autospider.cli_runtime")
+        module = importlib.import_module("autospider.legacy.cli_runtime")
         return getattr(module, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -32,7 +32,7 @@ class CliRuntimeProxy:
         if name in overrides:
             del overrides[name]
             return
-        module = importlib.import_module("autospider.cli_runtime")
+        module = importlib.import_module("autospider.legacy.cli_runtime")
         delattr(module, name)
 
 
@@ -47,7 +47,9 @@ def run_async_safely(coro: Any) -> Any:
     return _run_in_thread(coro)
 
 
-def invoke_graph(entry_mode: str, cli_args: dict[str, Any], *, thread_id: str = "") -> dict[str, Any]:
+def invoke_graph(
+    entry_mode: str, cli_args: dict[str, Any], *, thread_id: str = ""
+) -> dict[str, Any]:
     if entry_mode != "chat_pipeline":
         raise ValueError(f"unsupported entry mode: {entry_mode}")
     _ensure_database_ready()

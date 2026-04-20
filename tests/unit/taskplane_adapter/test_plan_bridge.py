@@ -1,5 +1,5 @@
 from autospider.contexts.planning.domain import SubTask, TaskPlan
-from autospider.taskplane_adapter.plan_bridge import PlanBridge
+from autospider.legacy.taskplane_adapter.plan_bridge import PlanBridge
 
 
 def _sample_plan() -> TaskPlan:

@@ -58,6 +58,7 @@ async def _collect_events(messaging, stream: str) -> list[object]:
         )
     ]
 
+
 @pytest.mark.asyncio
 async def test_chat_task_clarified_event_creates_plan_and_queue_message() -> None:
     messaging = InMemoryMessaging()

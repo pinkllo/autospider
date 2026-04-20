@@ -28,7 +28,9 @@ class _FakePage:
     def __init__(self) -> None:
         self.goto_calls: list[str] = []
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 15000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 15000
+    ) -> None:
         del wait_until
         del timeout
         self.goto_calls.append(url)
@@ -75,7 +77,7 @@ async def test_restore_page_state_rejects_successful_but_unvalidated_replay(
             )
 
     monkeypatch.setattr(
-        "autospider.crawler.collector.navigation_handler.NavigationHandler",
+        "autospider.legacy.crawler.collector.navigation_handler.NavigationHandler",
         _FakeNavigationHandler,
     )
 

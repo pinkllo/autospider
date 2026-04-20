@@ -88,8 +88,12 @@ class ClarifiedTask:
             per_group_target_count=payload.get("per_group_target_count"),
             total_target_count=payload.get("total_target_count"),
             category_discovery_mode=_text(payload.get("category_discovery_mode")) or "auto",
-            requested_categories=tuple(_text(item) for item in list(payload.get("requested_categories") or [])),
-            category_examples=tuple(_text(item) for item in list(payload.get("category_examples") or [])),
+            requested_categories=tuple(
+                _text(item) for item in list(payload.get("requested_categories") or [])
+            ),
+            category_examples=tuple(
+                _text(item) for item in list(payload.get("category_examples") or [])
+            ),
             max_pages=payload.get("max_pages"),
             target_url_count=payload.get("target_url_count"),
             consumer_concurrency=payload.get("consumer_concurrency"),

@@ -6,15 +6,15 @@ import asyncio
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
-from autospider.common.browser.actions import ActionExecutor
-from autospider.common.browser.click_utils import click_and_capture_new_page
-from autospider.common.logger import get_logger
-from autospider.common.som import build_mark_id_to_xpath_map, set_overlay_visibility
-from autospider.common.types import Action, ActionType
+from autospider.legacy.common.browser.actions import ActionExecutor
+from autospider.legacy.common.browser.click_utils import click_and_capture_new_page
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som import build_mark_id_to_xpath_map, set_overlay_visibility
+from autospider.legacy.common.types import Action, ActionType
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from autospider.common.types import ElementMark, SoMSnapshot
+    from autospider.legacy.common.types import ElementMark, SoMSnapshot
 
 
 logger = get_logger(__name__)

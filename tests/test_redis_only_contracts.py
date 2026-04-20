@@ -4,13 +4,13 @@ from enum import Enum
 
 import pytest
 
-import autospider.common.config as config_module
-from autospider.common.config import normalize_pipeline_mode
-from autospider.common.channel import __all__ as channel_exports
-from autospider.common.channel.factory import create_url_channel
-from autospider.common.channel.redis_channel import RedisURLChannel
-from autospider.pipeline.helpers import build_execution_context
-from autospider.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
+import autospider.legacy.common.config as config_module
+from autospider.legacy.common.config import normalize_pipeline_mode
+from autospider.legacy.common.channel import __all__ as channel_exports
+from autospider.legacy.common.channel.factory import create_url_channel
+from autospider.legacy.common.channel.redis_channel import RedisURLChannel
+from autospider.legacy.pipeline.helpers import build_execution_context
+from autospider.legacy.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
 
 
 def _reset_config_cache() -> None:

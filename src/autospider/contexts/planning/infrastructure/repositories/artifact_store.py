@@ -6,8 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from autospider.common.logger import get_logger
-from autospider.common.storage.idempotent_io import load_json_if_exists, write_json_idempotent
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.storage.idempotent_io import (
+    load_json_if_exists,
+    write_json_idempotent,
+)
 from autospider.contexts.experience.application.skill_promotion import SkillCandidate
 from autospider.contexts.planning.domain.model import (
     PlanJournalEntry,

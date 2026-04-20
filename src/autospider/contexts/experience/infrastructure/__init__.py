@@ -1,4 +1,5 @@
 """Package module."""
+
 from autospider.contexts.experience.infrastructure.repositories import (
     SkillIndexRepository,
     SkillQueryService,

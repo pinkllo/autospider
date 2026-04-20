@@ -108,7 +108,10 @@ def test_resolve_request_keeps_compatibility_entrypoint() -> None:
 
     config = ScenarioConfig.model_validate(yaml.safe_load(VALID_YAML))
 
-    assert config.resolve_request("http://localhost:7777") == "采集 http://localhost:7777/test/ 上的产品名称和价格"
+    assert (
+        config.resolve_request("http://localhost:7777")
+        == "采集 http://localhost:7777/test/ 上的产品名称和价格"
+    )
 
 
 def test_list_scenarios_returns_sorted_ids() -> None:

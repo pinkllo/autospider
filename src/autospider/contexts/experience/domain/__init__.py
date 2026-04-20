@@ -1,4 +1,5 @@
 """Package module."""
+
 from autospider.contexts.experience.domain.model import (
     SkillDocument,
     SkillFieldRule,
@@ -12,11 +13,11 @@ from autospider.contexts.experience.domain.services import SkillDocumentService
 
 __all__ = [
     "SkillDocument",
+    "SkillDocumentService",
     "SkillFieldRule",
     "SkillIndexEntry",
     "SkillMetadata",
     "SkillRepository",
     "SkillRuleData",
-    "SkillDocumentService",
     "SkillVariantRule",
 ]

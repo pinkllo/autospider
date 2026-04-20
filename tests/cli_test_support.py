@@ -10,12 +10,12 @@ from typing import Any
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 
 _PURGE_PREFIXES = (
-    "autospider.cli",
+    "autospider.interface.cli",
     "autospider.interface",
-    "autospider.cli_runtime",
-    "autospider.graph",
-    "autospider.common.db.engine",
-    "autospider.domain.fields",
+    "autospider.legacy.cli_runtime",
+    "autospider.legacy.graph",
+    "autospider.legacy.common.db.engine",
+    "autospider.legacy.domain.fields",
     "typer",
     "click",
     "rich",
@@ -60,7 +60,11 @@ def install_cli_stubs() -> None:
                     types.SimpleNamespace(
                         name=name or func.__name__,
                         callback=func,
-                        help=(inspect.getdoc(func) or "").splitlines()[0] if inspect.getdoc(func) else "",
+                        help=(
+                            (inspect.getdoc(func) or "").splitlines()[0]
+                            if inspect.getdoc(func)
+                            else ""
+                        ),
                     )
                 )
                 return func
@@ -131,7 +135,7 @@ def fresh_import_cli():
     install_cli_stubs()
     if str(SRC_ROOT) not in sys.path:
         sys.path.insert(0, str(SRC_ROOT))
-    return importlib.import_module("autospider.cli")
+    return importlib.import_module("autospider.interface.cli")
 
 
 def fresh_import_interface_cli():

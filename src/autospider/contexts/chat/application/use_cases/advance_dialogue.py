@@ -39,7 +39,9 @@ class AdvanceDialogue:
             await self._repository.save(updated_session)
         except DomainError as exc:
             return _failed(trace_id, exc.code, str(exc))
-        return ResultEnvelope.success(data=to_session_dto(updated_session, result), trace_id=trace_id)
+        return ResultEnvelope.success(
+            data=to_session_dto(updated_session, result), trace_id=trace_id
+        )
 
 
 def _require_trace_id() -> str:

@@ -6,16 +6,16 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.control_types import (
+from autospider.legacy.graph.control_types import (
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.graph.decision_context import (
+from autospider.legacy.graph.decision_context import (
     build_decision_context,
     summarize_failures,
 )
-from autospider.graph.nodes.capability_nodes import build_planning_runtime_payload
-from autospider.graph.world_model import build_initial_world_model, upsert_page_model
+from autospider.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.legacy.graph.world_model import build_initial_world_model, upsert_page_model
 
 
 def test_build_default_policies_expose_control_contract_defaults() -> None:
@@ -111,7 +111,9 @@ def test_build_decision_context_prefers_world_request_params_over_world_model_sn
     assert context["success_criteria"]["target_url_count"] == 12
 
 
-def test_build_decision_context_ignores_adapter_injected_legacy_request_params_when_world_model_exists() -> None:
+def test_build_decision_context_ignores_adapter_injected_legacy_request_params_when_world_model_exists() -> (
+    None
+):
     state = {
         "normalized_params": {"keyword": "legacy-only"},
         "world": {
@@ -174,9 +176,7 @@ def test_build_decision_context_keeps_explicit_empty_world_failure_records() -> 
                         "page_type": "list_page",
                     }
                 },
-                "failure_records": [
-                    {"page_id": "entry", "category": "old", "detail": "stale"}
-                ],
+                "failure_records": [{"page_id": "entry", "category": "old", "detail": "stale"}],
             },
         },
     }
@@ -288,7 +288,10 @@ def test_build_planning_runtime_payload_enriches_request_params_with_execution_c
         },
     )
 
-    assert payload["world"]["world_model"]["page_models"]["node_001"]["metadata"]["observations"] == "入口页识别为分类页"
+    assert (
+        payload["world"]["world_model"]["page_models"]["node_001"]["metadata"]["observations"]
+        == "入口页识别为分类页"
+    )
     assert payload["control"]["current_plan"]["page_id"] == "node_001"
     assert payload["decision_context"]["page_model"]["page_type"] == "category"
     assert payload["decision_context"]["current_plan"]["goal"] == "进入招标公告列表"

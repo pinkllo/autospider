@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 def resume_graph_command(
     thread_id: str = typer.Option(..., "--thread-id", help="需要恢复的 LangGraph 线程 ID"),
-    resume_json: str = typer.Option("", "--resume-json", help="interrupt 恢复载荷（JSON）。留空时按静态断点继续。"),
+    resume_json: str = typer.Option(
+        "", "--resume-json", help="interrupt 恢复载荷（JSON）。留空时按静态断点继续。"
+    ),
 ) -> None:
     """恢复已持久化的 LangGraph 线程。"""
     try:
@@ -49,7 +51,9 @@ def resume_graph_command(
         logger.info("用户中断")
         raise typer.Exit(130)
     except json.JSONDecodeError as exc:
-        console.print(Panel(f"[red]resume-json 不是合法 JSON: {exc}[/red]", title="输入错误", style="red"))
+        console.print(
+            Panel(f"[red]resume-json 不是合法 JSON: {exc}[/red]", title="输入错误", style="red")
+        )
         raise typer.Exit(1) from exc
     except Exception as exc:
         console.print(Panel(f"[red]{exc}[/red]", title="恢复失败", style="red"))

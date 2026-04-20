@@ -10,20 +10,20 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from autospider.common.config import config
-from autospider.common.storage.idempotent_io import write_json_idempotent
-from autospider.domain.fields import FieldDefinition
-from autospider.field.batch_xpath_extractor import BatchXPathExtractor
-from autospider.field.field_config import field_rules_to_payload
-from autospider.field.field_extractor import FieldExtractor
-from autospider.field.models import (
+from autospider.legacy.common.config import config
+from autospider.legacy.common.storage.idempotent_io import write_json_idempotent
+from autospider.legacy.domain.fields import FieldDefinition
+from autospider.legacy.field.batch_xpath_extractor import BatchXPathExtractor
+from autospider.legacy.field.field_config import field_rules_to_payload
+from autospider.legacy.field.field_extractor import FieldExtractor
+from autospider.legacy.field.models import (
     CommonFieldXPath,
     ExtractionConfig,
     FieldRule,
     PageExtractionRecord,
 )
-from autospider.field.xpath_helpers import normalize_xpath_majority_key
-from autospider.field.xpath_pattern import FieldXPathExtractor
+from autospider.legacy.field.xpath_helpers import normalize_xpath_majority_key
+from autospider.legacy.field.xpath_pattern import FieldXPathExtractor
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

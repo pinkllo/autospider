@@ -2,10 +2,10 @@ import asyncio
 
 import pytest
 
-from autospider.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket
-from autospider.taskplane.scheduler import TaskScheduler
-from autospider.taskplane.store.memory_store import MemoryStore
-from autospider.taskplane.subscription import Subscription
+from autospider.legacy.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket
+from autospider.legacy.taskplane.scheduler import TaskScheduler
+from autospider.legacy.taskplane.store.memory_store import MemoryStore
+from autospider.legacy.taskplane.subscription import Subscription
 
 
 @pytest.fixture

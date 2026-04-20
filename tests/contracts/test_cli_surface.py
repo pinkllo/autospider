@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.cli_test_support import fresh_import_cli, help_surface
+from tests.cli_test_support import fresh_import_cli, help_surface, purge_modules
 
 ROOT_SNAPSHOT = {
     "usage": "Usage: autospider [OPTIONS] COMMAND [ARGS]...",
@@ -57,21 +57,24 @@ BENCHMARK_SNAPSHOT = {
 
 
 def test_cli_help_surfaces_match_contract_snapshots() -> None:
-    cli_module = fresh_import_cli()
-    commands = {
-        "root": None,
-        "chat-pipeline": "chat-pipeline",
-        "resume": "resume",
-        "doctor": "doctor",
-        "benchmark": "benchmark",
-    }
-    snapshots = {
-        "root": ROOT_SNAPSHOT,
-        "chat-pipeline": CHAT_PIPELINE_SNAPSHOT,
-        "resume": RESUME_SNAPSHOT,
-        "doctor": DOCTOR_SNAPSHOT,
-        "benchmark": BENCHMARK_SNAPSHOT,
-    }
+    try:
+        cli_module = fresh_import_cli()
+        commands = {
+            "root": None,
+            "chat-pipeline": "chat-pipeline",
+            "resume": "resume",
+            "doctor": "doctor",
+            "benchmark": "benchmark",
+        }
+        snapshots = {
+            "root": ROOT_SNAPSHOT,
+            "chat-pipeline": CHAT_PIPELINE_SNAPSHOT,
+            "resume": RESUME_SNAPSHOT,
+            "doctor": DOCTOR_SNAPSHOT,
+            "benchmark": BENCHMARK_SNAPSHOT,
+        }
 
-    for name, command_name in commands.items():
-        assert help_surface(cli_module, command_name) == snapshots[name]
+        for name, command_name in commands.items():
+            assert help_surface(cli_module, command_name) == snapshots[name]
+    finally:
+        purge_modules()

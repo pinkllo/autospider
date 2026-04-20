@@ -67,7 +67,14 @@ def test_decompose_plan_appends_subtasks() -> None:
     result = DecomposePlan(repository).run(
         DecomposePlanInput(
             plan=plan,
-            subtasks=[SubTask(id="s1", name="公告", list_url="https://example.com/notices", task_description="抓取")],
+            subtasks=[
+                SubTask(
+                    id="s1",
+                    name="公告",
+                    list_url="https://example.com/notices",
+                    task_description="抓取",
+                )
+            ],
         )
     )
 

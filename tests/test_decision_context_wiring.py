@@ -14,8 +14,8 @@ if str(SRC_ROOT) not in sys.path:
 from autospider.contexts.collection.infrastructure.adapters.llm_navigator import (  # noqa: E402
     LLMDecisionMaker,
 )
-from autospider.field.field_decider import FieldDecider  # noqa: E402
-from autospider.pipeline.orchestration import (  # noqa: E402
+from autospider.legacy.field.field_decider import FieldDecider  # noqa: E402
+from autospider.legacy.pipeline.orchestration import (  # noqa: E402
     ConsumerPool,
     PipelineRuntimeContext,
     PipelineRuntimeDependencies,
@@ -42,7 +42,9 @@ async def test_llm_decision_maker_injects_decision_context_into_prompt(
 
     monkeypatch.setattr(decision_module, "render_template", fake_render_template)
     monkeypatch.setattr(decision_module, "ainvoke_with_stream", fake_ainvoke_with_stream)
-    monkeypatch.setattr(decision_module, "extract_response_text_from_llm_payload", lambda _response: "{}")
+    monkeypatch.setattr(
+        decision_module, "extract_response_text_from_llm_payload", lambda _response: "{}"
+    )
     monkeypatch.setattr(decision_module, "summarize_llm_payload", lambda _response: {})
     monkeypatch.setattr(
         decision_module,
@@ -78,8 +80,8 @@ async def test_llm_decision_maker_injects_decision_context_into_prompt(
 async def test_field_decider_injects_decision_context_into_navigation_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.field.field_decider as field_decider_module
-    from autospider.domain.fields import FieldDefinition
+    import autospider.legacy.field.field_decider as field_decider_module
+    from autospider.legacy.domain.fields import FieldDefinition
 
     captured: dict[str, object] = {}
 
@@ -93,7 +95,9 @@ async def test_field_decider_injects_decision_context_into_navigation_prompt(
 
     monkeypatch.setattr(field_decider_module, "render_template", fake_render_template)
     monkeypatch.setattr(field_decider_module, "ainvoke_with_stream", fake_ainvoke_with_stream)
-    monkeypatch.setattr(field_decider_module, "extract_response_text_from_llm_payload", lambda _response: "{}")
+    monkeypatch.setattr(
+        field_decider_module, "extract_response_text_from_llm_payload", lambda _response: "{}"
+    )
     monkeypatch.setattr(field_decider_module, "summarize_llm_payload", lambda _response: {})
     monkeypatch.setattr(
         field_decider_module,

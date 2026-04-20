@@ -5,12 +5,11 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any, Iterator
 from urllib.request import urlopen
 
-from autospider.common.channel.base import URLChannel
-from autospider.domain.fields import FieldDefinition
+from autospider.legacy.common.channel.base import URLChannel
+from autospider.legacy.domain.fields import FieldDefinition
 
 MOCK_HTML = (
     "<html><body><article data-kind='product'>"
@@ -67,7 +66,9 @@ class FakeURLCollector:
         self._channel = url_channel
         self.nav_steps = [{"action": "open", "url": list_url}]
         self.common_detail_xpath = "//article[@data-kind='product']"
-        self.pagination_handler = type("PaginationHandler", (), {"pagination_xpath": None, "jump_widget_xpath": None})()
+        self.pagination_handler = type(
+            "PaginationHandler", (), {"pagination_xpath": None, "jump_widget_xpath": None}
+        )()
 
     async def run(self) -> CollectorResult:
         await self._channel.publish(self._list_url)
@@ -82,7 +83,9 @@ class FakeDetailPageWorker:
         title = _extract_title(_fetch_text(url))
         field_results = [FieldResult(field_name=field.name, value=title) for field in self._fields]
         config = {"fields": [field.model_dump(mode="python") for field in self._fields]}
-        return WorkerResult(record=Record(url=url, success=True, fields=field_results), extraction_config=config)
+        return WorkerResult(
+            record=Record(url=url, success=True, fields=field_results), extraction_config=config
+        )
 
 
 @contextmanager

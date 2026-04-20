@@ -8,9 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from autospider.common.logger import get_logger
-from autospider.common.storage.idempotent_io import write_json_idempotent
-from autospider.common.utils.file_utils import ensure_directory, file_exists, load_json
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.storage.idempotent_io import write_json_idempotent
+from autospider.legacy.common.utils.file_utils import ensure_directory, file_exists, load_json
 
 logger = get_logger(__name__)
 
@@ -67,7 +67,11 @@ class CollectionConfig:
     @classmethod
     def from_storage_record(cls, data: Mapping[str, Any]) -> "CollectionConfig":
         return cls(
-            nav_steps=[dict(step) for step in list(data.get("nav_steps") or []) if isinstance(step, Mapping)],
+            nav_steps=[
+                dict(step)
+                for step in list(data.get("nav_steps") or [])
+                if isinstance(step, Mapping)
+            ],
             common_detail_xpath=data.get("common_detail_xpath"),
             pagination_xpath=data.get("pagination_xpath"),
             jump_widget_xpath=(
@@ -140,7 +144,9 @@ class ConfigPersistence:
         return file_exists(self.config_file)
 
 
-def load_collection_config(config_path: str | Path, *, strict: bool = True) -> CollectionConfig | None:
+def load_collection_config(
+    config_path: str | Path, *, strict: bool = True
+) -> CollectionConfig | None:
     path = Path(config_path)
     if not path.exists():
         return None

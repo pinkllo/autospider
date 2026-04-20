@@ -1,5 +1,5 @@
-from autospider.taskplane.protocol import TicketStatus
-from autospider.taskplane.types import (
+from autospider.legacy.taskplane.protocol import TicketStatus
+from autospider.legacy.taskplane.types import (
     EnvelopeProgress,
     ReportReceipt,
     SubmitReceipt,
@@ -40,4 +40,3 @@ class TestTaskPlaneConfig:
         assert config.default_max_attempts == 3
         assert config.default_timeout_seconds == 600
         assert config.fallback_to_memory is True
-

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from autospider.pipeline.progress_tracker import TaskProgressTracker
+from autospider.legacy.pipeline.progress_tracker import TaskProgressTracker
 
 
 class _FakeRedisClient:
@@ -27,7 +27,7 @@ class _FakeRedisClient:
 
 def _load_runtime_store_module():
     try:
-        return importlib.import_module("autospider.common.storage.pipeline_runtime_store")
+        return importlib.import_module("autospider.legacy.common.storage.pipeline_runtime_store")
     except ModuleNotFoundError as exc:
         pytest.fail(f"pipeline runtime store module missing: {exc}")
 
@@ -260,7 +260,9 @@ async def test_progress_tracker_mark_done_preserves_canonical_fields_and_finishe
 
     await tracker.set_total(2)
     await tracker.record_success("https://example.com/item-1")
-    await tracker.set_runtime_state({"stage": "consuming", "resume_mode": "resume", "thread_id": "thread-4"})
+    await tracker.set_runtime_state(
+        {"stage": "consuming", "resume_mode": "resume", "thread_id": "thread-4"}
+    )
     await tracker.mark_done("completed")
 
     state = runtime_store.get_runtime_state("run-4")

@@ -9,18 +9,18 @@ from pathlib import Path
 from typing import Any, Iterator
 from unittest.mock import patch
 
-from autospider.common.channel.base import URLChannel, URLTask
-from autospider.common.storage.pipeline_runtime_store import PipelineRuntimeStore
-from autospider.domain.fields import FieldDefinition
-from autospider.pipeline.finalization import (
+from autospider.legacy.common.channel.base import URLChannel, URLTask
+from autospider.legacy.common.storage.pipeline_runtime_store import PipelineRuntimeStore
+from autospider.legacy.domain.fields import FieldDefinition
+from autospider.legacy.pipeline.finalization import (
     DURABILITY_STATE_DURABLE,
     build_run_record,
     classify_pipeline_result as _classify_result_impl,
 )
-from autospider.pipeline.helpers import build_execution_context
-from autospider.pipeline.progress_tracker import TaskProgressTracker
-from autospider.pipeline.runner import run_pipeline
-from autospider.pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult
+from autospider.legacy.pipeline.helpers import build_execution_context
+from autospider.legacy.pipeline.progress_tracker import TaskProgressTracker
+from autospider.legacy.pipeline.runner import run_pipeline
+from autospider.legacy.pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult
 from .pipeline_artifacts import build_task_plan, persist_snapshot
 from .pipeline_fakes import (
     FakeBrowserRuntimeSession,
@@ -202,24 +202,88 @@ def _build_context(page_url: str, output_dir: Path):
 
 @contextmanager
 def _patched_pipeline(state: _ContractState) -> Iterator[None]:
-    tracker_factory = lambda execution_id: _ContractProgressTracker(execution_id, state)
+    def tracker_factory(execution_id: str) -> _ContractProgressTracker:
+        return _ContractProgressTracker(execution_id, state)
+
     with ExitStack() as stack:
-        stack.enter_context(patch("autospider.pipeline.runner.create_url_channel", return_value=_FakeURLChannel(state)))
-        stack.enter_context(patch("autospider.pipeline.runner.TaskProgressTracker", new=tracker_factory))
-        stack.enter_context(patch("autospider.pipeline.runner.BrowserRuntimeSession", FakeBrowserRuntimeSession))
-        stack.enter_context(patch("autospider.pipeline.runner.SkillRuntime", FakeSkillRuntime))
-        stack.enter_context(patch("autospider.pipeline.runner.URLCollector", FakeURLCollector))
-        stack.enter_context(patch("autospider.pipeline.runner.DetailPageWorker", FakeDetailPageWorker))
-        stack.enter_context(patch("autospider.pipeline.runner._persist_run_snapshot", new=persist_snapshot))
-        stack.enter_context(patch("autospider.pipeline.runner._load_persisted_run_records", new=partial(_load_records, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._claim_persisted_item", new=partial(_claim_record, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._commit_persisted_item", new=partial(_commit_record, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._fail_persisted_item", new=partial(_fail_record, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._ack_persisted_item", new=partial(_ack_record, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._release_persisted_claim", new=partial(_release_claim, state)))
-        stack.enter_context(patch("autospider.pipeline.runner._persist_pipeline_records", new=_persist_records))
-        stack.enter_context(patch("autospider.pipeline.runner._classify_pipeline_result", new=_classify_pipeline_result))
-        stack.enter_context(patch("autospider.pipeline.finalization.promote_pipeline_skill", return_value=None))
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner.create_url_channel",
+                return_value=_FakeURLChannel(state),
+            )
+        )
+        stack.enter_context(
+            patch("autospider.legacy.pipeline.runner.TaskProgressTracker", new=tracker_factory)
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner.BrowserRuntimeSession", FakeBrowserRuntimeSession
+            )
+        )
+        stack.enter_context(
+            patch("autospider.legacy.pipeline.runner.SkillRuntime", FakeSkillRuntime)
+        )
+        stack.enter_context(
+            patch("autospider.legacy.pipeline.runner.URLCollector", FakeURLCollector)
+        )
+        stack.enter_context(
+            patch("autospider.legacy.pipeline.runner.DetailPageWorker", FakeDetailPageWorker)
+        )
+        stack.enter_context(
+            patch("autospider.legacy.pipeline.runner._persist_run_snapshot", new=persist_snapshot)
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._load_persisted_run_records",
+                new=partial(_load_records, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._claim_persisted_item",
+                new=partial(_claim_record, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._commit_persisted_item",
+                new=partial(_commit_record, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._fail_persisted_item",
+                new=partial(_fail_record, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._ack_persisted_item",
+                new=partial(_ack_record, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._release_persisted_claim",
+                new=partial(_release_claim, state),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._persist_pipeline_records", new=_persist_records
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.runner._classify_pipeline_result",
+                new=_classify_pipeline_result,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "autospider.legacy.pipeline.finalization.promote_pipeline_skill", return_value=None
+            )
+        )
         yield
 
 
@@ -230,23 +294,54 @@ def _persist_records(context: Any, records: dict[str, dict[str, Any]]) -> None:
     ]
 
 
-async def _claim_record(state: _ContractState, *, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
+async def _claim_record(
+    state: _ContractState, *, execution_id: str, url: str, worker_id: str
+) -> dict[str, Any]:
     _ = execution_id, worker_id
-    record = build_run_record(url=url, item={"url": url}, success=False, failure_reason="", claim_state="claimed")
+    record = build_run_record(
+        url=url, item={"url": url}, success=False, failure_reason="", claim_state="claimed"
+    )
     state.records[url] = record
     return dict(record)
 
 
-async def _commit_record(state: _ContractState, *, execution_id: str, url: str, item: dict[str, Any], worker_id: str) -> dict[str, Any]:
+async def _commit_record(
+    state: _ContractState, *, execution_id: str, url: str, item: dict[str, Any], worker_id: str
+) -> dict[str, Any]:
     _ = execution_id, worker_id
-    record = build_run_record(url=url, item=item, success=True, failure_reason="", durability_state=DURABILITY_STATE_DURABLE, claim_state="committed")
+    record = build_run_record(
+        url=url,
+        item=item,
+        success=True,
+        failure_reason="",
+        durability_state=DURABILITY_STATE_DURABLE,
+        claim_state="committed",
+    )
     state.records[url] = record
     return dict(record)
 
 
-async def _fail_record(state: _ContractState, *, execution_id: str, url: str, failure_reason: str, item: dict[str, Any], worker_id: str, terminal_reason: str, error_kind: str) -> dict[str, Any]:
+async def _fail_record(
+    state: _ContractState,
+    *,
+    execution_id: str,
+    url: str,
+    failure_reason: str,
+    item: dict[str, Any],
+    worker_id: str,
+    terminal_reason: str,
+    error_kind: str,
+) -> dict[str, Any]:
     _ = execution_id, worker_id, error_kind
-    record = build_run_record(url=url, item=item, success=False, failure_reason=failure_reason, terminal_reason=terminal_reason, durability_state=DURABILITY_STATE_DURABLE, claim_state="failed")
+    record = build_run_record(
+        url=url,
+        item=item,
+        success=False,
+        failure_reason=failure_reason,
+        terminal_reason=terminal_reason,
+        durability_state=DURABILITY_STATE_DURABLE,
+        claim_state="failed",
+    )
     state.records[url] = record
     return dict(record)
 
@@ -259,7 +354,9 @@ async def _ack_record(state: _ContractState, *, execution_id: str, url: str) -> 
     return dict(current)
 
 
-async def _release_claim(state: _ContractState, *, execution_id: str, url: str, worker_id: str, terminal_reason: str) -> None:
+async def _release_claim(
+    state: _ContractState, *, execution_id: str, url: str, worker_id: str, terminal_reason: str
+) -> None:
     _ = execution_id, url, worker_id, terminal_reason
 
 

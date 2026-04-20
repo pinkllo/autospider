@@ -31,6 +31,7 @@ def test_trace_context_can_be_set_and_cleared() -> None:
 
 def test_trace_context_is_isolated_per_task() -> None:
     clear_run_context()
+
     async def _run_tasks() -> list[tuple[str | None, str | None]]:
         return await asyncio.gather(
             _capture_context("run-a", "trace-a"),

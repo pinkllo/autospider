@@ -9,11 +9,11 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.graph.main_graph as main_graph_module
+import autospider.legacy.graph.main_graph as main_graph_module
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.domain.runtime import SubTaskRuntimeState
-from autospider.graph.main_graph import build_main_graph, resolve_feedback_route
-from autospider.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
+from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.legacy.graph.main_graph import build_main_graph, resolve_feedback_route
+from autospider.legacy.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
 
 
 def _runtime_result(
@@ -121,9 +121,7 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
     def multi_dispatch_stub(state: dict[str, object]) -> dict[str, object]:
         dispatch_rounds["count"] += 1
         control = dict(state.get("control") or {})
-        active_strategy = str(
-            (control.get("active_strategy") or {}).get("name") or ""
-        )
+        active_strategy = str((control.get("active_strategy") or {}).get("name") or "")
         dispatch_strategy_names.append(active_strategy)
         is_first_round = dispatch_rounds["count"] == 1
         results = [
@@ -221,9 +219,10 @@ def test_build_main_graph_runs_feedback_replan_cycle_through_update_world_model(
         "downstream api rejected payload"
     )
     assert final_state["world"]["world_model"]["failure_records"][0]["category"] == "fatal"
-    assert final_state["world"]["world_model"]["failure_records"][0]["metadata"][
-        "message"
-    ] == "downstream api rejected payload"
+    assert (
+        final_state["world"]["world_model"]["failure_records"][0]["metadata"]["message"]
+        == "downstream api rejected payload"
+    )
 
 
 @pytest.mark.asyncio

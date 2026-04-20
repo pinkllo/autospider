@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from autospider.graph.types import GraphInput, GraphResult
+from autospider.legacy.graph.types import GraphInput, GraphResult
 
 
 class GraphRunnerProtocol(Protocol):
-    async def invoke(self, graph_input: GraphInput) -> GraphResult:
-        ...
+    async def invoke(self, graph_input: GraphInput) -> GraphResult: ...
 
 
 class RunChatPipeline:
@@ -29,6 +28,6 @@ class RunChatPipeline:
 
 
 def _build_graph_runner() -> GraphRunnerProtocol:
-    from autospider.graph.runner import GraphRunner
+    from autospider.legacy.graph.runner import GraphRunner
 
     return GraphRunner()

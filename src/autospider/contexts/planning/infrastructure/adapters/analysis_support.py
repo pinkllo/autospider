@@ -5,18 +5,18 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.common.accessibility import get_accessibility_text
-from autospider.common.config import config
-from autospider.common.llm.streaming import ainvoke_with_stream
-from autospider.common.llm.trace_logger import append_llm_trace
-from autospider.common.logger import get_logger
-from autospider.common.protocol import (
+from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.legacy.common.config import config
+from autospider.legacy.common.llm.streaming import ainvoke_with_stream
+from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     summarize_llm_payload,
 )
-from autospider.common.utils.paths import get_prompt_path
-from autospider.common.utils.prompt_template import render_template
+from autospider.legacy.common.utils.paths import get_prompt_path
+from autospider.legacy.common.utils.prompt_template import render_template
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask
 
 logger = get_logger(__name__)
@@ -140,7 +140,8 @@ class PlannerAnalysisSupportMixin:
                 "candidate_elements": self._build_planner_candidates(snapshot),
                 "grouping_semantics": self._format_grouping_semantics(),
                 "page_accessibility_text": accessibility_text or "无",
-                "selected_skills_context": self.selected_skills_context or "当前未选择任何站点 skills。",
+                "selected_skills_context": self.selected_skills_context
+                or "当前未选择任何站点 skills。",
                 "prior_failure_evidence": self._format_prior_failures(),
             },
         )

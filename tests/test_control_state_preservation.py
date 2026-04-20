@@ -19,7 +19,7 @@ if str(SRC_ROOT) not in sys.path:
 import pytest
 
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.graph.subgraphs.multi_dispatch import (
+from autospider.legacy.graph.subgraphs.multi_dispatch import (
     complete_dispatch,
     merge_dispatch_round,
 )
@@ -54,8 +54,10 @@ class _FakePlanMutationService:
         return _FakePlanMutation(self._plan)
 
 
-def _install_fakes(monkeypatch: pytest.MonkeyPatch, plan: TaskPlan, progress: _FakeProgress) -> None:
-    import autospider.graph.subgraphs.multi_dispatch as md
+def _install_fakes(
+    monkeypatch: pytest.MonkeyPatch, plan: TaskPlan, progress: _FakeProgress
+) -> None:
+    import autospider.legacy.graph.subgraphs.multi_dispatch as md
 
     monkeypatch.setattr(md, "_taskplane_scheduler", lambda state, plan: _FakeScheduler(progress))
     monkeypatch.setattr(md, "_taskplane_envelope_id", lambda state, plan: "env-1")

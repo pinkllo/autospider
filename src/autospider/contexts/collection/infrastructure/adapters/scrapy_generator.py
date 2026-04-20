@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from autospider.common.logger import get_logger
+from autospider.legacy.common.logger import get_logger
 from autospider.contexts.collection.infrastructure.adapters._scrapy_script_template import (
     build_detail_crawler_script,
 )
@@ -30,7 +30,9 @@ class ScriptGenerator:
         common_detail_xpath: str | None = None,
     ) -> str:
         logger.info("[ScriptGenerator] 开始分析探索记录...")
-        nav_steps, common_detail_xpath = self._hydrate_missing_config(nav_steps, common_detail_xpath)
+        nav_steps, common_detail_xpath = self._hydrate_missing_config(
+            nav_steps, common_detail_xpath
+        )
         if not detail_visits:
             logger.info("[ScriptGenerator] 没有探索记录，无法生成脚本")
             return ""

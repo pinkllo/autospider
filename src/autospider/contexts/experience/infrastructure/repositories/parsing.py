@@ -146,7 +146,9 @@ def _parse_fields(section: str) -> dict[str, SkillFieldRule]:
             primary_xpath=_clean_code_ticks(_extract_basic_value(block, "主 XPath")),
             fallback_xpaths=tuple(
                 str(item).strip()
-                for item in re.findall(r"^- \*\*备选 XPath\*\*:\s*`([^`]+)`$", block, flags=re.MULTILINE)
+                for item in re.findall(
+                    r"^- \*\*备选 XPath\*\*:\s*`([^`]+)`$", block, flags=re.MULTILINE
+                )
                 if str(item).strip()
             ),
             validated="已验证" in _extract_basic_value(block, "验证状态"),

@@ -5,18 +5,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from autospider.common.config import config
-from autospider.common.logger import get_logger
-from autospider.common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
-from autospider.common.som.text_first import (
+from autospider.legacy.common.config import config
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som import (
+    capture_screenshot_with_marks,
+    clear_overlay,
+    inject_and_scan,
+)
+from autospider.legacy.common.som.text_first import (
     resolve_mark_ids_from_map,
     resolve_single_mark_id,
 )
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from autospider.crawler.collector import DetailPageVisit, smart_scroll
+from autospider.legacy.crawler.collector import DetailPageVisit, smart_scroll
 
 if TYPE_CHECKING:
-    from autospider.common.types import SoMSnapshot
+    from autospider.legacy.common.types import SoMSnapshot
 
 logger = get_logger(__name__)
 
@@ -103,14 +107,18 @@ async def run_detail_explore_loop(
                 consecutive_bottom_hits = 0
             else:
                 consecutive_bottom_hits += 1
-                logger.info("[Explore] 已到达页面底部 (%d/%d)", consecutive_bottom_hits, max_bottom_hits)
+                logger.info(
+                    "[Explore] 已到达页面底部 (%d/%d)", consecutive_bottom_hits, max_bottom_hits
+                )
                 if consecutive_bottom_hits >= max_bottom_hits:
                     logger.info("[Explore] ⚠ 连续到达页面底部，停止探索")
                     break
             continue
 
         decision_type = llm_decision.get("action")
-        decision_args = llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+        decision_args = (
+            llm_decision.get("args") if isinstance(llm_decision.get("args"), dict) else {}
+        )
 
         if (
             decision_type == "report"
@@ -129,8 +137,14 @@ async def run_detail_explore_loop(
                     consecutive_bottom_hits = 0
             continue
 
-        if decision_type == "select" and (decision_args.get("purpose") or "").lower() in {"detail_links", "detail_link", "detail"}:
-            new_explored = await on_select_detail_links(llm_decision, snapshot, screenshot_base64, explored)
+        if decision_type == "select" and (decision_args.get("purpose") or "").lower() in {
+            "detail_links",
+            "detail_link",
+            "detail",
+        }:
+            new_explored = await on_select_detail_links(
+                llm_decision, snapshot, screenshot_base64, explored
+            )
             if new_explored > explored:
                 explored = new_explored
                 consecutive_bottom_hits = 0

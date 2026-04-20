@@ -75,7 +75,9 @@ def _compare_latest_benchmark_reports() -> dict[str, Any]:
 def _compare_new_benchmark_report(new_report_path: Path) -> dict[str, Any]:
     existing_reports = [path for path in _benchmark_json_reports() if path != new_report_path]
     if not existing_reports:
-        raise FileNotFoundError(f"Need at least one previous benchmark report in {_benchmark_reports_dir()}")
+        raise FileNotFoundError(
+            f"Need at least one previous benchmark report in {_benchmark_reports_dir()}"
+        )
     return _load_benchmark_reporter().compare_reports(existing_reports[-1], new_report_path)
 
 
@@ -88,7 +90,9 @@ def _run_benchmark_and_write_reports(selected_scenarios: list[str]) -> tuple[Pat
     server.start()
     try:
         runner = _build_benchmark_runner(f"http://127.0.0.1:{server.port}")
-        results = {scenario_id: runner.run_scenario(scenario_id) for scenario_id in selected_scenarios}
+        results = {
+            scenario_id: runner.run_scenario(scenario_id) for scenario_id in selected_scenarios
+        }
     finally:
         server.stop()
     return _write_benchmark_reports(results)
@@ -100,10 +104,14 @@ def _write_benchmark_reports(results: dict[str, Any]) -> tuple[Path, Path]:
     report_name = _SERVICE.report_stem()
     json_path = reports_dir / f"{report_name}.json"
     markdown_path = reports_dir / f"{report_name}.md"
-    scenario_results = {scenario_id: result.evaluation_result for scenario_id, result in results.items()}
+    scenario_results = {
+        scenario_id: result.evaluation_result for scenario_id, result in results.items()
+    }
     efficiency = {
         scenario_id: {
-            key: value for key, value in result.execution_summary.items() if key == "total_graph_steps"
+            key: value
+            for key, value in result.execution_summary.items()
+            if key == "total_graph_steps"
         }
         for scenario_id, result in results.items()
     }
@@ -150,7 +158,9 @@ def benchmark_command(
             return
         selected = list(scenario)
         if compare_last and not all_scenarios and not selected:
-            console.print(json.dumps(_compare_latest_benchmark_reports(), ensure_ascii=False, indent=2))
+            console.print(
+                json.dumps(_compare_latest_benchmark_reports(), ensure_ascii=False, indent=2)
+            )
             return
         if all_scenarios == bool(selected):
             raise ValueError("Use exactly one of `--all` or `--scenario`.")
@@ -160,7 +170,9 @@ def benchmark_command(
         console.print(f"Benchmark report written: {json_path}")
         console.print(f"Benchmark summary written: {markdown_path}")
         if compare_last:
-            console.print(json.dumps(_compare_new_benchmark_report(json_path), ensure_ascii=False, indent=2))
+            console.print(
+                json.dumps(_compare_new_benchmark_report(json_path), ensure_ascii=False, indent=2)
+            )
     except (FileNotFoundError, ValueError) as exc:
         console.print(Panel(f"[red]{exc}[/red]", title="Benchmark 错误", style="red"))
         raise typer.Exit(1) from exc

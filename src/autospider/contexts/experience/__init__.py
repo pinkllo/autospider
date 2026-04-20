@@ -1,4 +1,5 @@
 """Package module."""
+
 from autospider.contexts.experience.application.use_cases import LookupSkill
 from autospider.contexts.experience.domain import (
     SkillDocument,

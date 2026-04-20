@@ -39,4 +39,7 @@ def test_dotenv_candidates_include_project_root_for_worktree_path() -> None:
 
 def test_normalize_database_url_converts_psycopg2_to_psycopg() -> None:
     url = "postgresql+psycopg2://postgres:postgres@localhost:5432/autospider"
-    assert _normalize_database_url(url) == "postgresql+psycopg://postgres:postgres@localhost:5432/autospider"
+    assert (
+        _normalize_database_url(url)
+        == "postgresql+psycopg://postgres:postgres@localhost:5432/autospider"
+    )

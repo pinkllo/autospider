@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from autospider.pipeline.finalization import (
+from autospider.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
 )
-from autospider.pipeline.helpers import build_semantic_signature, build_strategy_payload
+from autospider.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
 
 
 class _CapturedPayload:
@@ -147,7 +147,9 @@ def test_build_strategy_payload_fills_missing_field_names_from_surrounding_field
     assert strategy_payload["field_names"] == ["published_at", "title"]
 
 
-def test_build_semantic_signature_keeps_actual_field_set_when_explicit_payload_omits_field_names() -> None:
+def test_build_semantic_signature_keeps_actual_field_set_when_explicit_payload_omits_field_names() -> (
+    None
+):
     payload_a = {
         "strategy_payload": {
             "group_by": "category",
@@ -171,7 +173,7 @@ def test_build_semantic_signature_keeps_actual_field_set_when_explicit_payload_o
 
 
 def test_build_task_run_payload_includes_semantic_identity(monkeypatch) -> None:
-    monkeypatch.setattr("autospider.common.db.repositories.TaskRunPayload", _CapturedPayload)
+    monkeypatch.setattr("autospider.legacy.common.db.repositories.TaskRunPayload", _CapturedPayload)
     context = _make_context()
 
     payload = _build_task_run_payload(context, {})

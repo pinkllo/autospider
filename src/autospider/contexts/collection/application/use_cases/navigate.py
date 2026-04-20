@@ -6,28 +6,28 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from autospider.common.accessibility import get_accessibility_text
-from autospider.common.browser import ActionExecutor
-from autospider.common.browser.click_utils import click_and_capture_new_page
-from autospider.common.decision_context_format import (
+from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.legacy.common.browser import ActionExecutor
+from autospider.legacy.common.browser.click_utils import click_and_capture_new_page
+from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_navigation_decision_context,
 )
-from autospider.common.logger import get_logger
-from autospider.common.som import (
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
     set_overlay_visibility,
 )
-from autospider.common.types import ActionType, AgentState, RunInput
+from autospider.legacy.common.types import ActionType, AgentState, RunInput
 from autospider.contexts.planning.domain import format_execution_brief
-from autospider.graph.recovery import build_recovery_directive
+from autospider.legacy.graph.recovery import build_recovery_directive
 
 if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
-    from autospider.common.llm import LLMDecider
+    from autospider.legacy.common.llm import LLMDecider
 
 
 logger = get_logger(__name__)
@@ -47,8 +47,6 @@ class ReplayNavigationResult:
 
     def __bool__(self) -> bool:
         return self.success
-
-
 
 
 def build_navigation_task_plan(
@@ -240,8 +238,6 @@ class NavigationHandler:
                 filter_done = True
                 break
 
-
-
             if action.action == ActionType.RETRY:
                 if self._handle_retry_action(nav_step, action):
                     break
@@ -347,7 +343,11 @@ class NavigationHandler:
             action_type = (step.get("action") or "").lower()
             step_success = True
             failure_reason = "replay_step_failed"
-            validation = step.get("state_validation") if isinstance(step.get("state_validation"), dict) else {}
+            validation = (
+                step.get("state_validation")
+                if isinstance(step.get("state_validation"), dict)
+                else {}
+            )
             validation_kind = str(validation.get("kind") or "").strip().lower()
             if validation_kind == "same_page_activation":
                 required_validation_steps += 1
@@ -379,9 +379,7 @@ class NavigationHandler:
                                 if new_page is not None:
                                     self.page = new_page
                                     self.list_url = self.page.url
-                                    logger.info(
-                                        "[Replay] ✓ 切换到新标签页: %s", self.page.url
-                                    )
+                                    logger.info("[Replay] ✓ 切换到新标签页: %s", self.page.url)
                             except Exception as exc:
                                 logger.debug("[Replay] 点击后未捕获新页面: %s", exc)
                             await asyncio.sleep(1)
@@ -566,12 +564,16 @@ class NavigationHandler:
         return self._is_active_interaction_state(state)
 
     def _get_interaction_xpath(self, step: dict) -> str:
-        validation = step.get("state_validation") if isinstance(step.get("state_validation"), dict) else {}
+        validation = (
+            step.get("state_validation") if isinstance(step.get("state_validation"), dict) else {}
+        )
         interaction_xpath = str(validation.get("interaction_xpath") or "").strip()
         if interaction_xpath:
             return interaction_xpath
         xpath_candidates = list(step.get("clicked_element_xpath_candidates") or [])
-        xpath_candidates_sorted = sorted(xpath_candidates, key=lambda item: item.get("priority", 99))
+        xpath_candidates_sorted = sorted(
+            xpath_candidates, key=lambda item: item.get("priority", 99)
+        )
         for candidate in xpath_candidates_sorted:
             xpath = str(candidate.get("xpath") or "").strip()
             if xpath:

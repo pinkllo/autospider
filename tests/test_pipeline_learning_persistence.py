@@ -10,8 +10,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.common.db.models import Base, TaskRun
-from autospider.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
+from autospider.legacy.common.db.models import Base, TaskRun
+from autospider.legacy.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
 
 
 def _make_session_factory() -> sessionmaker[Session]:

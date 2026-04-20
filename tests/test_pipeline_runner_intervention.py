@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from autospider.common.browser.intervention import BrowserInterventionRequired
-from autospider.common.channel.base import URLTask
-from autospider.common.db.models import Base
-from autospider.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
-from autospider.pipeline import runner
+from autospider.legacy.common.browser.intervention import BrowserInterventionRequired
+from autospider.legacy.common.channel.base import URLTask
+from autospider.legacy.common.db.models import Base
+from autospider.legacy.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
+from autospider.legacy.pipeline import runner
 
 
 def test_runner_persistence_helpers_are_async() -> None:
@@ -101,7 +101,9 @@ async def test_process_task_releases_persisted_claim_after_browser_intervention(
         requeued.append(reason)
 
     monkeypatch.setattr(runner, "_claim_persisted_item", fake_claim_persisted_item)
-    monkeypatch.setattr(runner, "_release_persisted_claim", fake_release_persisted_claim, raising=False)
+    monkeypatch.setattr(
+        runner, "_release_persisted_claim", fake_release_persisted_claim, raising=False
+    )
 
     tracker = _TrackerStub()
     run_records: dict[str, dict] = {}

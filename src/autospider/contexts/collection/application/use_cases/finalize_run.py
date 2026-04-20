@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from autospider.pipeline.aggregator import ResultAggregator
-from autospider.pipeline.finalization import (
+from autospider.legacy.pipeline.aggregator import ResultAggregator
+from autospider.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     PipelineFinalizationDependencies,
     PipelineFinalizer,

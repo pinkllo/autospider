@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from autospider.contexts.planning.domain import PlanJournalEntry, PlanNode, PlanNodeType, SubTask, SubTaskMode
+from autospider.contexts.planning.domain import (
+    PlanJournalEntry,
+    PlanNode,
+    PlanNodeType,
+    SubTask,
+    SubTaskMode,
+)
 
 
 class PlannerPlanRecordsMixin:
@@ -135,7 +141,10 @@ class PlannerPlanRecordsMixin:
 
     def _resolve_plan_node_type(self, raw: dict[str, Any]) -> PlanNodeType:
         raw_type = str(raw.get("node_type") or raw.get("page_type") or "").strip()
-        if raw.get("is_leaf") and raw_type not in {PlanNodeType.STATEFUL_LIST.value, PlanNodeType.LEAF.value}:
+        if raw.get("is_leaf") and raw_type not in {
+            PlanNodeType.STATEFUL_LIST.value,
+            PlanNodeType.LEAF.value,
+        }:
             return PlanNodeType.LEAF
         try:
             return PlanNodeType(raw_type)

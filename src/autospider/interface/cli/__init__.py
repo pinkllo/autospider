@@ -48,16 +48,6 @@ def main() -> None:
 
 
 __all__ = [
-    "app",
-    "benchmark_command",
-    "chat_pipeline_command",
-    "cli_runtime",
-    "console",
-    "db_init_command",
-    "doctor_command",
-    "main",
-    "resume_graph_command",
-    "run_async_safely",
     "_benchmark_git_commit",
     "_benchmark_json_reports",
     "_benchmark_paths",
@@ -78,4 +68,14 @@ __all__ = [
     "_resume_graph",
     "_run_benchmark_and_write_reports",
     "_write_benchmark_reports",
+    "app",
+    "benchmark_command",
+    "chat_pipeline_command",
+    "cli_runtime",
+    "console",
+    "db_init_command",
+    "doctor_command",
+    "main",
+    "resume_graph_command",
+    "run_async_safely",
 ]

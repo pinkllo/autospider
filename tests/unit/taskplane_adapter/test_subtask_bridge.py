@@ -1,5 +1,5 @@
 from autospider.contexts.planning.domain import SubTask
-from autospider.taskplane_adapter.subtask_bridge import SubtaskBridge
+from autospider.legacy.taskplane_adapter.subtask_bridge import SubtaskBridge
 
 
 def _sample_subtask() -> SubTask:

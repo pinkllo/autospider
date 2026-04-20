@@ -16,11 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 
 _PURGE_PREFIXES = (
-    "autospider.cli",
-    "autospider.cli_runtime",
-    "autospider.graph",
-    "autospider.common.db.engine",
-    "autospider.domain.fields",
+    "autospider.interface.cli",
+    "autospider.legacy.cli_runtime",
+    "autospider.legacy.graph",
+    "autospider.legacy.common.db.engine",
+    "autospider.legacy.domain.fields",
     "typer",
     "click",
     "rich",
@@ -134,7 +134,7 @@ def _fresh_import_cli():
     _install_cli_stubs()
     if str(SRC_ROOT) not in sys.path:
         sys.path.insert(0, str(SRC_ROOT))
-    return importlib.import_module("autospider.cli")
+    return importlib.import_module("autospider.interface.cli")
 
 
 @pytest.fixture(autouse=True)
@@ -185,7 +185,7 @@ def test_list_benchmark_scenarios_returns_fixture_data_without_runtime_imports()
 
     assert "products" in scenario_ids
     assert "categories" in scenario_ids
-    assert "autospider.graph" not in sys.modules
+    assert "autospider.legacy.graph" not in sys.modules
 
 
 def test_render_latest_benchmark_report_fails_without_history(
@@ -200,7 +200,7 @@ def test_render_latest_benchmark_report_fails_without_history(
     with pytest.raises(FileNotFoundError, match="No benchmark reports found"):
         cli._render_latest_benchmark_report()
 
-    assert "autospider.graph" not in sys.modules
+    assert "autospider.legacy.graph" not in sys.modules
 
 
 def test_compare_latest_benchmark_reports_fails_without_history(
@@ -215,7 +215,7 @@ def test_compare_latest_benchmark_reports_fails_without_history(
     with pytest.raises(FileNotFoundError, match="Need at least two benchmark reports"):
         cli._compare_latest_benchmark_reports()
 
-    assert "autospider.graph" not in sys.modules
+    assert "autospider.legacy.graph" not in sys.modules
 
 
 def test_benchmark_command_runs_then_compares_when_compare_last_is_combined(
@@ -226,8 +226,12 @@ def test_benchmark_command_runs_then_compares_when_compare_last_is_combined(
     benchmark_module = inspect.getmodule(cli.benchmark_command)
     assert benchmark_module is not None
 
-    monkeypatch.setattr(cli.cli_runtime, "bootstrap_cli_logging", lambda **kwargs: calls.append(("log", kwargs)))
-    monkeypatch.setattr(benchmark_module, "_list_benchmark_scenarios", lambda: ["products", "categories"])
+    monkeypatch.setattr(
+        cli.cli_runtime, "bootstrap_cli_logging", lambda **kwargs: calls.append(("log", kwargs))
+    )
+    monkeypatch.setattr(
+        benchmark_module, "_list_benchmark_scenarios", lambda: ["products", "categories"]
+    )
     monkeypatch.setattr(
         benchmark_module,
         "_run_benchmark_and_write_reports",

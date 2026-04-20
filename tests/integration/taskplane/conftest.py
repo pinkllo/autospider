@@ -6,7 +6,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
-from .env_config import load_taskplane_dotenv, resolve_taskplane_database_url, resolve_taskplane_redis_url
+from .env_config import (
+    load_taskplane_dotenv,
+    resolve_taskplane_database_url,
+    resolve_taskplane_redis_url,
+)
 
 PG_TABLES = ("task_results", "task_tickets", "plan_envelopes")
 
@@ -16,7 +20,9 @@ def _normalize_database_url(url: str) -> str:
     scheme = str(parsed.scheme or "").strip().lower()
     if scheme != "postgresql":
         return url
-    return urlunsplit(("postgresql+psycopg", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    return urlunsplit(
+        ("postgresql+psycopg", parsed.netloc, parsed.path, parsed.query, parsed.fragment)
+    )
 
 
 async def _drop_taskplane_tables(database_url: str) -> None:

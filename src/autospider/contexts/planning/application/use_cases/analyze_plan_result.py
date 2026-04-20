@@ -65,9 +65,7 @@ class PlannerAnalysisPostProcessMixin:
             name = str(item.get("name") or item.get("link_text") or "").strip()
             candidate_path = self._expand_category_segments(name)
             candidate_path_norm = [
-                self._normalize_semantic_label(segment)
-                for segment in candidate_path
-                if segment
+                self._normalize_semantic_label(segment) for segment in candidate_path if segment
             ]
             candidate_path_norm = [segment for segment in candidate_path_norm if segment]
             if not candidate_path_norm:
@@ -107,8 +105,12 @@ class PlannerAnalysisPostProcessMixin:
         subtask_names = self._extract_subtask_names(normalized)
         if not current_label or not subtask_names:
             return normalized
-        looks_like_grouped_switch = self._looks_like_sibling_switch_group(current_label, subtask_names)
-        looks_like_registered_switch = self._matches_registered_sibling_switches(context, subtask_names)
+        looks_like_grouped_switch = self._looks_like_sibling_switch_group(
+            current_label, subtask_names
+        )
+        looks_like_registered_switch = self._matches_registered_sibling_switches(
+            context, subtask_names
+        )
         if not looks_like_grouped_switch and not looks_like_registered_switch:
             return normalized
 
@@ -150,10 +152,9 @@ class PlannerAnalysisPostProcessMixin:
             if scope_key in seen_scope_keys:
                 continue
             seen_scope_keys.add(scope_key)
-            task_description = (
-                str(candidate.task_description or "").strip()
-                or self._build_category_candidate_task_description(label)
-            )
+            task_description = str(
+                candidate.task_description or ""
+            ).strip() or self._build_category_candidate_task_description(label)
             subtasks.append(
                 {
                     "name": label,
@@ -171,7 +172,11 @@ class PlannerAnalysisPostProcessMixin:
         mode = str(grouping.get("category_discovery_mode") or "").strip().lower()
         if mode != "manual":
             return []
-        return [str(item or "").strip() for item in list(grouping.get("requested_categories") or []) if str(item or "").strip()]
+        return [
+            str(item or "").strip()
+            for item in list(grouping.get("requested_categories") or [])
+            if str(item or "").strip()
+        ]
 
     def _matches_requested_categories(self, label: str, requested_categories: list[str]) -> bool:
         candidate_tokens = {

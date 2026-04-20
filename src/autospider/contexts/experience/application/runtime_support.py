@@ -38,9 +38,7 @@ def normalize_object(value: Any) -> Any:
         return normalize_experience_context(asdict(value))
     except TypeError:
         attributes = {
-            key: current
-            for key, current in vars(value).items()
-            if not key.startswith("_")
+            key: current for key, current in vars(value).items() if not key.startswith("_")
         }
         return normalize_experience_context(attributes)
 

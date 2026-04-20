@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Protocol
 from urllib.parse import urlparse
 
-from autospider.common.db.engine import session_scope
-from autospider.common.db.repositories import FieldXPathRepository
-from autospider.domain.fields import FieldDefinition
+from autospider.legacy.common.db.engine import session_scope
+from autospider.legacy.common.db.repositories import FieldXPathRepository
+from autospider.legacy.domain.fields import FieldDefinition
 
 MIN_ACTIVATION_SUCCESSES = 2
 MAX_XPATHS_PER_FIELD = 8

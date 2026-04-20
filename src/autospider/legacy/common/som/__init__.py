@@ -1,0 +1,26 @@
+"""SoM 模块"""
+
+from .api import (
+    build_mark_id_to_xpath_map,
+    capture_screenshot_with_custom_marks,
+    capture_screenshot_with_marks,
+    clear_overlay,
+    format_marks_for_llm,
+    get_element_by_mark_id,
+    inject_and_scan,
+    set_overlay_visibility,
+)
+from .mark_id_validator import MarkIdValidator, MarkIdValidationResult
+
+__all__ = [
+    "MarkIdValidationResult",
+    "MarkIdValidator",
+    "build_mark_id_to_xpath_map",
+    "capture_screenshot_with_custom_marks",
+    "capture_screenshot_with_marks",
+    "clear_overlay",
+    "format_marks_for_llm",
+    "get_element_by_mark_id",
+    "inject_and_scan",
+    "set_overlay_visibility",
+]

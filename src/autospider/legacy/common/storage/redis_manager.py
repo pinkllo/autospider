@@ -1,0 +1,803 @@
+"""Redis 队列管理模块 - 支持 ACK 机制和故障转移的可靠消息队列
+
+基于 Redis Stream + Hash 架构：
+- Hash: 存储全量数据，支持去重
+- Stream: 任务队列，支持 ACK、Consumer Group、故障转移
+
+存储结构：
+1. Data Hash:
+   - Key: {key_prefix}:data
+   - Field: {item_hash}
+   - Value: JSON {"url": "...", "created_at": "...", "metadata": {...}}
+
+2. Task Stream:
+   - Key: {key_prefix}:stream
+   - Entry: {"data_id": "{item_hash}"}
+
+3. Consumer Group:
+   - Group Name: {key_prefix}:workers
+   - Consumer Name: 由调用方指定（通常是进程ID或机器名）
+"""
+
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any
+import logging
+import hashlib
+import json
+import time
+
+import redis.asyncio as aioredis
+from autospider.legacy.common.logger import get_logger
+
+try:
+    from redis.asyncio.client import Script
+except ImportError:  # pragma: no cover - 兼容较新的 redis-py 导出变化
+    Script = Any
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+logger = get_logger(__name__)
+
+# ==================== Lua 脚本定义 ====================
+
+# 1. 原子推送：HSETNX 去重 + XADD 入队
+LUA_PUSH_TASK = """
+local is_new = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+if is_new == 1 then
+    redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[3], '*', 'data_id', ARGV[1])
+    return 1
+end
+return 0
+"""
+
+# 2. 原子获取：XREADGROUP + HGET 批量获取详情
+LUA_FETCH_TASK = """
+local results = redis.call('XREADGROUP', 'GROUP', ARGV[1], ARGV[2], 'COUNT', ARGV[3], 'STREAMS', KEYS[1], '>')
+if not results or #results == 0 then return {} end
+
+local final_tasks = {}
+local messages = results[1][2]
+for _, msg in ipairs(messages) do
+    local stream_id = msg[1]
+    local fields = msg[2]
+    local data_id = nil
+    for i=1, #fields, 2 do
+        if fields[i] == 'data_id' then
+            data_id = fields[i+1]
+            break
+        end
+    end
+    
+    if data_id then
+        local data_json = redis.call('HGET', KEYS[2], data_id)
+        table.insert(final_tasks, {stream_id, data_id, data_json})
+    end
+end
+return final_tasks
+"""
+
+# 3. 原子失败处理：读取-判断计数-更新状态/转移死信
+LUA_FAIL_TASK = """
+local data_json = redis.call('HGET', KEYS[1], ARGV[1])
+if not data_json then return 0 end
+
+local data = cjson.decode(data_json)
+if not data['metadata'] or type(data['metadata']) ~= 'table' then
+    data['metadata'] = {}
+end
+
+local retry_count = tonumber(data['metadata']['retry_count'] or 0)
+local max_retries = tonumber(ARGV[5])
+
+if retry_count < max_retries then
+    data['metadata']['retry_count'] = retry_count + 1
+    data['metadata']['last_error'] = ARGV[4]
+    data['metadata']['last_failed_at'] = tonumber(ARGV[6])
+    redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(data))
+    return 1
+else
+    redis.call('XACK', KEYS[2], ARGV[3], ARGV[2])
+    redis.call('XDEL', KEYS[2], ARGV[2])
+    data['final_failed_at'] = tonumber(ARGV[6])
+    data['final_error'] = ARGV[4]
+    data['total_retries'] = retry_count
+    redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[7], '*', 
+        'data_id', ARGV[1], 
+        'url', data['url'] or '', 
+        'error', ARGV[4], 
+        'retries', tostring(retry_count), 
+        'failed_at', ARGV[6]
+    )
+    redis.call('HDEL', KEYS[1], ARGV[1])
+    return 2
+end
+"""
+
+# 4. 原子确认：XACK + XDEL + HDEL
+LUA_ACK_TASK = """
+local acked = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+if acked == 0 then return 0 end
+redis.call('XDEL', KEYS[1], ARGV[2])
+if ARGV[3] and ARGV[3] ~= '' then
+    redis.call('HDEL', KEYS[2], ARGV[3])
+end
+return acked
+"""
+
+# 5. 原子释放：XACK + XDEL + XADD（保留 payload，不计失败）
+LUA_RELEASE_TASK = """
+local acked = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+if acked == 0 then return 0 end
+redis.call('XDEL', KEYS[1], ARGV[2])
+redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[4], '*', 'data_id', ARGV[3])
+return 1
+"""
+
+# 5. 原子捞回：XAUTOCLAIM + HGET 批量获取详情
+LUA_RECOVER_TASK = """
+local result = redis.call('XAUTOCLAIM', KEYS[1], ARGV[1], ARGV[2], ARGV[3], '0-0', 'COUNT', ARGV[4])
+local claimed_messages = result[2]
+if not claimed_messages or #claimed_messages == 0 then return {result[1], {}} end
+
+local final_tasks = {}
+for _, msg in ipairs(claimed_messages) do
+    local stream_id = msg[1]
+    local fields = msg[2]
+    local data_id = nil
+    for i=1, #fields, 2 do
+        if fields[i] == 'data_id' then
+            data_id = fields[i+1]
+            break
+        end
+    end
+    
+    if data_id then
+        local data_json = redis.call('HGET', KEYS[2], data_id)
+        table.insert(final_tasks, {stream_id, data_id, data_json})
+    end
+end
+return {result[1], final_tasks}
+"""
+
+
+class RedisQueueManager:
+    """Redis 可靠队列管理器
+
+    功能特性：
+    - 基于 Stream 的消息队列
+    - ACK 确认机制
+    - 故障转移（自动 Claim 超时任务）
+    - 自动去重（基于 Hash）
+    - Consumer Group 多消费者并发
+
+    Args:
+        host: Redis 服务器地址
+        port: Redis 端口
+        password: Redis 密码
+        db: Redis 数据库索引
+        key_prefix: 存储键的前缀（如 "autospider:urls"）
+        logger: 可选的日志记录器
+    """
+
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 6379,
+        password: str | None = None,
+        db: int = 0,
+        key_prefix: str = "autospider:urls",
+        logger: logging.Logger | None = None,
+        stream_maxlen: int = 100_000,
+        dead_letter_maxlen: int = 10_000,
+    ):
+        self.host = host
+        self.port = port
+        self.password = password
+        self.db = db
+        self.key_prefix = key_prefix
+        self.client: Redis | None = None
+        self.logger = logger or get_logger(__name__)
+
+        # Key 名称
+        self.data_key = f"{key_prefix}:data"
+        self.stream_key = f"{key_prefix}:stream"
+        self.group_name = f"{key_prefix}:workers"
+
+        # Stream 容量限制（近似裁剪，防止内存无限增长）
+        self.stream_maxlen = stream_maxlen
+        self.dead_letter_maxlen = dead_letter_maxlen
+
+        # Lua 脚本实例
+        self._lua_push: Script | None = None
+        self._lua_fetch: Script | None = None
+        self._lua_fail: Script | None = None
+        self._lua_ack: Script | None = None
+        self._lua_release: Script | None = None
+        self._lua_recover: Script | None = None
+
+    def _generate_hash_id(self, item: str) -> str:
+        """生成 item 的稳定 hash ID
+
+        使用 SHA256 的前 16 位作为 ID，确保：
+        1. 相同 item 总是生成相同 ID（天然去重键）
+        2. ID 足够短，节省 Redis Hash 存储内存
+        3. 16位哈希空间对当前规模的碰撞概率极低
+
+        Args:
+            item: 数据项（如 URL）
+
+        Returns:
+            16 位十六进制 hash ID
+        """
+        return hashlib.sha256(item.encode("utf-8")).hexdigest()[:16]
+
+    def _format_connection_summary(self, timeout_seconds: int) -> str:
+        password_status = "set" if self.password else "empty"
+        return (
+            f"host={self.host}, port={self.port}, db={self.db}, "
+            f"key_prefix={self.key_prefix}, timeout={timeout_seconds}s, "
+            f"password={password_status}"
+        )
+
+    @staticmethod
+    def _normalize_xpending_consumers(consumers: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        if not isinstance(consumers, list):
+            raise TypeError(f"unexpected xpending consumers type: {type(consumers).__name__}")
+
+        for consumer in consumers:
+            if isinstance(consumer, dict):
+                name = consumer.get("name")
+                pending = consumer.get("pending")
+            elif isinstance(consumer, (list, tuple)) and len(consumer) >= 2:
+                name, pending = consumer[0], consumer[1]
+            else:
+                raise TypeError(f"unexpected xpending consumer entry: {consumer!r}")
+
+            normalized.append({"name": str(name), "pending": int(pending)})
+
+        return normalized
+
+    def _parse_xpending_summary(self, pending_info: Any) -> dict[str, Any]:
+        if isinstance(pending_info, dict):
+            return {
+                "pending": int(pending_info["pending"]),
+                "min": pending_info.get("min"),
+                "max": pending_info.get("max"),
+                "consumers": self._normalize_xpending_consumers(pending_info.get("consumers", [])),
+            }
+
+        if isinstance(pending_info, (list, tuple)) and len(pending_info) >= 4:
+            return {
+                "pending": int(pending_info[0]),
+                "min": pending_info[1],
+                "max": pending_info[2],
+                "consumers": self._normalize_xpending_consumers(pending_info[3]),
+            }
+
+        raise TypeError(f"unexpected xpending summary: {pending_info!r}")
+
+    async def connect(self) -> Redis | None:
+        """连接到 Redis 服务器
+
+        Returns:
+            Redis 客户端实例，连接失败返回 None
+        """
+        try:
+            connect_timeout = 2
+            self.client = aioredis.Redis(
+                host=self.host,
+                port=self.port,
+                password=self.password,
+                db=self.db,
+                decode_responses=True,
+                socket_connect_timeout=connect_timeout,
+            )
+
+            # 测试连接
+            await self.client.ping()
+            self.logger.info(
+                f"已连接到 Redis {self.host}:{self.port}，数据库: {self.db}，Key 前缀: {self.key_prefix}"
+            )
+
+            # 注册 Lua 脚本
+            self._lua_push = self.client.register_script(LUA_PUSH_TASK)
+            self._lua_fetch = self.client.register_script(LUA_FETCH_TASK)
+            self._lua_fail = self.client.register_script(LUA_FAIL_TASK)
+            self._lua_ack = self.client.register_script(LUA_ACK_TASK)
+            self._lua_release = self.client.register_script(LUA_RELEASE_TASK)
+            self._lua_recover = self.client.register_script(LUA_RECOVER_TASK)
+
+            # 初始化 Consumer Group（如果不存在）
+            await self._ensure_consumer_group()
+
+            return self.client
+
+        except (ConnectionRefusedError, TimeoutError, aioredis.ConnectionError) as e:
+            self.logger.error(f"Redis 连接失败: {e}")
+            self.logger.error(f"Redis 连接参数: {self._format_connection_summary(connect_timeout)}")
+            self.logger.info("请确保 Redis 服务正在运行")
+
+            # 连接失败，关闭客户端
+            if self.client:
+                await self.client.close()
+                self.client = None
+
+        except Exception as e:
+            self.logger.error(f"Redis 连接时发生未知错误: {e}")
+            self.logger.error(f"Redis 连接参数: {self._format_connection_summary(connect_timeout)}")
+            if self.client:
+                await self.client.close()
+                self.client = None
+
+        return None
+
+    async def _ensure_consumer_group(self) -> None:
+        """确保 Redis Stream 的消费者组 (Consumer Group) 存在。
+
+        如果 Stream 不存在，会使用 mkstream=True 自动创建。
+        如果 Group 已存在，会忽略 BUSYGROUP 错误。
+        """
+        if not self.client:
+            return
+
+        try:
+            # 尝试创建 Consumer Group，从头 ("0") 开始读取
+            await self.client.xgroup_create(self.stream_key, self.group_name, id="0", mkstream=True)
+            self.logger.info(f"已创建 Consumer Group: {self.group_name}")
+        except aioredis.ResponseError as e:
+            # BUSYGROUP 错误表示 Group 已存在，是正常情况
+            if "BUSYGROUP" in str(e):
+                self.logger.debug(f"Consumer Group 已存在: {self.group_name}")
+            else:
+                self.logger.error(f"创建 Consumer Group 失败: {e}")
+                raise
+
+    # ==================== 队列操作 API ====================
+
+    async def push_task(self, item: str, metadata: dict[str, Any] | None = None) -> bool:
+        """将数据推入队列
+
+        1. 存入 Hash（去重）
+        2. 发布到 Stream（任务队列）
+
+        Args:
+            item: 数据项（如 URL）
+            metadata: 可选的元数据
+
+        Returns:
+            是否成功推入（False 表示数据已存在，已去重）
+        """
+        if not self.client or not self._lua_push:
+            return False
+
+        try:
+            hash_id = self._generate_hash_id(item)
+
+            # 构建存储数据
+            data = {
+                "url": item,
+                "created_at": int(time.time()),
+            }
+            if metadata:
+                data["metadata"] = metadata
+
+            data_json = json.dumps(data, ensure_ascii=False)
+
+            # 使用 Lua 脚本执行原子 HSETNX + XADD
+            is_new = await self._lua_push(
+                keys=[self.data_key, self.stream_key], args=[hash_id, data_json, self.stream_maxlen]
+            )
+
+            if is_new == 1:
+                self.logger.debug(f"已推入任务: {item[:60]}...")
+                return True
+            else:
+                self.logger.debug(f"数据项已存在（去重）: {item[:60]}...")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"推入任务失败: {e}")
+            return False
+
+    async def push_tasks_batch(
+        self, items: list[str], metadata_list: list[dict[str, Any]] | None = None
+    ) -> int:
+        """批量推入任务，利用 Redis Pipeline 提高吞吐量。
+
+        Args:
+            items: 数据项（如 URL）列表。
+            metadata_list: 与 items 对应的元数据列表。
+
+        Returns:
+            成功推入的新任务数量（排除已存在的重复项）。
+        """
+        if not self.client or not self._lua_push or not items:
+            return 0
+
+        success_count = 0
+
+        try:
+            # 使用 pipeline + Lua 脚本提高吞吐量
+            async with self.client.pipeline() as pipe:
+                for i, item in enumerate(items):
+                    hash_id = self._generate_hash_id(item)
+
+                    data = {
+                        "url": item,
+                        "created_at": int(time.time()),
+                    }
+                    if metadata_list and i < len(metadata_list):
+                        data["metadata"] = metadata_list[i]
+
+                    data_json = json.dumps(data, ensure_ascii=False)
+
+                    # 在 pipeline 中调用 Lua 脚本
+                    self._lua_push(
+                        keys=[self.data_key, self.stream_key],
+                        args=[hash_id, data_json, self.stream_maxlen],
+                        client=pipe,
+                    )
+
+                results = await pipe.execute()
+
+            success_count = sum(1 for res in results if res == 1)
+            self.logger.info(f"批量推入完成: {success_count}/{len(items)} 个新任务")
+            return success_count
+
+        except Exception as e:
+            self.logger.error(f"批量推入任务异常: {e}")
+            return success_count
+
+    async def _hydrate_stream_messages(self, response: Any) -> list[tuple[str, str, dict]]:
+        """将 Stream 响应批量补全为包含业务数据的任务列表。"""
+        if not self.client or not response:
+            return []
+
+        messages_info = []
+        data_ids = []
+        for _, messages in response:
+            for stream_id, fields in messages:
+                data_id = fields.get("data_id")
+                if data_id:
+                    messages_info.append((stream_id, data_id))
+                    data_ids.append(data_id)
+
+        if not data_ids:
+            return []
+
+        data_jsons = await self.client.hmget(self.data_key, data_ids)
+
+        tasks = []
+        for (stream_id, data_id), data_json in zip(messages_info, data_jsons):
+            if data_json:
+                tasks.append((stream_id, data_id, json.loads(data_json)))
+
+        return tasks
+
+    async def fetch_task(
+        self, consumer_name: str, block_ms: int = 5000, count: int = 1
+    ) -> list[tuple[str, str, dict]]:
+        """从消费者组中获取任务。
+
+        仅拉取新的 `>` 消息。
+
+        超时接管任务与本地重试任务的重新投递由 channel 层完成，避免在
+        manager 层直接重读当前消费者的 pending 消息，导致未完成任务被
+        过早重复派发。
+
+        Args:
+            consumer_name: 当前消费者的唯一名称
+            block_ms: 如果队列为空，阻塞等待的毫秒数
+            count: 单次获取的任务上限
+
+        Returns:
+            任务列表 [(StreamID, HashID, DataDict), ...]。
+        """
+        if not self.client:
+            return []
+
+        try:
+            # 1. 尝试使用 Lua 脚本一次性拉取详情 (非阻塞优化路径)
+            if block_ms == 0 and self._lua_fetch:
+                raw_tasks = await self._lua_fetch(
+                    keys=[self.stream_key, self.data_key],
+                    args=[self.group_name, consumer_name, count],
+                )
+                return [(t[0], t[1], json.loads(t[2])) for t in raw_tasks if t[2]]
+
+            # 2. 如果包含阻塞，先执行标准 XREADGROUP
+            response = await self.client.xreadgroup(
+                groupname=self.group_name,
+                consumername=consumer_name,
+                streams={self.stream_key: ">"},
+                count=count,
+                block=block_ms,
+            )
+            tasks = await self._hydrate_stream_messages(response)
+
+            if tasks:
+                self.logger.debug(f"消费者 [{consumer_name}] 成功获取 {len(tasks)} 个任务")
+            return tasks
+
+        except Exception as e:
+            self.logger.error(f"消费任务异常: {e}")
+            return []
+
+    async def ack_task(self, stream_id: str, data_id: str | None = None) -> bool:
+        """确认任务已完成
+
+        Args:
+            stream_id: 任务的 Stream ID
+            data_id: 任务对应的 Hash ID。提供时会一并清理 payload。
+
+        Returns:
+            是否成功确认
+        """
+        if not self.client:
+            return False
+
+        try:
+            if self._lua_ack:
+                result = await self._lua_ack(
+                    keys=[self.stream_key, self.data_key],
+                    args=[self.group_name, stream_id, data_id or ""],
+                )
+            else:
+                result = await self.client.xack(self.stream_key, self.group_name, stream_id)
+                if result and data_id:
+                    await self.client.xdel(self.stream_key, stream_id)
+                    await self.client.hdel(self.data_key, data_id)
+
+            if result:
+                self.logger.debug(f"已 ACK 任务: {stream_id}")
+
+            return bool(result)
+
+        except Exception as e:
+            self.logger.error(f"ACK 任务失败: {e}")
+            return False
+
+    async def release_task(self, stream_id: str, data_id: str, reason: str = "") -> bool:
+        """释放当前 lease，并将同一 payload 重新发布回队列。"""
+        if not self.client or not self._lua_release:
+            return False
+
+        try:
+            result = await self._lua_release(
+                keys=[self.stream_key],
+                args=[self.group_name, stream_id, data_id, self.stream_maxlen],
+            )
+            if result:
+                self.logger.info("已释放任务回队列: %s (%s)", data_id, reason or "released")
+            return bool(result)
+        except Exception as e:
+            self.logger.error(f"释放任务回队列失败: {e}")
+            return False
+
+    async def fail_task(
+        self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3
+    ) -> bool:
+        """标记任务失败并实现原子重试/死信机制。
+
+        使用 Lua 脚本实现原子状态机转换，避免并发下的计数器覆盖。
+        """
+        state = await self.fail_task_state(
+            stream_id,
+            data_id,
+            error_msg=error_msg,
+            max_retries=max_retries,
+        )
+        return state in {"retry", "dead_letter"}
+
+    async def fail_task_state(
+        self, stream_id: str, data_id: str, error_msg: str | None = None, max_retries: int = 3
+    ) -> str:
+        """标记任务失败并返回状态机结果。
+
+        返回值:
+        - ``retry``: 任务仍可重试，应重新进入执行路径
+        - ``dead_letter``: 任务已进入死信
+        - ``missing``: 数据不存在
+        - ``error``: Redis 操作异常
+        """
+        if not self.client or not self._lua_fail:
+            return "error"
+
+        try:
+            dead_letter_key = f"{self.key_prefix}:dead_letter"
+
+            # 返回值: 1=重试中, 2=入死信, 0=数据不存在
+            result = await self._lua_fail(
+                keys=[self.data_key, self.stream_key, dead_letter_key],
+                args=[
+                    data_id,
+                    stream_id,
+                    self.group_name,
+                    error_msg or "Unknown error",
+                    max_retries,
+                    int(time.time()),
+                    self.dead_letter_maxlen,
+                ],
+            )
+
+            if result == 1:
+                self.logger.warning(f"任务将重试: {data_id}, 错误: {error_msg}")
+                return "retry"
+            elif result == 2:
+                self.logger.error(f"任务彻底失败并移入死信: {data_id}")
+                return "dead_letter"
+            else:
+                self.logger.error(f"标记失败任务失败 (数据不存在): {data_id}")
+                return "missing"
+
+        except Exception as e:
+            self.logger.error(f"标记失败任务时出错: {e}")
+            return "error"
+
+    async def recover_stale_tasks(
+        self, consumer_name: str, max_idle_ms: int = 300000, count: int = 10
+    ) -> list[tuple[str, str, dict]]:
+        """捞回超时僵尸未 ACK 的遗留任务。
+
+        使用 Lua 脚本实现原子 XAUTOCLAIM + HGET 详情拉取。
+        """
+        if not self.client or not self._lua_recover:
+            return []
+
+        try:
+            # result 格式: [next_id, [[stream_id, data_id, data_json], ...]]
+            result = await self._lua_recover(
+                keys=[self.stream_key, self.data_key],
+                args=[self.group_name, consumer_name, max_idle_ms, count],
+            )
+
+            if not result or len(result) < 2:
+                return []
+
+            raw_tasks = result[1]
+            tasks = []
+            for rt in raw_tasks:
+                if rt[2]:
+                    tasks.append((rt[0], rt[1], json.loads(rt[2])))
+
+            if tasks:
+                self.logger.warning(
+                    f"消费者 [{consumer_name}] 捞回 {len(tasks)} 个停滞任务 (空闲 > {max_idle_ms/1000}s)"
+                )
+
+            return tasks
+
+        except Exception as e:
+            self.logger.error(f"捞回停滞任务异常: {e}")
+            return []
+
+    # ==================== 查询 API ====================
+
+    async def get_all_items(self) -> dict[str, dict]:
+        """获取所有数据项
+
+        Returns:
+            字典 {hash_id: data_dict}
+        """
+        if not self.client:
+            return {}
+
+        try:
+            items = await self.client.hgetall(self.data_key)
+
+            result = {}
+            for hash_id, data_json in items.items():
+                result[hash_id] = json.loads(data_json)
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"获取所有数据项失败: {e}")
+            return {}
+
+    async def get_item(self, item: str) -> dict | None:
+        """获取单个数据项
+
+        Args:
+            item: 数据项（如 URL）
+
+        Returns:
+            数据字典，不存在则返回 None
+        """
+        if not self.client:
+            return None
+
+        try:
+            hash_id = self._generate_hash_id(item)
+            data_json = await self.client.hget(self.data_key, hash_id)
+
+            if data_json:
+                return json.loads(data_json)
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"获取数据项失败: {e}")
+            return None
+
+    async def get_pending_count(self, consumer_name: str | None = None) -> int:
+        """获取待处理任务数量
+
+        Args:
+            consumer_name: 消费者名称（可选，如果提供则仅统计该消费者的 PEL）
+
+        Returns:
+            待处理任务数量
+        """
+        if not self.client:
+            return 0
+
+        try:
+            if consumer_name:
+                pending_summary = self._parse_xpending_summary(
+                    await self.client.xpending(self.stream_key, self.group_name)
+                )
+                for consumer in pending_summary["consumers"]:
+                    if consumer["name"] == consumer_name:
+                        return consumer["pending"]
+                return 0
+            else:
+                # 获取 Stream 长度
+                length = await self.client.xlen(self.stream_key)
+                return length
+
+        except Exception as e:
+            self.logger.error(f"获取待处理任务数失败: {e}")
+            return 0
+
+    async def get_stream_length(self) -> int:
+        if not self.client:
+            return 0
+
+        try:
+            return int(await self.client.xlen(self.stream_key))
+        except Exception as e:
+            self.logger.error(f"获取 Stream 长度失败: {e}")
+            return 0
+
+    async def get_stats(self) -> dict[str, Any]:
+        """获取队列统计信息
+
+        Returns:
+            统计信息字典
+        """
+        if not self.client:
+            return {}
+
+        try:
+            stats = {
+                "total_items": await self.client.hlen(self.data_key),
+                "stream_length": await self.client.xlen(self.stream_key),
+                "pending_count": 0,
+                "consumers": [],
+            }
+
+            # 获取 PEL 信息
+            try:
+                pending_summary = self._parse_xpending_summary(
+                    await self.client.xpending(self.stream_key, self.group_name)
+                )
+                stats["pending_count"] = pending_summary["pending"]
+                stats["consumers"] = pending_summary["consumers"]
+            except Exception as e:
+                self.logger.warning(f"获取 PEL 信息失败: {e}")
+
+            return stats
+
+        except Exception as e:
+            self.logger.error(f"获取统计信息失败: {e}")
+            return {}
+
+    async def close(self) -> None:
+        """关闭 Redis 连接，释放资源。"""
+        if self.client:
+            await self.client.close()
+            self.client = None
+            self.logger.info("Redis 连接已关闭")

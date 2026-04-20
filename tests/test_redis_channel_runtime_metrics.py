@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.common.channel.base import ChannelRuntimeEvent
-from autospider.common.channel.redis_channel import RedisURLChannel
-from autospider.common.config import config
+from autospider.legacy.common.channel.base import ChannelRuntimeEvent
+from autospider.legacy.common.channel.redis_channel import RedisURLChannel
+from autospider.legacy.common.config import config
 
 
 class _FakeRedisManager:

@@ -90,9 +90,7 @@ class CollectionFinalizedHandler:
 
     def handle(self, payload: CollectionFinalizedPayload) -> Path | None:
         summary = _load_pipeline_summary(payload.artifacts_dir)
-        return self._sedimenter.sediment_from_pipeline_result(
-            _to_sedimentation_payload(summary)
-        )
+        return self._sedimenter.sediment_from_pipeline_result(_to_sedimentation_payload(summary))
 
 
 def _to_field_dto(payload: SedimentSkillFieldPayload) -> SkillFieldRuleDTO:

@@ -1,6 +1,6 @@
-from autospider.domain.runtime import SubTaskRuntimeState
-from autospider.taskplane.protocol import ResultStatus, TaskResult
-from autospider.taskplane_adapter.result_bridge import ResultBridge
+from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.legacy.taskplane.protocol import ResultStatus, TaskResult
+from autospider.legacy.taskplane_adapter.result_bridge import ResultBridge
 
 
 def _sample_runtime_state() -> SubTaskRuntimeState:

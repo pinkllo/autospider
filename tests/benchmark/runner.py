@@ -65,7 +65,9 @@ class BenchmarkRunner:
 
     def run_all(self) -> dict[str, ScenarioRunResult]:
         """Run all configured scenarios."""
-        return {scenario_id: self.run_scenario(scenario_id) for scenario_id in self.list_scenarios()}
+        return {
+            scenario_id: self.run_scenario(scenario_id) for scenario_id in self.list_scenarios()
+        }
 
     def _invoke_autospider(self, request: str, cli_overrides: dict[str, Any]) -> dict[str, Any]:
         invoke_graph = _load_cli_invoke_graph()
@@ -101,10 +103,10 @@ def _build_evaluation_params(scenario: ScenarioConfig) -> EvaluationParams:
 
 
 def _load_cli_invoke_graph() -> Callable[[str, dict[str, Any]], dict[str, Any]]:
-    cli_module = import_module("autospider.cli")
+    cli_module = import_module("autospider.interface.cli")
     invoke_graph = getattr(cli_module, "_invoke_graph", None)
     if not callable(invoke_graph):
-        raise RuntimeError("autospider.cli._invoke_graph is unavailable.")
+        raise RuntimeError("autospider.interface.cli._invoke_graph is unavailable.")
     return invoke_graph
 
 

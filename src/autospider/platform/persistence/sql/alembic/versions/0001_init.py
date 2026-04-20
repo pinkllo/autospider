@@ -145,7 +145,9 @@ def upgrade() -> None:
         sa.Column("created_at", timestamp_type, nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", timestamp_type, nullable=False, server_default=sa.func.now()),
     )
-    op.create_index("ix_ex_skills_host_intent", "ex_skills", ["site_host", "intent_key"], unique=True)
+    op.create_index(
+        "ix_ex_skills_host_intent", "ex_skills", ["site_host", "intent_key"], unique=True
+    )
 
     op.create_table(
         "ex_skill_usages",

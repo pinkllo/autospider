@@ -49,7 +49,15 @@ def _build_graph_redis_url(env: dict[str, str] | None) -> str:
     port = str(source.get("GRAPH_REDIS_PORT") or DEFAULT_GRAPH_REDIS_PORT).strip()
     db = str(source.get("GRAPH_REDIS_DB") or DEFAULT_GRAPH_REDIS_DB).strip()
     password = str(source.get("GRAPH_REDIS_PASSWORD") or "").strip()
-    if not any(source.get(key) for key in ("GRAPH_REDIS_HOST", "GRAPH_REDIS_PORT", "GRAPH_REDIS_DB", "GRAPH_REDIS_PASSWORD")):
+    if not any(
+        source.get(key)
+        for key in (
+            "GRAPH_REDIS_HOST",
+            "GRAPH_REDIS_PORT",
+            "GRAPH_REDIS_DB",
+            "GRAPH_REDIS_PASSWORD",
+        )
+    ):
         return ""
     auth = f":{quote(password, safe='')}@" if password else ""
     return f"redis://{auth}{host}:{port}/{db}"
@@ -74,5 +82,7 @@ def _normalize_database_url(url: str) -> str:
     parsed = urlsplit(url)
     scheme = str(parsed.scheme or "").strip().lower()
     if scheme in {"postgresql", "postgresql+psycopg2"}:
-        return urlunsplit(("postgresql+psycopg", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+        return urlunsplit(
+            ("postgresql+psycopg", parsed.netloc, parsed.path, parsed.query, parsed.fragment)
+        )
     return url

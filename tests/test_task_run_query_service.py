@@ -5,14 +5,17 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from autospider.common.db.models import Base, TaskRecord, TaskRun
-from autospider.common.db.repositories.task_repo import (
+from autospider.legacy.common.db.models import Base, TaskRecord, TaskRun
+from autospider.legacy.common.db.repositories.task_repo import (
     TaskRepository,
     TaskRunPayload,
     _build_registry_id,
 )
-from autospider.common.storage.task_run_query_service import TaskRunQueryService, normalize_url
-from autospider.pipeline.helpers import build_semantic_signature
+from autospider.legacy.common.storage.task_run_query_service import (
+    TaskRunQueryService,
+    normalize_url,
+)
+from autospider.legacy.pipeline.helpers import build_semantic_signature
 
 
 def _make_session_factory() -> sessionmaker[Session]:
@@ -34,7 +37,9 @@ def _build_payload(
         original_url="https://example.com/list?page=1",
         page_state_signature="sig-category",
         task_description=task_description,
-        semantic_signature=_expected_semantic_signature() if semantic_signature is None else semantic_signature,
+        semantic_signature=(
+            _expected_semantic_signature() if semantic_signature is None else semantic_signature
+        ),
         strategy_payload=dict(
             strategy_payload
             or {
@@ -156,7 +161,9 @@ def test_task_repository_reuses_registry_identity_by_semantic_signature() -> Non
     )
 
 
-def test_task_repository_does_not_merge_legacy_empty_signature_row_by_description_when_semantics_differ() -> None:
+def test_task_repository_does_not_merge_legacy_empty_signature_row_by_description_when_semantics_differ() -> (
+    None
+):
     session_factory = _make_session_factory()
     mismatched_signature = build_semantic_signature(
         {
@@ -245,7 +252,9 @@ def test_task_repository_save_run_computes_missing_semantic_signature_for_new_wr
     )
 
 
-def test_task_repository_save_run_rejects_new_empty_signature_task_record_when_semantics_missing() -> None:
+def test_task_repository_save_run_rejects_new_empty_signature_task_record_when_semantics_missing() -> (
+    None
+):
     session_factory = _make_session_factory()
 
     with session_factory() as session:
@@ -275,7 +284,9 @@ def test_task_repository_save_run_rejects_new_empty_signature_task_record_when_s
     assert task_count == 0
 
 
-def test_task_repository_save_run_reconciles_stale_explicit_semantic_signature_to_canonical_identity() -> None:
+def test_task_repository_save_run_reconciles_stale_explicit_semantic_signature_to_canonical_identity() -> (
+    None
+):
     session_factory = _make_session_factory()
     expected_signature = _expected_semantic_signature()
 
@@ -336,7 +347,7 @@ def test_save_run_with_missing_semantic_signature_upgrades_legacy_history_semant
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.common.storage.task_run_query_service._cache",
+        "autospider.legacy.common.storage.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),
@@ -388,7 +399,7 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.common.storage.task_run_query_service._cache",
+        "autospider.legacy.common.storage.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),

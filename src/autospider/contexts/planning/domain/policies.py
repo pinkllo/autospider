@@ -118,7 +118,9 @@ class FailureClassifier:
         payload.pop("page_id", None)
         return payload
 
-    def classify_protocol_violation(self, *, component: str, diagnostics: dict[str, Any] | None) -> dict[str, Any]:
+    def classify_protocol_violation(
+        self, *, component: str, diagnostics: dict[str, Any] | None
+    ) -> dict[str, Any]:
         payload = classify_protocol_violation(component=component, diagnostics=diagnostics)
         payload.pop("page_id", None)
         return payload

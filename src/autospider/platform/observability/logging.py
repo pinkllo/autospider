@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from loguru import logger
+import loguru
 
 from autospider.platform.config.settings import LoggingSettings
 from autospider.platform.observability.log_schema import (
@@ -15,7 +15,7 @@ from autospider.platform.observability.log_schema import (
 from autospider.platform.shared_kernel.trace import get_run_id, get_trace_id
 
 RecordPatcher = Callable[[dict[str, Any]], None]
-_active_logger: Any = logger.patch(lambda record: None)
+_active_logger: Any = loguru.logger.patch(lambda record: None)
 
 
 def configure_logging(
@@ -25,7 +25,7 @@ def configure_logging(
 ) -> Any:
     global _active_logger
     effective_settings = settings or LoggingSettings()
-    patched_logger = logger.patch(_build_record_patcher(effective_settings))
+    patched_logger = loguru.logger.patch(_build_record_patcher(effective_settings))
     patched_logger.remove()
     patched_logger.add(
         sink or sys.stderr,
@@ -54,4 +54,4 @@ def _build_record_patcher(settings: LoggingSettings) -> RecordPatcher:
     return _patch
 
 
-_active_logger = logger.patch(_build_record_patcher(LoggingSettings()))
+_active_logger = loguru.logger.patch(_build_record_patcher(LoggingSettings()))

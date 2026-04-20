@@ -11,16 +11,16 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode
-from autospider.pipeline.types import PipelineRunResult
-from autospider.pipeline.worker import SubTaskWorker
+from autospider.legacy.pipeline.types import PipelineRunResult
+from autospider.legacy.pipeline.worker import SubTaskWorker
 
 
 @pytest.mark.asyncio
 async def test_subtask_worker_execute_builds_execution_request_from_runtime_payloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.pipeline.runner as runner_module
-    import autospider.pipeline.worker as worker_module
+    import autospider.legacy.pipeline.runner as runner_module
+    import autospider.legacy.pipeline.worker as worker_module
 
     captured: dict[str, object] = {}
 
@@ -99,7 +99,11 @@ async def test_subtask_worker_execute_builds_execution_request_from_runtime_payl
         ],
     }
     worker.control_snapshot = {
-        "current_plan": {"goal": "采集采购公告详情页", "page_id": "node_001", "stage": "planning_seeded"},
+        "current_plan": {
+            "goal": "采集采购公告详情页",
+            "page_id": "node_001",
+            "stage": "planning_seeded",
+        },
         "dispatch_policy": {"strategy": "parallel", "max_concurrency": 2},
         "recovery_policy": {"max_retries": 2, "fail_fast": True},
     }

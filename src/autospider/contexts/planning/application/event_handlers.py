@@ -13,8 +13,7 @@ from autospider.platform.shared_kernel.result import ResultEnvelope
 
 
 class PlanRepositoryFactory(Protocol):
-    def __call__(self, *, site_url: str, user_request: str, output_dir: str) -> PlanRepository:
-        ...
+    def __call__(self, *, site_url: str, user_request: str, output_dir: str) -> PlanRepository: ...
 
 
 @dataclass(frozen=True, slots=True)

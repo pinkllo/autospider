@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from autospider.contexts.chat.application.dto import ClarifiedTaskDTO, FinalizeTaskInput, to_task_dto
+from autospider.contexts.chat.application.dto import (
+    ClarifiedTaskDTO,
+    FinalizeTaskInput,
+    to_task_dto,
+)
 from autospider.contexts.chat.domain.ports import SessionRepository
 from autospider.platform.shared_kernel.result import ErrorInfo, ResultEnvelope
 from autospider.platform.shared_kernel.trace import get_trace_id

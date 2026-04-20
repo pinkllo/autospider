@@ -5,18 +5,18 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from autospider.common.browser.actions import ActionExecutor
-from autospider.common.config import config
-from autospider.common.logger import get_logger
-from autospider.common.protocol import coerce_bool
-from autospider.common.som import (
+from autospider.legacy.common.browser.actions import ActionExecutor
+from autospider.legacy.common.config import config
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import coerce_bool
+from autospider.legacy.common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from autospider.common.som.text_first import resolve_single_mark_id
-from autospider.common.types import Action, ActionType
+from autospider.legacy.common.som.text_first import resolve_single_mark_id
+from autospider.legacy.common.types import Action, ActionType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -234,11 +234,20 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            args = (
+                data.get("args")
+                if isinstance(data, dict) and isinstance(data.get("args"), dict)
+                else {}
+            )
             purpose = (args.get("purpose") or "").lower()
             found = coerce_bool(args.get("found"), default=True)
 
-            if data and data.get("action") == "select" and purpose in {"jump_widget", "page_jump"} and found:
+            if (
+                data
+                and data.get("action") == "select"
+                and purpose in {"jump_widget", "page_jump"}
+                and found
+            ):
                 input_obj = args.get("input") if isinstance(args.get("input"), dict) else {}
                 button_obj = args.get("button") if isinstance(args.get("button"), dict) else {}
                 input_mark_id = input_obj.get("mark_id")
@@ -259,7 +268,9 @@ class PaginationHandler:
                     input_mark_id_value = None
 
                 # 文本优先：即使未返回 mark_id，也允许仅凭文本解析输入框元素
-                if input_text and (config.url_collector.validate_mark_id or input_mark_id_value is None):
+                if input_text and (
+                    config.url_collector.validate_mark_id or input_mark_id_value is None
+                ):
                     corrected_mark_id = await resolve_single_mark_id(
                         page=self.page,
                         llm=self.llm_decision_maker.decider.llm,
@@ -280,13 +291,13 @@ class PaginationHandler:
                     else None
                 )
                 if element and element.xpath_candidates:
-                    sorted_candidates = sorted(
-                        element.xpath_candidates, key=lambda x: x.priority
-                    )
+                    sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
                     input_xpath = sorted_candidates[0].xpath if sorted_candidates else None
 
                 try:
-                    button_mark_id_value = int(button_mark_id) if button_mark_id is not None else None
+                    button_mark_id_value = (
+                        int(button_mark_id) if button_mark_id is not None else None
+                    )
                 except (TypeError, ValueError):
                     button_mark_id_value = None
 
@@ -313,9 +324,7 @@ class PaginationHandler:
                     else None
                 )
                 if element and element.xpath_candidates:
-                    sorted_candidates = sorted(
-                        element.xpath_candidates, key=lambda x: x.priority
-                    )
+                    sorted_candidates = sorted(element.xpath_candidates, key=lambda x: x.priority)
                     button_xpath = sorted_candidates[0].xpath if sorted_candidates else None
 
                 if input_xpath and button_xpath:
@@ -325,9 +334,7 @@ class PaginationHandler:
                     return None
             else:
                 reasoning = data.get("thinking") if isinstance(data, dict) else ""
-                logger.info(
-                    f"[Extract-JumpWidget-LLM] 未找到跳转控件: {reasoning if data else ''}"
-                )
+                logger.info(f"[Extract-JumpWidget-LLM] 未找到跳转控件: {reasoning if data else ''}")
         except Exception as e:
             logger.info(f"[Extract-JumpWidget-LLM] LLM 识别失败: {e}")
 
@@ -356,7 +363,11 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            args = (
+                data.get("args")
+                if isinstance(data, dict) and isinstance(data.get("args"), dict)
+                else {}
+            )
             purpose = (args.get("purpose") or "").lower()
             found = coerce_bool(args.get("found"), default=True)
             item = None
@@ -418,9 +429,7 @@ class PaginationHandler:
                         return best_xpath
             else:
                 reasoning = data.get("thinking") if isinstance(data, dict) else ""
-                logger.info(
-                    f"[Extract-Pagination-LLM] 未找到分页按钮: {reasoning if data else ''}"
-                )
+                logger.info(f"[Extract-Pagination-LLM] 未找到分页按钮: {reasoning if data else ''}")
         except Exception as e:
             logger.info(f"[Extract-Pagination-LLM] LLM 识别失败: {e}")
 
@@ -452,7 +461,7 @@ class PaginationHandler:
                     logger.info("[Pagination] 策略1: 使用提取的 xpath...")
 
                     # 获取随机延迟
-                    from autospider.common.utils.delay import get_random_delay
+                    from autospider.legacy.common.utils.delay import get_random_delay
 
                     delay = get_random_delay(
                         config.url_collector.action_delay_base,
@@ -493,7 +502,7 @@ class PaginationHandler:
                     if is_visible:
                         logger.info(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
 
-                        from autospider.common.utils.delay import get_random_delay
+                        from autospider.legacy.common.utils.delay import get_random_delay
 
                         delay = get_random_delay(
                             config.url_collector.action_delay_base,
@@ -539,7 +548,11 @@ class PaginationHandler:
                 snapshot, screenshot_base64
             )
 
-            args = data.get("args") if isinstance(data, dict) and isinstance(data.get("args"), dict) else {}
+            args = (
+                data.get("args")
+                if isinstance(data, dict) and isinstance(data.get("args"), dict)
+                else {}
+            )
             purpose = (args.get("purpose") or "").lower()
             found = coerce_bool(args.get("found"), default=True)
             item = None
@@ -586,7 +599,7 @@ class PaginationHandler:
                 executor = ActionExecutor(self.page)
 
                 logger.info(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
-                from autospider.common.utils.delay import get_random_delay
+                from autospider.legacy.common.utils.delay import get_random_delay
 
                 delay = get_random_delay(
                     config.url_collector.action_delay_base,

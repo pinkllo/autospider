@@ -18,7 +18,7 @@ from autospider.contexts.planning.infrastructure.adapters.task_planner import (
     build_planner_world_payload,
 )
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
 
 
 def _sample_plan() -> TaskPlan:

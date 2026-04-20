@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autospider.crawler.collector.navigation_handler import NavigationHandler
+from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
 
 
 class _FakeLocator:
@@ -98,7 +98,9 @@ def _same_page_step() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_replay_nav_steps_returns_explicit_validation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_replay_nav_steps_returns_explicit_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     page = _FakePage()
     handler = NavigationHandler(page=page, list_url=page.url, task_description="", max_nav_steps=3)
 
@@ -107,7 +109,7 @@ async def test_replay_nav_steps_returns_explicit_validation_failure(monkeypatch:
         return None
 
     monkeypatch.setattr(
-        "autospider.crawler.collector.navigation_handler.click_and_capture_new_page",
+        "autospider.legacy.crawler.collector.navigation_handler.click_and_capture_new_page",
         _no_state_change,
     )
 
@@ -120,7 +122,9 @@ async def test_replay_nav_steps_returns_explicit_validation_failure(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_replay_nav_steps_returns_passed_validation_status(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_replay_nav_steps_returns_passed_validation_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     page = _FakePage()
     handler = NavigationHandler(page=page, list_url=page.url, task_description="", max_nav_steps=3)
 
@@ -130,7 +134,7 @@ async def test_replay_nav_steps_returns_passed_validation_status(monkeypatch: py
         return None
 
     monkeypatch.setattr(
-        "autospider.crawler.collector.navigation_handler.click_and_capture_new_page",
+        "autospider.legacy.crawler.collector.navigation_handler.click_and_capture_new_page",
         _activate_state,
     )
 

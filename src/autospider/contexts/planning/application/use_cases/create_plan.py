@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from autospider.contexts.planning.application.dto import CreatePlanInput, TaskPlanDTO, to_task_plan_dto
+from autospider.contexts.planning.application.dto import (
+    CreatePlanInput,
+    TaskPlanDTO,
+    to_task_plan_dto,
+)
 from autospider.contexts.planning.domain.ports import PlanRepository
 from autospider.platform.shared_kernel.errors import DomainError
 from autospider.platform.shared_kernel.result import ErrorInfo, ResultEnvelope

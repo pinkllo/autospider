@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autospider.common.logger import get_logger
+from autospider.legacy.common.logger import get_logger
 from autospider.contexts.collection.infrastructure.repositories.field_xpath_repository import (
     FieldXPathQueryService,
     FieldXPathWriteService,
 )
-from autospider.domain.fields import FieldDefinition
+from autospider.legacy.domain.fields import FieldDefinition
 
-from autospider.field.batch_xpath_extractor import BatchXPathExtractor
-from autospider.field.field_config import ensure_extraction_config
-from autospider.field.field_extractor import FieldExtractor
-from autospider.field.models import ExtractionConfig, FieldRule, PageExtractionRecord
+from autospider.legacy.field.batch_xpath_extractor import BatchXPathExtractor
+from autospider.legacy.field.field_config import ensure_extraction_config
+from autospider.legacy.field.field_extractor import FieldExtractor
+from autospider.legacy.field.models import ExtractionConfig, FieldRule, PageExtractionRecord
 
 logger = get_logger(__name__)
 
@@ -61,7 +61,11 @@ class DetailPageWorker:
             xpath_record = await self._extract_with_xpath(url, extraction_config)
             if xpath_record.success:
                 self.xpath_write_service.record(url, xpath_record, success=True)
-                logger.info("[DetailWorker] 处理完成: %s | mode=xpath | success=%s", url, xpath_record.success)
+                logger.info(
+                    "[DetailWorker] 处理完成: %s | mode=xpath | success=%s",
+                    url,
+                    xpath_record.success,
+                )
                 return DetailPageWorkerResult(
                     record=xpath_record,
                     extraction_config=extraction_config.to_payload(),
@@ -73,7 +77,9 @@ class DetailPageWorker:
         if any(field.value is not None for field in list(llm_record.fields or [])):
             self.xpath_write_service.record(url, llm_record, success=True)
         logger.info("[DetailWorker] 处理完成: %s | mode=llm | success=%s", url, llm_record.success)
-        return DetailPageWorkerResult(record=llm_record, extraction_config=extraction_config.to_payload())
+        return DetailPageWorkerResult(
+            record=llm_record, extraction_config=extraction_config.to_payload()
+        )
 
     def _has_rule_candidates(self, field_rules: tuple[FieldRule, ...]) -> bool:
         return any(rule.has_rule_candidate() for rule in field_rules)

@@ -32,9 +32,7 @@ def _detach_logger_handlers(logger_module) -> None:
 
 @pytest.fixture()
 def repo_tmp_dir() -> Path:
-    base_dir = REPO_ROOT / "artifacts" / "test_tmp"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    path = Path(tempfile.mkdtemp(prefix="logger-tests-", dir=base_dir))
+    path = Path(tempfile.mkdtemp(prefix="logger-tests-"))
     try:
         yield path
     finally:
@@ -44,14 +42,14 @@ def repo_tmp_dir() -> Path:
 @pytest.fixture()
 def load_logger_module():
     def _load():
-        import autospider.common.logger as logger_module
+        import autospider.legacy.common.logger as logger_module
 
         _detach_logger_handlers(logger_module)
         return importlib.reload(logger_module)
 
     yield _load
 
-    import autospider.common.logger as logger_module
+    import autospider.legacy.common.logger as logger_module
 
     _detach_logger_handlers(logger_module)
 

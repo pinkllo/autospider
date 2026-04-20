@@ -15,14 +15,13 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import pytest
 
-from autospider.domain.runtime import SubTaskRuntimeState
-from autospider.graph.nodes.feedback_nodes import (
+from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.legacy.graph.nodes.feedback_nodes import (
     REPLAN_BUDGET_EXHAUSTED_REASON,
     monitor_dispatch_node,
 )
-from autospider.graph.subgraphs.multi_dispatch import route_after_feedback
+from autospider.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
 
 
 def _system_failure_result(

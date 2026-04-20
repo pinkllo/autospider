@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from autospider.graph.main_graph import (
+from autospider.legacy.graph.main_graph import (
     resolve_chat_clarify_route,
     resolve_chat_review_route,
     resolve_entry_route,
@@ -21,7 +21,12 @@ from .nodes.entry_nodes import (
     chat_review_task,
     route_entry,
 )
-from .nodes.finalize_nodes import aggregate_node, build_artifact_index, build_summary, finalize_result
+from .nodes.finalize_nodes import (
+    aggregate_node,
+    build_artifact_index,
+    build_summary,
+    finalize_result,
+)
 from .nodes.plan_nodes import initialize_world_model_node, plan_node, plan_strategy_node
 from .state import GraphState
 
@@ -103,6 +108,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
 
 
 def _build_multi_dispatch_subgraph():
-    from autospider.graph.subgraphs import build_multi_dispatch_subgraph
+    from autospider.legacy.graph.subgraphs import build_multi_dispatch_subgraph
 
     return build_multi_dispatch_subgraph()

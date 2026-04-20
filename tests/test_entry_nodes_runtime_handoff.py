@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 # ruff: noqa: E402
 
 import sys
@@ -10,9 +11,9 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.graph.nodes.entry_nodes as entry_nodes_module
-from autospider.graph.state_access import request_params as select_request_params
-from autospider.graph.nodes.entry_nodes import (
+import autospider.legacy.graph.nodes.entry_nodes as entry_nodes_module
+from autospider.legacy.graph.state_access import request_params as select_request_params
+from autospider.legacy.graph.nodes.entry_nodes import (
     chat_clarify,
     chat_history_match,
     chat_prepare_execution_handoff,
@@ -26,7 +27,7 @@ from autospider.contexts.chat.domain.model import (
     DialogueMessage,
     RequestedField,
 )
-from autospider.pipeline.helpers import build_semantic_signature
+from autospider.legacy.pipeline.helpers import build_semantic_signature
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
 
@@ -341,7 +342,9 @@ async def test_llm_history_rank_prompt_includes_semantic_identity(
 
     monkeypatch.setattr(entry_nodes_module, "ChatOpenAI", _FakeLLM)
     monkeypatch.setattr(entry_nodes_module, "ainvoke_with_stream", _fake_ainvoke)
-    monkeypatch.setattr(entry_nodes_module, "extract_response_text_from_llm_payload", lambda _payload: "{}")
+    monkeypatch.setattr(
+        entry_nodes_module, "extract_response_text_from_llm_payload", lambda _payload: "{}"
+    )
     monkeypatch.setattr(entry_nodes_module, "summarize_llm_payload", lambda _payload: {})
     monkeypatch.setattr(
         entry_nodes_module,
@@ -403,7 +406,9 @@ async def test_chat_history_match_normalizes_stale_current_semantic_signature(
 
     monkeypatch.setattr(entry_nodes_module, "TaskRunQueryService", _FakeQueryService)
 
-    async def _fake_rank_history(_current_desc, current_semantic_signature, current_strategy_payload, history):
+    async def _fake_rank_history(
+        _current_desc, current_semantic_signature, current_strategy_payload, history
+    ):
         captured["semantic_signature"] = current_semantic_signature
         captured["strategy_payload"] = dict(current_strategy_payload)
         captured["history"] = history

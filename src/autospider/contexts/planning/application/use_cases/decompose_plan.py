@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from autospider.contexts.planning.application.dto import DecomposePlanInput, TaskPlanDTO, to_task_plan_dto
+from autospider.contexts.planning.application.dto import (
+    DecomposePlanInput,
+    TaskPlanDTO,
+    to_task_plan_dto,
+)
 from autospider.contexts.planning.domain.ports import PlanRepository
 from autospider.platform.shared_kernel.result import ResultEnvelope
 from autospider.platform.shared_kernel.trace import get_trace_id

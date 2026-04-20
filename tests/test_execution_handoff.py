@@ -7,12 +7,12 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.execution_handoff import (
+from autospider.legacy.graph.execution_handoff import (
     build_chat_execution_params,
     build_chat_review_payload,
 )
-from autospider.pipeline.helpers import build_semantic_signature, build_strategy_payload
-from autospider.pipeline.types import ExecutionRequest
+from autospider.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
+from autospider.legacy.pipeline.types import ExecutionRequest
 
 
 def test_build_chat_handoff_preserves_grouping_semantics() -> None:

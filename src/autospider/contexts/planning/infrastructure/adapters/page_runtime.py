@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from autospider.common.som import capture_screenshot_with_marks, clear_overlay, inject_and_scan
+from autospider.legacy.common.som import (
+    capture_screenshot_with_marks,
+    clear_overlay,
+    inject_and_scan,
+)
 from autospider.contexts.planning.domain import SubTask, SubTaskMode
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
     RuntimeSubtaskPlanResult,
@@ -39,7 +43,9 @@ class PlannerPageRuntimeMixin:
         parent_subtask: SubTask,
         max_children: int | None = None,
     ) -> RuntimeSubtaskPlanResult:
-        current_url = str(parent_subtask.anchor_url or parent_subtask.list_url or self.site_url).strip()
+        current_url = str(
+            parent_subtask.anchor_url or parent_subtask.list_url or self.site_url
+        ).strip()
         current_nav_steps = list(parent_subtask.nav_steps or [])
         current_context = self._sanitize_context(parent_subtask.context)
         restored = await self._restore_page_state(current_url, current_nav_steps)
@@ -59,7 +65,9 @@ class PlannerPageRuntimeMixin:
         if not analysis:
             raise RuntimeError("runtime_subtask_analysis_failed")
 
-        collect_desc, collect_brief = self._build_runtime_collect_brief(analysis, current_context, parent_subtask)
+        collect_desc, collect_brief = self._build_runtime_collect_brief(
+            analysis, current_context, parent_subtask
+        )
         if str(analysis.get("page_type", "category")).strip().lower() == "list_page":
             return self._build_collect_runtime_result(analysis, collect_desc, collect_brief)
 

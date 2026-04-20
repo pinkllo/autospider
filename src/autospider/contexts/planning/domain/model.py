@@ -234,7 +234,9 @@ class TaskPlan(BaseModel):
 def format_execution_brief(brief: ExecutionBrief | dict[str, Any] | None) -> str:
     if brief is None:
         return "无"
-    normalized = brief if isinstance(brief, ExecutionBrief) else ExecutionBrief.model_validate(brief)
+    normalized = (
+        brief if isinstance(brief, ExecutionBrief) else ExecutionBrief.model_validate(brief)
+    )
     parts: list[str] = []
     if normalized.parent_chain:
         parts.append(f"- 父链路: {' > '.join(normalized.parent_chain)}")

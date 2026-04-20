@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.graph.workflow_access import (
+from autospider.legacy.graph.workflow_access import (
     coerce_workflow_state,
     current_plan,
     final_error,
@@ -27,7 +27,7 @@ def test_coerce_workflow_state_maps_legacy_meta_and_intent_fields() -> None:
             "clarified_task": {
                 "fields": FIELD_LIST,
             }
-        }
+        },
     }
 
     workflow = coerce_workflow_state(legacy_state)

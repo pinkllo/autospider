@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket, TicketStatus
+from autospider.legacy.taskplane.protocol import (
+    PlanEnvelope,
+    ResultStatus,
+    TaskResult,
+    TaskTicket,
+    TicketStatus,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -28,7 +34,7 @@ def _ticket(ticket_id: str, *, priority: int = 0, mode: str = "collect") -> Task
 
 
 def test_pg_store_module_exists() -> None:
-    from autospider.taskplane.store.pg_store import PgColdStore
+    from autospider.legacy.taskplane.store.pg_store import PgColdStore
 
     assert PgColdStore is not None
 
@@ -37,7 +43,7 @@ async def test_save_and_query_tickets(
     taskplane_database_url: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.taskplane.store.pg_store import PgColdStore
+    from autospider.legacy.taskplane.store.pg_store import PgColdStore
 
     store = PgColdStore(database_url=taskplane_database_url)
     await store.save_envelope(_envelope())
@@ -65,7 +71,7 @@ async def test_claim_and_release_roundtrip(
     taskplane_database_url: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.taskplane.store.pg_store import PgColdStore
+    from autospider.legacy.taskplane.store.pg_store import PgColdStore
 
     store = PgColdStore(database_url=taskplane_database_url)
     await store.save_ticket(_ticket("ticket-claim", priority=1))
@@ -87,7 +93,7 @@ async def test_save_result_roundtrip(
     taskplane_database_url: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.taskplane.store.pg_store import PgColdStore
+    from autospider.legacy.taskplane.store.pg_store import PgColdStore
 
     store = PgColdStore(database_url=taskplane_database_url)
     await store.save_envelope(_envelope())

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from tests.cli_test_support import fresh_import_cli
 
-from autospider.graph.execution_handoff import build_chat_execution_params
-from autospider.pipeline.types import ExecutionRequest
+from autospider.legacy.graph.execution_handoff import build_chat_execution_params
+from autospider.legacy.pipeline.types import ExecutionRequest
 
 
 def test_cli_help_exposes_only_current_public_commands() -> None:

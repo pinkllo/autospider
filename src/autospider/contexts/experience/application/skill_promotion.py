@@ -169,16 +169,20 @@ def _build_success_rate_text(summary: dict[str, Any]) -> str:
 
 
 def _has_usable_rules(extraction_config: dict[str, Any]) -> bool:
-    for field in list(extraction_config.get("fields") or []):
-        xpath = str(field.get("xpath") or "").strip()
-        fixed_value = str(field.get("fixed_value") or "").strip()
+    for field_rule in list(extraction_config.get("fields") or []):
+        xpath = str(field_rule.get("xpath") or "").strip()
+        fixed_value = str(field_rule.get("fixed_value") or "").strip()
         if xpath or fixed_value:
             return True
     return False
 
 
 def _build_nav_steps(collection_config: dict[str, Any]) -> list[dict[str, str]]:
-    return [dict(step) for step in list(collection_config.get("nav_steps") or []) if isinstance(step, dict)]
+    return [
+        dict(step)
+        for step in list(collection_config.get("nav_steps") or [])
+        if isinstance(step, dict)
+    ]
 
 
 def _build_field_rules(candidate: SkillCandidate) -> dict[str, SkillFieldRule]:
@@ -189,7 +193,19 @@ def _build_field_rules(candidate: SkillCandidate) -> dict[str, SkillFieldRule]:
     }
     failed_fields = _extract_failure_field_names(candidate.validation_failures)
     rules: dict[str, SkillFieldRule] = {}
-    for raw_field in list(candidate.extraction_evidence or candidate.extraction_config.get("fields") or candidate.summary.get("fields") or candidate.collection_config.get("fields") or candidate.extraction_config.get("field_rules") or candidate.extraction_config.get("field_configs") or candidate.extraction_config.get("resolved_fields") or candidate.extraction_config.get("extracted_fields") or candidate.extraction_config.get("definitions") or candidate.extraction_config.get("items") or []):
+    for raw_field in list(
+        candidate.extraction_evidence
+        or candidate.extraction_config.get("fields")
+        or candidate.summary.get("fields")
+        or candidate.collection_config.get("fields")
+        or candidate.extraction_config.get("field_rules")
+        or candidate.extraction_config.get("field_configs")
+        or candidate.extraction_config.get("resolved_fields")
+        or candidate.extraction_config.get("extracted_fields")
+        or candidate.extraction_config.get("definitions")
+        or candidate.extraction_config.get("items")
+        or []
+    ):
         if not isinstance(raw_field, dict):
             continue
         name = str(raw_field.get("name") or "").strip()
@@ -202,7 +218,9 @@ def _build_field_rules(candidate: SkillCandidate) -> dict[str, SkillFieldRule]:
             name=name,
             description=str(raw_field.get("description") or ""),
             data_type=str(raw_field.get("data_type") or "text"),
-            extraction_source=str(config.get("extraction_source") or raw_field.get("extraction_source") or ""),
+            extraction_source=str(
+                config.get("extraction_source") or raw_field.get("extraction_source") or ""
+            ),
             fixed_value=fixed_value,
             primary_xpath=primary_xpath,
             validated=bool(primary_xpath) and name not in failed_fields,

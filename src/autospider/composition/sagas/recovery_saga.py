@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from autospider.graph.recovery import build_recovery_directive
+from autospider.legacy.graph.recovery import build_recovery_directive
 
 
 @dataclass(frozen=True, slots=True)

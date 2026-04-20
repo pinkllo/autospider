@@ -108,7 +108,10 @@ def _handle_chat_review_interrupt(payload: dict[str, Any]) -> dict[str, Any]:
         return {"action": "approve"}
     if action == "2":
         supplement = typer.prompt("请输入补充要求").strip()
-        return {"action": "supplement", "message": supplement or "请按常见默认方案继续，并明确你的默认假设。"}
+        return {
+            "action": "supplement",
+            "message": supplement or "请按常见默认方案继续，并明确你的默认假设。",
+        }
     if action == "3":
         return {"action": "override_task", "task": _edit_chat_review_task(task)}
     if action == "4":
@@ -128,7 +131,13 @@ def _handle_history_task_select_interrupt(payload: dict[str, Any]) -> dict[str, 
     options = list(payload.get("options") or [])
     if not options:
         return {"choice": 1}
-    console.print(Panel(str(payload.get("message") or "检测到历史采集任务，请选择："), title="历史任务匹配", style="yellow"))
+    console.print(
+        Panel(
+            str(payload.get("message") or "检测到历史采集任务，请选择："),
+            title="历史任务匹配",
+            style="yellow",
+        )
+    )
     for option in options:
         console.print(f"  [cyan]{option.get('index', '')}[/cyan]. {option.get('label', '')}")
     choice = typer.prompt(f"请输入选项序号（1-{len(options)}）", default="1").strip()
@@ -161,16 +170,34 @@ def _continue_chat_interrupts(result: dict[str, Any]) -> dict[str, Any]:
 
 def chat_pipeline_command(
     ctx: typer.Context,
-    request: str = typer.Option("", "--request", "-r", help="初始自然语言需求（可为空，程序会交互询问）"),
+    request: str = typer.Option(
+        "", "--request", "-r", help="初始自然语言需求（可为空，程序会交互询问）"
+    ),
     max_turns: int = typer.Option(6, "--max-turns", help="多轮澄清的最大轮数"),
-    field_explore_count: int | None = typer.Option(None, "--field-explore-count", help="字段探索数量（默认取配置）"),
-    field_validate_count: int | None = typer.Option(None, "--field-validate-count", help="字段校验数量（默认取配置）"),
-    max_pages: int | None = typer.Option(None, "--max-pages", help="列表页最大翻页次数（可覆盖 AI 推断）"),
-    target_url_count: int | None = typer.Option(None, "--target-url-count", help="目标采集 URL 数量（可覆盖 AI 推断）"),
-    consumer_concurrency: int | None = typer.Option(None, "--consumer-concurrency", help="详情抽取消费者并发数（默认取配置）"),
-    serial_mode: bool = typer.Option(False, "--serial/--no-serial", help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发"),
-    max_concurrent: int | None = typer.Option(None, "--max-concurrent", help="多分类子任务最大并发数（用于 multi）"),
-    headless: bool = typer.Option(False, "--headless/--no-headless", help="是否使用无头模式（默认读取 .env HEADLESS）"),
+    field_explore_count: int | None = typer.Option(
+        None, "--field-explore-count", help="字段探索数量（默认取配置）"
+    ),
+    field_validate_count: int | None = typer.Option(
+        None, "--field-validate-count", help="字段校验数量（默认取配置）"
+    ),
+    max_pages: int | None = typer.Option(
+        None, "--max-pages", help="列表页最大翻页次数（可覆盖 AI 推断）"
+    ),
+    target_url_count: int | None = typer.Option(
+        None, "--target-url-count", help="目标采集 URL 数量（可覆盖 AI 推断）"
+    ),
+    consumer_concurrency: int | None = typer.Option(
+        None, "--consumer-concurrency", help="详情抽取消费者并发数（默认取配置）"
+    ),
+    serial_mode: bool = typer.Option(
+        False, "--serial/--no-serial", help="显式串行模式：本机测试时强制关闭多任务并发和详情页并发"
+    ),
+    max_concurrent: int | None = typer.Option(
+        None, "--max-concurrent", help="多分类子任务最大并发数（用于 multi）"
+    ),
+    headless: bool = typer.Option(
+        False, "--headless/--no-headless", help="是否使用无头模式（默认读取 .env HEADLESS）"
+    ),
     output_dir: str = typer.Option("output", "--output", "-o", help="输出目录"),
     thread_id: str = typer.Option("", "--thread-id", help=_GRAPH_THREAD_ID_HELP),
 ) -> None:

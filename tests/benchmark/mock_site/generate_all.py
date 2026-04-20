@@ -94,7 +94,9 @@ def write_categories_assets() -> None:
         panel_cards = []
         for product_name, price, brand, specs in items:
             product_url = f"/scenarios/categories/detail_{detail_index}.html"
-            panel_cards.append(listing_card(product_name, brand, price, f"detail_{detail_index}.html"))
+            panel_cards.append(
+                listing_card(product_name, brand, price, f"detail_{detail_index}.html")
+            )
             write_detail_page(
                 MOCK_SITE_DIR / "scenarios" / "categories" / f"detail_{detail_index}.html",
                 product_name,
@@ -105,7 +107,9 @@ def write_categories_assets() -> None:
                 "index.html",
                 extra_rows=[("category", category)],
             )
-            records.append(record(product_name, price, brand, specs, product_url, category=category))
+            records.append(
+                record(product_name, price, brand, specs, product_url, category=category)
+            )
             detail_index += 1
         panel = tab_panel(category, panel_cards, hidden=(category != "Phones"))
         cards.append(panel)
@@ -115,7 +119,9 @@ def write_categories_assets() -> None:
         '<nav class="tab-nav"><button class="tab-button" data-tab-target="#phones" aria-selected="true">Phones</button><button class="tab-button" data-tab-target="#computers" aria-selected="false">Computers</button><button class="tab-button" data-tab-target="#accessories" aria-selected="false">Accessories</button></nav>'
         + cards[0].replace('id="Phones"', 'id="phones"').replace("Phones", "Phones", 1)
         + cards[1].replace('id="Computers"', 'id="computers"').replace("Computers", "Computers", 1)
-        + cards[2].replace('id="Accessories"', 'id="accessories"').replace("Accessories", "Accessories", 1),
+        + cards[2]
+        .replace('id="Accessories"', 'id="accessories"')
+        .replace("Accessories", "Accessories", 1),
         scripts='<script src="/shared/tabs.js" defer></script>',
     )
     write_text(MOCK_SITE_DIR / "scenarios" / "categories" / "index.html", index_html)
@@ -140,11 +146,15 @@ def write_dynamic_assets() -> None:
     batches = []
     for batch_index, start in enumerate((3, 6), start=1):
         cards = []
-        for offset, item in enumerate(DYNAMIC_ITEMS[start:start + 3], start=start + 1):
+        for offset, item in enumerate(DYNAMIC_ITEMS[start : start + 3], start=start + 1):
             cards.append(listing_card(item[0], item[2], item[1], f"detail_{offset}.html"))
-        batches.append(f'<div class="load-batch"{" hidden" if batch_index else ""}>{"".join(cards)}</div>')
+        batches.append(
+            f'<div class="load-batch"{" hidden" if batch_index else ""}>{"".join(cards)}</div>'
+        )
     body = (
-        '<section class="product-grid">' + "".join(visible) + "</section>"
+        '<section class="product-grid">'
+        + "".join(visible)
+        + "</section>"
         + "".join(batches)
         + '<button class="load-more-btn" type="button">Load More</button>'
     )
@@ -159,10 +169,14 @@ def write_dynamic_assets() -> None:
     )
     for index, (product_name, price, brand, specs) in enumerate(DYNAMIC_ITEMS, start=1):
         product_url = f"/scenarios/dynamic/detail_{index}.html"
-        extra = '<section class="collapsible"><h2>Technical Details</h2><div class="collapsible-body"><p data-field="specs">{}</p></div></section>'.format(specs)
+        extra = '<section class="collapsible"><h2>Technical Details</h2><div class="collapsible-body"><p data-field="specs">{}</p></div></section>'.format(
+            specs
+        )
         write_text(
             MOCK_SITE_DIR / "scenarios" / "dynamic" / f"detail_{index}.html",
-            detail_page(product_name, price, brand, specs, product_url, "index.html", extra_section=extra),
+            detail_page(
+                product_name, price, brand, specs, product_url, "index.html", extra_section=extra
+            ),
         )
         records.append(record(product_name, price, brand, specs, product_url))
     write_yaml(
@@ -189,7 +203,9 @@ def write_variants_assets() -> None:
         else:
             html = variant_table_page(product_name, price, brand, specs, product_url)
         write_text(MOCK_SITE_DIR / "scenarios" / "variants" / page_name, html)
-        records.append(record(product_name, price, brand, specs, product_url, layout_variant=layout))
+        records.append(
+            record(product_name, price, brand, specs, product_url, layout_variant=layout)
+        )
     write_text(
         MOCK_SITE_DIR / "scenarios" / "variants" / "index.html",
         page_shell("TechMart Variants", "Mix card and table detail layouts.", "".join(links)),
@@ -228,7 +244,9 @@ def write_nested_assets() -> None:
                 f"list_{list_index}.html",
                 extra_rows=[("category_path", category_path)],
             )
-            records.append(record(name, price, brand, specs, product_url, category_path=category_path))
+            records.append(
+                record(name, price, brand, specs, product_url, category_path=category_path)
+            )
             detail_index += 1
         write_text(
             MOCK_SITE_DIR / "scenarios" / "nested" / f"list_{list_index}.html",
@@ -236,7 +254,10 @@ def write_nested_assets() -> None:
         )
         leaf_links.append(f'<li><a href="list_{list_index}.html">{category_path}</a></li>')
     tree = '<nav class="tree-nav"><ul>{}</ul></nav>'.format("".join(leaf_links))
-    write_text(MOCK_SITE_DIR / "scenarios" / "nested" / "index.html", page_shell("TechMart Nested", "Browse a three-level tree.", tree))
+    write_text(
+        MOCK_SITE_DIR / "scenarios" / "nested" / "index.html",
+        page_shell("TechMart Nested", "Browse a three-level tree.", tree),
+    )
     write_yaml(
         "nested",
         "嵌套多层导航",
@@ -252,26 +273,45 @@ def write_nested_assets() -> None:
 def page_shell(title: str, description: str, body: str, scripts: str = "") -> str:
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />'
-        f"<title>{title}</title><link rel=\"stylesheet\" href=\"/shared/style.css\" />{scripts}</head>"
+        f'<title>{title}</title><link rel="stylesheet" href="/shared/style.css" />{scripts}</head>'
         f'<body><main class="site-shell"><section class="hero"><h1>{title}</h1><p>{description}</p></section>{body}</main></body></html>'
     )
 
 
-def detail_page(product_name: str, price: float, brand: str, specs: str, product_url: str, back_href: str, extra_section: str = "") -> str:
+def detail_page(
+    product_name: str,
+    price: float,
+    brand: str,
+    specs: str,
+    product_url: str,
+    back_href: str,
+    extra_section: str = "",
+) -> str:
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />'
-        f"<title>{product_name}</title><link rel=\"stylesheet\" href=\"/shared/style.css\" /></head><body><main class=\"site-shell\"><article class=\"detail-panel\">"
+        f'<title>{product_name}</title><link rel="stylesheet" href="/shared/style.css" /></head><body><main class="site-shell"><article class="detail-panel">'
         f'<h1 data-field="product_name">{product_name}</h1><dl><dt>Price</dt><dd data-field="price">{price:.2f}</dd><dt>Brand</dt><dd data-field="brand">{brand}</dd>'
         f'<dt>Specs</dt><dd data-field="specs">{specs}</dd><dt>Product URL</dt><dd><a data-field="product_url" href="{product_url}">{product_url}</a></dd></dl>{extra_section}'
         f'<div class="detail-actions"><a href="{back_href}">Back</a></div></article></main></body></html>'
     )
 
 
-def write_detail_page(path: Path, product_name: str, price: float, brand: str, specs: str, product_url: str, back_href: str, extra_rows: list[tuple[str, str]]) -> None:
-    extra_html = "".join(f'<dt>{name}</dt><dd data-field="{name}">{value}</dd>' for name, value in extra_rows)
+def write_detail_page(
+    path: Path,
+    product_name: str,
+    price: float,
+    brand: str,
+    specs: str,
+    product_url: str,
+    back_href: str,
+    extra_rows: list[tuple[str, str]],
+) -> None:
+    extra_html = "".join(
+        f'<dt>{name}</dt><dd data-field="{name}">{value}</dd>' for name, value in extra_rows
+    )
     html = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />'
-        f"<title>{product_name}</title><link rel=\"stylesheet\" href=\"/shared/style.css\" /></head><body><main class=\"site-shell\"><article class=\"detail-panel\">"
+        f'<title>{product_name}</title><link rel="stylesheet" href="/shared/style.css" /></head><body><main class="site-shell"><article class="detail-panel">'
         f'<h1 data-field="product_name">{product_name}</h1><dl><dt>Price</dt><dd data-field="price">{price:.2f}</dd><dt>Brand</dt><dd data-field="brand">{brand}</dd>'
         f'<dt>Specs</dt><dd data-field="specs">{specs}</dd>{extra_html}<dt>Product URL</dt><dd><a data-field="product_url" href="{product_url}">{product_url}</a></dd></dl>'
         f'<div class="detail-actions"><a href="{back_href}">Back</a></div></article></main></body></html>'
@@ -288,26 +328,50 @@ def listing_card(product_name: str, brand: str, price: float, href: str) -> str:
     return f'<article class="product-card"><h2><a href="{href}">{product_name}</a></h2><p class="listing-meta">{brand}</p><p class="price-tag">{price:.2f}</p></article>'
 
 
-def variant_card_page(product_name: str, price: float, brand: str, specs: str, product_url: str) -> str:
+def variant_card_page(
+    product_name: str, price: float, brand: str, specs: str, product_url: str
+) -> str:
     body = f'<article class="detail-panel"><h1 data-field="product_name">{product_name}</h1><div class="price-tag" data-field="price">{price:.2f}</div><div data-field="brand">{brand}</div><div data-field="specs">{specs}</div><a data-field="product_url" href="{product_url}">{product_url}</a></article>'
     return page_shell(product_name, "Card layout detail page.", body)
 
 
-def variant_table_page(product_name: str, price: float, brand: str, specs: str, product_url: str) -> str:
+def variant_table_page(
+    product_name: str, price: float, brand: str, specs: str, product_url: str
+) -> str:
     table = f'<table class="detail-panel"><tr><th>Product</th><td data-field="product_name">{product_name}</td></tr><tr><th>Price</th><td data-field="price">{price:.2f}</td></tr><tr><th>Brand</th><td data-field="brand">{brand}</td></tr><tr><th>Specs</th><td data-field="specs">{specs}</td></tr><tr><th>Product URL</th><td><a data-field="product_url" href="{product_url}">{product_url}</a></td></tr></table>'
     return page_shell(product_name, "Table layout detail page.", table)
 
 
-def record(product_name: str, price: float, brand: str, specs: str, product_url: str, **extra: object) -> dict[str, object]:
-    return {"product_name": product_name, "price": price, "brand": brand, "specs": specs, "product_url": product_url, **extra}
+def record(
+    product_name: str, price: float, brand: str, specs: str, product_url: str, **extra: object
+) -> dict[str, object]:
+    return {
+        "product_name": product_name,
+        "price": price,
+        "brand": brand,
+        "specs": specs,
+        "product_url": product_url,
+        **extra,
+    }
 
 
-def write_yaml(scenario_id: str, name: str, description: str, request: str, record_count: int, fields: list[str], match_key: str) -> None:
+def write_yaml(
+    scenario_id: str,
+    name: str,
+    description: str,
+    request: str,
+    record_count: int,
+    fields: list[str],
+    match_key: str,
+) -> None:
     field_block = "\n".join(
         f"    - name: \"{field_name}\"\n      type: \"{'number' if field_name == 'price' else 'text' if 'url' not in field_name else 'url'}\"\n      required: true"
         for field_name in fields
     )
-    matching = "\n".join(f"    {field_name}: {'numeric_tolerance' if field_name == 'price' else 'exact'}" for field_name in fields)
+    matching = "\n".join(
+        f"    {field_name}: {'numeric_tolerance' if field_name == 'price' else 'exact'}"
+        for field_name in fields
+    )
     content = (
         f'scenario:\n  id: {scenario_id}\n  name: "{name}"\n  description: "{description}"\n\n'
         f'task:\n  request: "{request}"\n  cli_overrides:\n    max_pages: 6\n    serial_mode: true\n    headless: true\n    output_dir: ".tmp/benchmark/{scenario_id}"\n\n'

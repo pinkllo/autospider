@@ -47,7 +47,9 @@ def test_format_violation_includes_path_line_pattern_and_snippet() -> None:
         snippet="traceback.print_exc()",
     )
 
-    assert rendered == "src/autospider/example.py:7 -> traceback.print_exc() -> traceback.print_exc()"
+    assert (
+        rendered == "src/autospider/example.py:7 -> traceback.print_exc() -> traceback.print_exc()"
+    )
 
 
 def test_runtime_code_does_not_use_banned_logging_shortcuts() -> None:

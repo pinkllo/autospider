@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_benchmark_runner_fixture_has_expected_api(benchmark_runner: object) -> None:
     """benchmark_runner exposes list and run operations."""

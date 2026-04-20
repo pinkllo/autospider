@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket, TicketStatus
-from autospider.taskplane.strategy import PriorityStrategy
+from autospider.legacy.taskplane.protocol import (
+    PlanEnvelope,
+    ResultStatus,
+    TaskResult,
+    TaskTicket,
+    TicketStatus,
+)
+from autospider.legacy.taskplane.strategy import PriorityStrategy
 
 pytestmark = pytest.mark.integration
 
@@ -24,7 +30,7 @@ def _ticket(ticket_id: str, *, priority: int = 0, mode: str = "collect") -> Task
 
 
 def test_redis_store_module_exists() -> None:
-    from autospider.taskplane.store.redis_store import RedisHotStore
+    from autospider.legacy.taskplane.store.redis_store import RedisHotStore
 
     assert RedisHotStore is not None
 
@@ -33,7 +39,7 @@ async def test_save_and_claim_tickets_by_priority_and_label(
     taskplane_redis_url: str,
     redis_namespace: str,
 ) -> None:
-    from autospider.taskplane.store.redis_store import RedisHotStore
+    from autospider.legacy.taskplane.store.redis_store import RedisHotStore
 
     store = RedisHotStore(
         redis_url=taskplane_redis_url,
@@ -64,7 +70,7 @@ async def test_release_claim_requeues_ticket(
     taskplane_redis_url: str,
     redis_namespace: str,
 ) -> None:
-    from autospider.taskplane.store.redis_store import RedisHotStore
+    from autospider.legacy.taskplane.store.redis_store import RedisHotStore
 
     store = RedisHotStore(redis_url=taskplane_redis_url, namespace=redis_namespace)
     await store.save_ticket(_ticket("ticket-release"))
@@ -86,7 +92,7 @@ async def test_save_result_persists_result_and_terminal_status(
     taskplane_redis_url: str,
     redis_namespace: str,
 ) -> None:
-    from autospider.taskplane.store.redis_store import RedisHotStore
+    from autospider.legacy.taskplane.store.redis_store import RedisHotStore
 
     store = RedisHotStore(redis_url=taskplane_redis_url, namespace=redis_namespace)
     await store.save_ticket(_ticket("ticket-result"))

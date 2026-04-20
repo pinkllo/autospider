@@ -9,18 +9,18 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.common.llm.decider import LLMDecider
-from autospider.common.protocol import (
+from autospider.legacy.common.llm.decider import LLMDecider
+from autospider.legacy.common.protocol import (
     parse_protocol_message,
     parse_protocol_message_diagnostics,
 )
-from autospider.common.types import ActionType
+from autospider.legacy.common.types import ActionType
 from autospider.contexts.planning.domain import (
     classify_protocol_violation,
     classify_runtime_exception,
 )
-from autospider.graph.nodes import capability_nodes
-from autospider.graph.recovery import build_recovery_directive
+from autospider.legacy.graph.nodes import capability_nodes
+from autospider.legacy.graph.recovery import build_recovery_directive
 
 
 class StateMismatchError(RuntimeError):
@@ -78,7 +78,9 @@ def test_parse_protocol_message_diagnostics_returns_validation_errors() -> None:
 
     assert diagnostics["message"] is None
     assert diagnostics["action"] == "click"
-    assert any("click requires target_text or mark_id" in item for item in diagnostics["validation_errors"])
+    assert any(
+        "click requires target_text or mark_id" in item for item in diagnostics["validation_errors"]
+    )
     assert parse_protocol_message({"action": "click", "args": {}}) is None
 
 
@@ -272,8 +274,7 @@ async def test_capability_recovery_escalates_non_retry_categories(
     assert result["failure_records"][0]["category"] == expected_category
 
 
-def test_capability_recovery_exposes_directive_for_unknown_runtime_error(
-) -> None:
+def test_capability_recovery_exposes_directive_for_unknown_runtime_error() -> None:
     failure_record = classify_runtime_exception(
         component="collect_urls_node",
         error=RuntimeError("boom"),

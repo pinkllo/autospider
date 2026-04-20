@@ -5,17 +5,17 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.common.config import config
-from autospider.common.llm.streaming import ainvoke_with_stream
-from autospider.common.llm.trace_logger import append_llm_trace
-from autospider.common.logger import get_logger
-from autospider.common.protocol import (
+from autospider.legacy.common.config import config
+from autospider.legacy.common.llm.streaming import ainvoke_with_stream
+from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.legacy.common.logger import get_logger
+from autospider.legacy.common.protocol import (
     extract_json_dict_from_llm_payload,
     extract_response_text_from_llm_payload,
     summarize_llm_payload,
 )
-from autospider.common.utils.paths import get_prompt_path
-from autospider.common.utils.prompt_template import render_template
+from autospider.legacy.common.utils.paths import get_prompt_path
+from autospider.legacy.common.utils.prompt_template import render_template
 from autospider.contexts.experience.application.runtime_support import (
     LoadedSkill,
     serialize_task_context,
@@ -50,7 +50,9 @@ class SkillRuntime:
         skills = list(available_skills or [])
         if not skills or llm is None:
             return []
-        prompts = _build_selector_prompts(phase=phase, url=url, task_context=task_context, skills=skills)
+        prompts = _build_selector_prompts(
+            phase=phase, url=url, task_context=task_context, skills=skills
+        )
         response_payload = await _invoke_selector(llm=llm, prompts=prompts)
         selected = _select_skill_indexes(
             skills=skills,
@@ -184,7 +186,9 @@ async def _invoke_selector(*, llm: Any, prompts: dict[str, str]) -> dict[str, An
     }
 
 
-def _select_skill_indexes(*, skills: list[Any], payload: dict[str, Any], reasoning: str) -> list[Any]:
+def _select_skill_indexes(
+    *, skills: list[Any], payload: dict[str, Any], reasoning: str
+) -> list[Any]:
     indexes = _parse_selected_indexes(
         payload.get("selected_indexes"),
         available_count=len(skills),
@@ -207,7 +211,9 @@ def _append_trace(
     append_llm_trace(
         component="skill_selector",
         payload={
-            "model": getattr(llm, "model_name", None) or getattr(llm, "model", None) or config.llm.model,
+            "model": getattr(llm, "model_name", None)
+            or getattr(llm, "model", None)
+            or config.llm.model,
             "input": {
                 "phase": phase,
                 "url": url,
@@ -221,7 +227,9 @@ def _append_trace(
                 "raw_response": response_payload["raw_response"],
                 "parsed_payload": response_payload["payload"],
                 "selected_skills": [skill_to_dict(skill) for skill in selected],
-                "selected_skill_paths": [str(getattr(skill, "path", "") or "") for skill in selected],
+                "selected_skill_paths": [
+                    str(getattr(skill, "path", "") or "") for skill in selected
+                ],
                 "reasoning": response_payload["reasoning"],
             },
         },
@@ -287,11 +295,15 @@ def _coerce_metadata_list(
             continue
         seen_paths.add(path)
         result.append(
-            type("SeededSkill", (), {
-                "name": str(item.get("name") or "").strip(),
-                "description": str(item.get("description") or "").strip(),
-                "path": path,
-                "domain": domain,
-            })()
+            type(
+                "SeededSkill",
+                (),
+                {
+                    "name": str(item.get("name") or "").strip(),
+                    "description": str(item.get("description") or "").strip(),
+                    "path": path,
+                    "domain": domain,
+                },
+            )()
         )
     return result[:_MAX_SELECTED_SKILLS]

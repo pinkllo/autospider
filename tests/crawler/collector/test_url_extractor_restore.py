@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autospider.crawler.collector.url_extractor import URLExtractor
+from autospider.legacy.crawler.collector.url_extractor import URLExtractor
 
 
 class _FakeLocator:
@@ -25,7 +25,9 @@ class _FakePage:
         self.url = "https://example.com/list"
         self.goto_calls: list[str] = []
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 30000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 30000
+    ) -> None:
         del wait_until
         del timeout
         self.url = url
@@ -66,15 +68,15 @@ async def test_click_element_and_get_url_raises_when_restore_replay_fails(
             )
 
     monkeypatch.setattr(
-        "autospider.crawler.collector.url_extractor.click_and_capture_new_page",
+        "autospider.legacy.crawler.collector.url_extractor.click_and_capture_new_page",
         _change_url,
     )
     monkeypatch.setattr(
-        "autospider.crawler.collector.navigation_handler.NavigationHandler",
+        "autospider.legacy.crawler.collector.navigation_handler.NavigationHandler",
         _FakeNavigationHandler,
     )
     monkeypatch.setattr(
-        "autospider.crawler.collector.url_extractor.asyncio.sleep",
+        "autospider.legacy.crawler.collector.url_extractor.asyncio.sleep",
         lambda *_args, **_kwargs: _completed_awaitable(),
     )
 

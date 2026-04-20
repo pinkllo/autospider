@@ -7,8 +7,7 @@ UtcDatetime: TypeAlias = datetime
 
 
 class Clock(Protocol):
-    def now(self) -> UtcDatetime:
-        ...
+    def now(self) -> UtcDatetime: ...
 
 
 class SystemClock:

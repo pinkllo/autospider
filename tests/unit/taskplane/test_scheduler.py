@@ -1,15 +1,15 @@
 import pytest
 
-from autospider.taskplane.protocol import (
+from autospider.legacy.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
     TaskTicket,
     TicketStatus,
 )
-from autospider.taskplane.scheduler import TaskScheduler
-from autospider.taskplane.store.memory_store import MemoryStore
-from autospider.taskplane.subscription import Subscription
+from autospider.legacy.taskplane.scheduler import TaskScheduler
+from autospider.legacy.taskplane.store.memory_store import MemoryStore
+from autospider.legacy.taskplane.subscription import Subscription
 
 
 @pytest.fixture
@@ -39,7 +39,9 @@ class TestSubmit:
 
     async def test_submit_additional_tickets(self, scheduler: TaskScheduler) -> None:
         await scheduler.submit_envelope(_envelope(1))
-        ids = await scheduler.submit_tickets("e1", [TaskTicket(ticket_id="t_new", envelope_id="e1")])
+        ids = await scheduler.submit_tickets(
+            "e1", [TaskTicket(ticket_id="t_new", envelope_id="e1")]
+        )
         assert ids == ["t_new"]
 
     def test_subscribe_returns_subscription(self, scheduler: TaskScheduler) -> None:

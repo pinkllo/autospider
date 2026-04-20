@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -57,8 +56,7 @@ def test_format_prior_failures_lists_category_and_detail() -> None:
 
 def test_format_prior_failures_truncates_when_over_limit() -> None:
     failures = [
-        {"category": "rule_stale", "detail": f"case_{idx}", "metadata": {}}
-        for idx in range(8)
+        {"category": "rule_stale", "detail": f"case_{idx}", "metadata": {}} for idx in range(8)
     ]
     planner = _planner_with_failures(failures)
 
@@ -76,8 +74,7 @@ def test_format_prior_failures_keeps_newest_entries_on_truncation() -> None:
     这是 replan 链路的核心不变量：长循环下只有最近的失败信号对下一步策略有指导意义。
     """
     failures = [
-        {"category": "rule_stale", "detail": f"case_{idx}", "metadata": {}}
-        for idx in range(8)
+        {"category": "rule_stale", "detail": f"case_{idx}", "metadata": {}} for idx in range(8)
     ]
     planner = _planner_with_failures(failures)
 

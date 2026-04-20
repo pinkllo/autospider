@@ -10,18 +10,18 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.pipeline.helpers import build_execution_context
-from autospider.pipeline.runner import run_pipeline
-from autospider.pipeline.types import ExecutionRequest
-from autospider.pipeline.worker import SubTaskWorker
-from autospider.graph.subgraphs.multi_dispatch import run_subtask_worker_node
-from autospider.graph.control_types import (
+from autospider.legacy.pipeline.helpers import build_execution_context
+from autospider.legacy.pipeline.runner import run_pipeline
+from autospider.legacy.pipeline.types import ExecutionRequest
+from autospider.legacy.pipeline.worker import SubTaskWorker
+from autospider.legacy.graph.subgraphs.multi_dispatch import run_subtask_worker_node
+from autospider.legacy.graph.control_types import (
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.graph.decision_context import build_decision_context
+from autospider.legacy.graph.decision_context import build_decision_context
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
-from autospider.graph.world_model import build_initial_world_model, upsert_page_model
+from autospider.legacy.graph.world_model import build_initial_world_model, upsert_page_model
 
 
 def test_execution_request_from_params_preserves_decision_payloads() -> None:
@@ -33,9 +33,7 @@ def test_execution_request_from_params_preserves_decision_payloads() -> None:
         "world_snapshot": {
             "page_models": {"entry": {"page_type": "list_page"}},
         },
-        "failure_records": [
-            {"page_id": "entry", "category": "navigation", "detail": "timed_out"}
-        ],
+        "failure_records": [{"page_id": "entry", "category": "navigation", "detail": "timed_out"}],
     }
 
     request = ExecutionRequest.from_params(params, thread_id="thread-1")
@@ -194,7 +192,7 @@ def test_runtime_context_prefers_workflow_payloads_over_legacy_compat_fields() -
 async def test_run_pipeline_passes_learning_snapshots_into_finalization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.pipeline.runner as runner_module
+    import autospider.legacy.pipeline.runner as runner_module
 
     captured: dict[str, object] = {}
 
@@ -277,9 +275,16 @@ async def test_run_pipeline_passes_learning_snapshots_into_finalization(
 
     finalization_context = captured["context"]
     assert finalization_context.world_snapshot == workflow_world_snapshot
-    assert finalization_context.site_profile_snapshot == {"host": "example.com", "supports_pagination": True}
-    assert finalization_context.failure_records == [{"category": "rule_stale", "detail": "selector stale"}]
-    assert finalization_context.failure_patterns == [{"pattern_id": "loop-detected", "trigger": "ABAB loop"}]
+    assert finalization_context.site_profile_snapshot == {
+        "host": "example.com",
+        "supports_pagination": True,
+    }
+    assert finalization_context.failure_records == [
+        {"category": "rule_stale", "detail": "selector stale"}
+    ]
+    assert finalization_context.failure_patterns == [
+        {"pattern_id": "loop-detected", "trigger": "ABAB loop"}
+    ]
 
 
 def test_subtask_worker_prepare_fields_prefers_fixed_fields_for_category_like_values() -> None:
@@ -312,7 +317,9 @@ def test_subtask_worker_prepare_fields_prefers_fixed_fields_for_category_like_va
     assert title_field.fixed_value in (None, "")
 
 
-def test_subtask_worker_prepare_fields_overrides_upstream_category_extraction_with_scoped_value() -> None:
+def test_subtask_worker_prepare_fields_overrides_upstream_category_extraction_with_scoped_value() -> (
+    None
+):
     subtask = SubTask(
         id="leaf_001",
         name="交通运输工程",
@@ -416,7 +423,7 @@ def test_subtask_worker_prepare_fields_does_not_override_non_category_fields() -
 async def test_run_subtask_worker_node_uses_per_subtask_target_count_when_global_target_is_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.graph.subgraphs.multi_dispatch as dispatch_module
+    import autospider.legacy.graph.subgraphs.multi_dispatch as dispatch_module
 
     captured: dict[str, object] = {}
 
@@ -471,7 +478,7 @@ async def test_run_subtask_worker_node_uses_per_subtask_target_count_when_global
 async def test_run_subtask_worker_node_prefers_per_subtask_target_count_for_grouped_category_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.graph.subgraphs.multi_dispatch as dispatch_module
+    import autospider.legacy.graph.subgraphs.multi_dispatch as dispatch_module
 
     captured: dict[str, object] = {}
 

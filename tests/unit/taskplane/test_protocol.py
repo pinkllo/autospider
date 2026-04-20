@@ -1,4 +1,4 @@
-from autospider.taskplane.protocol import (
+from autospider.legacy.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
@@ -119,4 +119,3 @@ class TestTaskResult:
             spawned_tickets=[{"ticket_id": "t1-child1", "payload": {}}],
         )
         assert len(result.spawned_tickets) == 1
-

@@ -54,7 +54,9 @@ class PlanningEventPublisher:
         run_id: str | None = None,
         output_dir: str = "output",
     ) -> str:
-        payload = SubTaskPlannedPayload(plan_id=plan_id, subtask=dict(subtask), output_dir=output_dir)
+        payload = SubTaskPlannedPayload(
+            plan_id=plan_id, subtask=dict(subtask), output_dir=output_dir
+        )
         return await self._publish(
             event_type=SUBTASK_PLANNED_EVENT,
             payload=payload.model_dump(mode="python"),
