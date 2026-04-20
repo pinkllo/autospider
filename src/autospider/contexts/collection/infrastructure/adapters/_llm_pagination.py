@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.legacy.common.llm.streaming import ainvoke_with_stream
-from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.platform.llm.streaming import ainvoke_with_stream
+from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,

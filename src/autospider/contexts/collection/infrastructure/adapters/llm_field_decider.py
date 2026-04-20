@@ -17,8 +17,8 @@ from autospider.legacy.common.accessibility import get_accessibility_text
 from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_decision_context,
 )
-from autospider.legacy.common.llm.streaming import ainvoke_with_stream
-from autospider.legacy.common.llm.trace_logger import append_llm_trace
+from autospider.platform.llm.streaming import ainvoke_with_stream
+from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import (
     coerce_bool,
@@ -32,7 +32,7 @@ from autospider.legacy.domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from autospider.legacy.common.llm import LLMDecider
+    from autospider.platform.llm import LLMDecider
     from autospider.platform.shared_kernel.types import ElementMark, SoMSnapshot
 
 

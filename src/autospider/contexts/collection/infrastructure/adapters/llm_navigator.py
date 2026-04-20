@@ -14,7 +14,7 @@ from autospider.contexts.collection.infrastructure.adapters._llm_pagination impo
 )
 
 if TYPE_CHECKING:
-    from autospider.legacy.common.llm import LLMDecider
+    from autospider.platform.llm import LLMDecider
     from playwright.async_api import Page
 
 logger = get_logger(__name__)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from autospider.legacy.common.llm.task_clarifier import TaskClarifier
+from autospider.platform.llm.task_clarifier import TaskClarifier
 from autospider.contexts.chat.domain.model import ClarificationResult, DialogueMessage
 
 

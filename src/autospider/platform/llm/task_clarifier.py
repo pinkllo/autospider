@@ -7,16 +7,16 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ....contexts.chat.domain.model import (
+from autospider.contexts.chat.domain.model import (
     ClarificationResult,
     ClarifiedTask,
     DialogueMessage,
     RequestedField,
 )
 from autospider.platform.config.runtime import config
-from ..grouping_semantics import normalize_grouping_semantics
-from ..llm_contracts import validate_task_clarifier_payload
-from ..protocol import (
+from autospider.legacy.common.grouping_semantics import normalize_grouping_semantics
+from autospider.legacy.common.llm_contracts import validate_task_clarifier_payload
+from autospider.legacy.common.protocol import (
     extract_json_dict_from_llm_payload,
     extract_response_text_from_llm_payload,
     summarize_llm_payload,

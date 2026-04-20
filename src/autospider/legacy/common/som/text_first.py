@@ -15,8 +15,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
-from ..llm.streaming import ainvoke_with_stream
-from ..llm.trace_logger import append_llm_trace
+from autospider.platform.llm.streaming import ainvoke_with_stream
+from autospider.platform.llm.trace_logger import append_llm_trace
 from ..protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message,

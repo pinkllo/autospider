@@ -112,7 +112,7 @@ def _check_runtime_log_path() -> DoctorCheckResult:
 
 def _check_llm_trace_path() -> DoctorCheckResult:
     from autospider.platform.config.runtime import get_config
-    from .common.llm.trace_logger import _resolve_trace_path
+    from autospider.platform.llm.trace_logger import _resolve_trace_path
 
     try:
         runtime_config = get_config(reload=True)

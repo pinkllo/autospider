@@ -10,15 +10,15 @@ from langchain_openai import ChatOpenAI
 
 from autospider.platform.config.runtime import config
 from autospider.platform.shared_kernel.types import Action, ActionType, ScrollInfo
-from ..protocol import (
+from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message_diagnostics,
     summarize_llm_payload,
 )
-from ..som.text_first import resolve_single_mark_id
+from autospider.legacy.common.som.text_first import resolve_single_mark_id
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
-from ....contexts.planning.domain import classify_protocol_violation
+from autospider.contexts.planning.domain import classify_protocol_violation
 from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from autospider.platform.observability.logger import get_logger
-from ...common.llm import LLMDecider
+from autospider.platform.llm import LLMDecider
 from ....contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
     ConfigPersistence,

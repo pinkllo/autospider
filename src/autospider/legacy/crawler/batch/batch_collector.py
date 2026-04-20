@@ -22,7 +22,7 @@ from ..collector import (
     LLMDecisionMaker,
     NavigationHandler,
 )
-from ...common.llm import LLMDecider
+from autospider.platform.llm import LLMDecider
 from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:

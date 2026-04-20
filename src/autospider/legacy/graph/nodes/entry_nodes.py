@@ -13,8 +13,8 @@ from langgraph.types import interrupt
 
 from autospider.platform.config.runtime import config
 from ...common.grouping_semantics import normalize_grouping_semantics
-from ...common.llm.streaming import ainvoke_with_stream
-from ...common.llm.trace_logger import append_llm_trace
+from autospider.platform.llm.streaming import ainvoke_with_stream
+from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
 from ...common.protocol import (
     extract_json_dict_from_llm_payload,

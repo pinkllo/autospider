@@ -27,7 +27,7 @@ from autospider.legacy.graph.recovery import build_recovery_directive
 if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
-    from autospider.legacy.common.llm import LLMDecider
+    from autospider.platform.llm import LLMDecider
 
 
 logger = get_logger(__name__)
