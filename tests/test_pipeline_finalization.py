@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from autospider.legacy.common.storage.task_run_query_service import TaskRunQueryService
+from autospider.platform.persistence.redis.task_run_query_service import TaskRunQueryService
 from autospider.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
@@ -70,7 +70,7 @@ def _make_context(**overrides) -> PipelineFinalizationContext:
 
 def test_build_task_run_payload_carries_learning_snapshots(monkeypatch) -> None:
     monkeypatch.setattr(
-        "autospider.legacy.common.db.repositories.TaskRunPayload",
+        "autospider.platform.persistence.sql.orm.repositories.TaskRunPayload",
         _CapturedPayload,
     )
     context = _make_context()

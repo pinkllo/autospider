@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..common.db.engine import session_scope
-from ..common.db.repositories import TaskRepository
+from autospider.platform.persistence.sql.orm.engine import session_scope
+from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from .types import (

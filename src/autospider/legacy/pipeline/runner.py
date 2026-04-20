@@ -184,9 +184,9 @@ async def _persist_run_snapshot(
     committed_records: list[dict[str, Any]] | None = None,
 ) -> None:
     def _save() -> None:
-        from ..common.db.engine import session_scope
-        from ..common.db.repositories import TaskRepository, TaskRunPayload
-        from ..common.storage.task_run_query_service import normalize_url
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories import TaskRepository, TaskRunPayload
+        from autospider.platform.persistence.redis.task_run_query_service import normalize_url
 
         payload = TaskRunPayload(
             normalized_url=normalize_url(str(identity.list_url or "").strip()),
@@ -230,8 +230,8 @@ async def _persist_run_snapshot(
 
 async def _claim_persisted_item(*, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
     def _claim() -> dict[str, Any]:
-        from ..common.db.engine import session_scope
-        from ..common.db.repositories import TaskRepository
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
         with session_scope() as session:
             return TaskRepository(session).claim_item(
@@ -252,8 +252,8 @@ async def _commit_persisted_item(
     worker_id: str,
 ) -> dict[str, Any]:
     def _commit() -> dict[str, Any]:
-        from ..common.db.engine import session_scope
-        from ..common.db.repositories import TaskRepository
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
         with session_scope() as session:
             return TaskRepository(session).commit_item(
@@ -278,8 +278,8 @@ async def _fail_persisted_item(
     error_kind: str,
 ) -> dict[str, Any]:
     def _fail() -> dict[str, Any]:
-        from ..common.db.engine import session_scope
-        from ..common.db.repositories import TaskRepository
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
         with session_scope() as session:
             return TaskRepository(session).fail_item(
@@ -297,8 +297,8 @@ async def _fail_persisted_item(
 
 async def _ack_persisted_item(*, execution_id: str, url: str) -> dict[str, Any]:
     def _ack() -> dict[str, Any]:
-        from ..common.db.engine import session_scope
-        from ..common.db.repositories import TaskRepository
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
         with session_scope() as session:
             return TaskRepository(session).ack_item(execution_id=execution_id, url=url)

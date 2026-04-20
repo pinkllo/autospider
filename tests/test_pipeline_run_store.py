@@ -173,7 +173,7 @@ def test_build_semantic_signature_keeps_actual_field_set_when_explicit_payload_o
 
 
 def test_build_task_run_payload_includes_semantic_identity(monkeypatch) -> None:
-    monkeypatch.setattr("autospider.legacy.common.db.repositories.TaskRunPayload", _CapturedPayload)
+    monkeypatch.setattr("autospider.platform.persistence.sql.orm.repositories.TaskRunPayload", _CapturedPayload)
     context = _make_context()
 
     payload = _build_task_run_payload(context, {})

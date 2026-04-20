@@ -5,7 +5,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.legacy.common.db.engine import _normalize_database_url
+from autospider.platform.persistence.sql.orm.engine import _normalize_database_url
 
 
 def test_normalize_database_url_prefers_psycopg_for_plain_postgresql() -> None:

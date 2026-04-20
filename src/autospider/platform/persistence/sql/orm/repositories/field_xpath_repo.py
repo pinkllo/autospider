@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from autospider.legacy.common.db.models import FieldXPath
+from autospider.platform.persistence.sql.orm.models import FieldXPath
 
 
 class FieldXPathRepository:

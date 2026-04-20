@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from autospider.legacy.common.browser.intervention import BrowserInterventionRequired
 from autospider.legacy.common.channel.base import URLTask
-from autospider.legacy.common.db.models import Base
-from autospider.legacy.common.db.repositories.task_repo import TaskRepository, TaskRunPayload
+from autospider.platform.persistence.sql.orm.models import Base
+from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository, TaskRunPayload
 from autospider.legacy.pipeline import runner
 
 

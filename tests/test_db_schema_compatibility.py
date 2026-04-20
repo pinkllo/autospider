@@ -9,8 +9,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.legacy.common.db.engine import _validate_expected_schema
-from autospider.legacy.common.db.models import Base
+from autospider.platform.persistence.sql.orm.engine import _validate_expected_schema
+from autospider.platform.persistence.sql.orm.models import Base
 
 
 def test_validate_expected_schema_upgrades_old_tasks_table_additively() -> None:

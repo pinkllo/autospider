@@ -27,7 +27,7 @@ class _FakeRedisClient:
 
 def _load_runtime_store_module():
     try:
-        return importlib.import_module("autospider.legacy.common.storage.pipeline_runtime_store")
+        return importlib.import_module("autospider.platform.persistence.redis.pipeline_runtime_store")
     except ModuleNotFoundError as exc:
         pytest.fail(f"pipeline runtime store module missing: {exc}")
 

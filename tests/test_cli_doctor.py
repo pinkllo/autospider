@@ -12,7 +12,7 @@ _HEAVY_PREFIXES = (
     "autospider.interface.cli",
     "autospider.legacy.cli_runtime",
     "autospider.legacy.graph",
-    "autospider.legacy.common.db.engine",
+    "autospider.platform.persistence.sql.orm.engine",
     "autospider.legacy.domain.fields",
 )
 
@@ -40,7 +40,7 @@ def test_importing_cli_does_not_eagerly_import_graph_runtime() -> None:
     fresh_import_cli()
 
     assert "autospider.legacy.graph" not in sys.modules
-    assert "autospider.legacy.common.db.engine" not in sys.modules
+    assert "autospider.platform.persistence.sql.orm.engine" not in sys.modules
     assert "autospider.legacy.domain.fields" not in sys.modules
 
 
@@ -50,7 +50,7 @@ def test_root_help_registration_does_not_import_graph_runtime() -> None:
 
     assert "doctor" in command_names
     assert "autospider.legacy.graph" not in sys.modules
-    assert "autospider.legacy.common.db.engine" not in sys.modules
+    assert "autospider.platform.persistence.sql.orm.engine" not in sys.modules
 
 
 def test_doctor_command_reports_failure_without_importing_graph_runtime(

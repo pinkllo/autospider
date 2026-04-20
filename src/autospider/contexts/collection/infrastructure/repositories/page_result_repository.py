@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from autospider.legacy.common.db.engine import session_scope
-from autospider.legacy.common.db.repositories import TaskRepository
+from autospider.platform.persistence.sql.orm.engine import session_scope
+from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
 
 class PageResultRepository:

@@ -26,7 +26,7 @@ def bootstrap_cli_logging(*, output_dir: str | None = None) -> None:
 
 
 def init_database(*, reset: bool = False) -> None:
-    from .common.db.engine import init_db
+    from autospider.platform.persistence.sql.orm.engine import init_db
 
     init_db(reset=reset)
 
@@ -134,7 +134,7 @@ def _check_llm_trace_path() -> DoctorCheckResult:
 
 def _check_database() -> DoctorCheckResult:
     from autospider.platform.config.runtime import config
-    from .common.db.engine import get_engine
+    from autospider.platform.persistence.sql.orm.engine import get_engine
 
     try:
         engine = get_engine()
@@ -151,7 +151,7 @@ def _check_database() -> DoctorCheckResult:
 
 def _check_redis() -> DoctorCheckResult:
     from autospider.platform.config.runtime import config
-    from .common.storage.redis_pool import get_sync_client
+    from autospider.platform.persistence.redis.pool import get_sync_client
 
     if not config.redis.enabled:
         return DoctorCheckResult(

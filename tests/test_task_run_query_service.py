@@ -5,13 +5,13 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from autospider.legacy.common.db.models import Base, TaskRecord, TaskRun
-from autospider.legacy.common.db.repositories.task_repo import (
+from autospider.platform.persistence.sql.orm.models import Base, TaskRecord, TaskRun
+from autospider.platform.persistence.sql.orm.repositories.task_repo import (
     TaskRepository,
     TaskRunPayload,
     _build_registry_id,
 )
-from autospider.legacy.common.storage.task_run_query_service import (
+from autospider.platform.persistence.redis.task_run_query_service import (
     TaskRunQueryService,
     normalize_url,
 )
@@ -347,7 +347,7 @@ def test_save_run_with_missing_semantic_signature_upgrades_legacy_history_semant
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.legacy.common.storage.task_run_query_service._cache",
+        "autospider.platform.persistence.redis.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),
@@ -399,7 +399,7 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.legacy.common.storage.task_run_query_service._cache",
+        "autospider.platform.persistence.redis.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),

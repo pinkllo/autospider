@@ -8,8 +8,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.storage.pipeline_runtime_store import PipelineRuntimeStore
-from autospider.legacy.common.storage.redis_pool import get_sync_client
+from autospider.platform.persistence.redis.pipeline_runtime_store import PipelineRuntimeStore
+from autospider.platform.persistence.redis.pool import get_sync_client
 
 logger = get_logger(__name__)
 
@@ -152,8 +152,8 @@ class TaskRunQueryService:
         return self._runtime_store_get(target)
 
     def _db_find_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
-        from autospider.legacy.common.db.engine import session_scope
-        from autospider.legacy.common.db.repositories.task_repo import TaskRepository
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository
 
         with session_scope() as session:
             repo = TaskRepository(session)
@@ -170,8 +170,8 @@ class TaskRunQueryService:
         return None
 
     def _db_list_run_snapshots_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
-        from autospider.legacy.common.db.engine import session_scope
-        from autospider.legacy.common.db.models import TaskRecord, TaskRun
+        from autospider.platform.persistence.sql.orm.engine import session_scope
+        from autospider.platform.persistence.sql.orm.models import TaskRecord, TaskRun
 
         with session_scope() as session:
             runs = (

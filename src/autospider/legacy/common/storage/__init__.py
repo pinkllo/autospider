@@ -1,5 +1,5 @@
 """Common storage exports."""
 
-from .redis_manager import RedisQueueManager
+from autospider.platform.persistence.redis.queue_manager import RedisQueueManager
 
 __all__ = ["RedisQueueManager"]

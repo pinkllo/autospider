@@ -10,7 +10,7 @@ from typing import Any, Iterator
 from unittest.mock import patch
 
 from autospider.legacy.common.channel.base import URLChannel, URLTask
-from autospider.legacy.common.storage.pipeline_runtime_store import PipelineRuntimeStore
+from autospider.platform.persistence.redis.pipeline_runtime_store import PipelineRuntimeStore
 from autospider.legacy.domain.fields import FieldDefinition
 from autospider.legacy.pipeline.finalization import (
     DURABILITY_STATE_DURABLE,

@@ -395,8 +395,8 @@ def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
     if not execution_id:
         return {}
 
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.engine import session_scope
+    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
 
     records: dict[str, dict] = {}
     with session_scope() as session:
@@ -624,8 +624,8 @@ def _build_task_run_payload(
     context: "PipelineFinalizationContext",
     records: dict[str, dict],
 ):
-    from ..common.db.repositories import TaskRunPayload
-    from ..common.storage.task_run_query_service import normalize_url
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunPayload
+    from autospider.platform.persistence.redis.task_run_query_service import normalize_url
 
     normalized_url = normalize_url(context.list_url)
     if not normalized_url:
@@ -640,9 +640,9 @@ def persist_pipeline_records(
     context: "PipelineFinalizationContext", records: dict[str, dict]
 ) -> None:
     """将现版本运行结果持久化到 PostgreSQL。"""
-    from ..common.db.engine import session_scope
-    from ..common.db.repositories import TaskRepository
-    from ..common.storage.task_run_query_service import invalidate_task_cache
+    from autospider.platform.persistence.sql.orm.engine import session_scope
+    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.redis.task_run_query_service import invalidate_task_cache
 
     payload = _build_task_run_payload(context, records)
     if payload is None:

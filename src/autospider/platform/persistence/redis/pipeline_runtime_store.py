@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from autospider.legacy.common.storage.redis_pool import get_sync_client
+from autospider.platform.persistence.redis.pool import get_sync_client
 
 _KEY_PREFIX = "autospider:task_progress:"
 _PAYLOAD_FIELD = "payload"

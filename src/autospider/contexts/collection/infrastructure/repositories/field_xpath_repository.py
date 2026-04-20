@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Protocol
 from urllib.parse import urlparse
 
-from autospider.legacy.common.db.engine import session_scope
-from autospider.legacy.common.db.repositories import FieldXPathRepository
+from autospider.platform.persistence.sql.orm.engine import session_scope
+from autospider.platform.persistence.sql.orm.repositories import FieldXPathRepository
 from autospider.legacy.domain.fields import FieldDefinition
 
 MIN_ACTIVATION_SUCCESSES = 2

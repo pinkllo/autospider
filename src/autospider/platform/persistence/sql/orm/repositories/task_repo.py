@@ -11,7 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from autospider.legacy.common.db.models import (
+from autospider.platform.persistence.sql.orm.models import (
     TaskRecord,
     TaskRun,
     TaskRunItem,
