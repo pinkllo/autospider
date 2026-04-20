@@ -16,7 +16,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.graph.nodes.feedback_nodes import (
     REPLAN_BUDGET_EXHAUSTED_REASON,
     monitor_dispatch_node,

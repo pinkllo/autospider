@@ -11,7 +11,7 @@ if str(SRC_ROOT) not in sys.path:
 
 import autospider.legacy.graph.main_graph as main_graph_module
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.graph.main_graph import build_main_graph, resolve_feedback_route
 from autospider.legacy.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
 

@@ -44,25 +44,25 @@ def load_graph_runtime():
 
 
 def build_field_definition(payload: dict[str, Any]):
-    from .domain.fields import build_field_definitions
+    from autospider.contexts.collection.domain.fields import build_field_definitions
 
     return build_field_definitions([payload])[0]
 
 
 def build_field_definitions(payloads: list[dict[str, Any]]):
-    from .domain.fields import build_field_definitions as _build_field_definitions
+    from autospider.contexts.collection.domain.fields import build_field_definitions as _build_field_definitions
 
     return _build_field_definitions(item for item in payloads if isinstance(item, dict))
 
 
 def create_field_definition(**payload: Any):
-    from .domain.fields import FieldDefinition
+    from autospider.contexts.collection.domain.fields import FieldDefinition
 
     return FieldDefinition(**payload)
 
 
 def serialize_field_definitions_payload(fields: list[Any]) -> list[dict[str, Any]]:
-    from .domain.fields import serialize_field_definitions
+    from autospider.contexts.collection.domain.fields import serialize_field_definitions
 
     return serialize_field_definitions(fields)
 

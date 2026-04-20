@@ -11,7 +11,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from autospider.platform.config.runtime import config
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.graph.subgraphs.multi_dispatch import (
     finalize_subtask_flow,
     initialize_multi_dispatch,

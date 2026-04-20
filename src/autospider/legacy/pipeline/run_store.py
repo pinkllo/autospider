@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .types import PipelineMode, TaskIdentity
-from ..domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 
 def _release_inflight_items_for_resume(execution_id: str) -> int:

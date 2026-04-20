@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 from .field_config import ensure_field_definition, field_to_payload
 
 

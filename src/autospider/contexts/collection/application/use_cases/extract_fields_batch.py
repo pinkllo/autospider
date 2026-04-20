@@ -12,7 +12,7 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 )
 from autospider.platform.config.runtime import config
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 from autospider.contexts.collection.infrastructure.field.batch_xpath_extractor import BatchXPathExtractor
 from autospider.contexts.collection.infrastructure.field.field_config import field_rules_to_payload
 from autospider.contexts.collection.infrastructure.field.field_extractor import FieldExtractor

@@ -28,7 +28,7 @@ from autospider.platform.llm.protocol import (
 )
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

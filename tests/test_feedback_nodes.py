@@ -10,7 +10,7 @@ if str(SRC_ROOT) not in sys.path:
 import pytest
 from langgraph.graph import END, StateGraph
 
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.graph.nodes.feedback_nodes import (
     monitor_dispatch_node,
     update_world_model_node,

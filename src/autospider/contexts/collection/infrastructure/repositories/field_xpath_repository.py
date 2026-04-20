@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from autospider.platform.persistence.sql.orm.engine import session_scope
 from autospider.platform.persistence.sql.orm.repositories import FieldXPathRepository
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 MIN_ACTIVATION_SUCCESSES = 2
 MAX_XPATHS_PER_FIELD = 8

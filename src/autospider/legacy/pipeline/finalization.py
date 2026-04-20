@@ -27,7 +27,7 @@ from autospider.platform.persistence.files.idempotent_io import write_json_idemp
 from ...contexts.planning.domain import FATAL_CATEGORY
 
 if TYPE_CHECKING:
-    from ..domain.fields import FieldDefinition
+    from autospider.contexts.collection.domain.fields import FieldDefinition
     from .orchestration import PipelineRuntimeState, PipelineSessionBundle
     from .progress_tracker import TaskProgressTracker
 

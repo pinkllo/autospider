@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
-    "FieldDefinition": ("autospider.legacy.domain.fields", "FieldDefinition"),
+    "FieldDefinition": ("autospider.contexts.collection.domain.fields", "FieldDefinition"),
     "FieldExtractionResult": ("autospider.contexts.collection.infrastructure.field.models", "FieldExtractionResult"),
     "PageExtractionRecord": ("autospider.contexts.collection.infrastructure.field.models", "PageExtractionRecord"),
     "BatchExtractionResult": ("autospider.contexts.collection.infrastructure.field.models", "BatchExtractionResult"),

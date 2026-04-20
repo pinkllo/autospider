@@ -21,7 +21,7 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 from .models import (
     BatchExtractionResult,

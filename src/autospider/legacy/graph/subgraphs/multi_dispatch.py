@@ -10,7 +10,7 @@ from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.platform.config.runtime import config
 from ....contexts.planning.application.handlers import PlanMutationService
 from ....contexts.planning.domain import TaskPlan
-from ...domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ...pipeline.runtime_controls import resolve_concurrency_settings
 from ...pipeline.subtask_runtime import (
     apply_runtime_state_to_plan,

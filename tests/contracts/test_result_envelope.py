@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.taskplane_adapter.result_bridge import ResultBridge
 
 from . import contract_tmp_dir, run_contract_pipeline, snapshot_shape

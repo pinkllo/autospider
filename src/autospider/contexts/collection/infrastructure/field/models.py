@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from autospider.legacy.domain.fields import FieldDefinition, build_field_definitions
+from autospider.contexts.collection.domain.fields import FieldDefinition, build_field_definitions
 
 
 def _normalize_xpath_fallbacks(value: Any) -> tuple[str, ...]:

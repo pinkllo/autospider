@@ -11,7 +11,7 @@ from autospider.contexts.collection.infrastructure.channel.base import URLChanne
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from ..domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 from ...contexts.planning.domain import classify_runtime_exception
 from .progress_tracker import TaskProgressTracker
 

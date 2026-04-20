@@ -1,8 +1,8 @@
-"""跨模块共享的领域模型。"""
+"""Compat shim: re-exports of legacy domain models now relocated under contexts.*."""
 
-from .fields import FieldDefinition
-from ...contexts.planning.domain import SubTask, SubTaskStatus, TaskPlan
-from .runtime import SubTaskRuntimeState, SubTaskRuntimeSummary
+from autospider.contexts.collection.domain.fields import FieldDefinition
+from autospider.contexts.planning.domain import SubTask, SubTaskStatus, TaskPlan
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState, SubTaskRuntimeSummary
 
 __all__ = [
     "FieldDefinition",

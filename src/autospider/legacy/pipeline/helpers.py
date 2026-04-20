@@ -19,7 +19,7 @@ from ...contexts.collection.infrastructure.repositories.config_repository import
     coerce_collection_config,
 )
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from ..domain.fields import (
+from autospider.contexts.collection.domain.fields import (
     FieldDefinition,
     build_field_definitions as build_domain_field_definitions,
 )

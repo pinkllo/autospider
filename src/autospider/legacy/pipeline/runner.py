@@ -19,7 +19,7 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ..domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 from ...contexts.planning.domain import (
     SITE_DEFENSE_CATEGORY,
     classify_runtime_exception,

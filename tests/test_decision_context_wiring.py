@@ -81,7 +81,7 @@ async def test_field_decider_injects_decision_context_into_navigation_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import autospider.contexts.collection.infrastructure.field.field_decider as field_decider_module
-    from autospider.legacy.domain.fields import FieldDefinition
+    from autospider.contexts.collection.domain.fields import FieldDefinition
 
     captured: dict[str, object] = {}
 

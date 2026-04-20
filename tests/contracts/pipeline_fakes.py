@@ -9,7 +9,7 @@ from typing import Any, Iterator
 from urllib.request import urlopen
 
 from autospider.contexts.collection.infrastructure.channel.base import URLChannel
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 MOCK_HTML = (
     "<html><body><article data-kind='product'>"

@@ -1,4 +1,4 @@
-from autospider.legacy.domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.legacy.taskplane.protocol import ResultStatus, TaskResult
 from autospider.legacy.taskplane_adapter.result_bridge import ResultBridge
 

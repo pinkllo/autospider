@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from ..domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ..taskplane.protocol import ResultStatus, TaskResult
 
 _STATUS_MAP: dict[str, ResultStatus] = {

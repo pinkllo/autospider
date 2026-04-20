@@ -9,7 +9,7 @@ from autospider.contexts.collection.infrastructure.repositories.field_xpath_repo
     FieldXPathQueryService,
     FieldXPathWriteService,
 )
-from autospider.legacy.domain.fields import FieldDefinition
+from autospider.contexts.collection.domain.fields import FieldDefinition
 
 from autospider.contexts.collection.infrastructure.field.batch_xpath_extractor import BatchXPathExtractor
 from autospider.contexts.collection.infrastructure.field.field_config import ensure_extraction_config

@@ -15,7 +15,7 @@ _PURGE_PREFIXES = (
     "autospider.legacy.cli_runtime",
     "autospider.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
-    "autospider.legacy.domain.fields",
+    "autospider.contexts.collection.domain.fields",
     "typer",
     "click",
     "rich",

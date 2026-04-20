@@ -32,7 +32,7 @@ from ....contexts.planning.infrastructure.adapters.task_planner import (
     build_planner_world_payload,
 )
 from ....contexts.planning.domain import TaskPlan
-from ...domain.runtime import SubTaskRuntimeState
+from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ..control_types import build_default_recovery_policy
 from ....contexts.planning.domain import classify_runtime_exception
 from ..recovery import RETRY_ACTION, build_recovery_directive
