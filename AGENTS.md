@@ -8,7 +8,7 @@ Core code lives in `src/autospider/` and follows the Bounded Context layout intr
 - `interface/cli/` — Typer CLI entry points (`chat_pipeline`, `resume`, `doctor`, `benchmark`).
 - `platform/{shared_kernel,observability,persistence,messaging}/` — cross-cutting infrastructure (IDs, logging, Redis/SQL adapters, messaging ports).
 - `platform/persistence/redis/keys.py` — centralized Redis key registry (`v1:` prefix required, see `refactor/adr/0002-redis-as-queue-and-store.md`).
-- `legacy/` — phase-4 residual modules retained until full deletion; no new code goes here.
+- `composition/legacy/` — graph/pipeline/taskplane modules retained pending architectural redesign; no new code goes here.
 - `prompts/` — LLM prompt templates (YAML assets).
 
 Tests are under `tests/{contexts,composition,platform,interface,contracts,e2e,benchmark,integration,unit}/`. Runtime artifacts land under `output/runs/<run_id>/` per `refactor/adr/0003-run-artifact-layout.md`.
