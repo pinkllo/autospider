@@ -11,7 +11,7 @@ from autospider.legacy.common.decision_context_format import (
 )
 from autospider.legacy.common.llm.streaming import ainvoke_with_stream
 from autospider.legacy.common.llm.trace_logger import append_llm_trace
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message,
@@ -20,12 +20,12 @@ from autospider.legacy.common.protocol import (
 from autospider.legacy.common.som.text_first import (
     disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text,
 )
-from autospider.legacy.common.utils.prompt_template import render_template
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.contexts.collection.infrastructure.adapters._llm_shared import build_trace_payload
 from autospider.contexts.planning.domain import format_execution_brief
 
 if TYPE_CHECKING:
-    from autospider.legacy.common.types import ElementMark, SoMSnapshot
+    from autospider.platform.shared_kernel.types import ElementMark, SoMSnapshot
 
 logger = get_logger(__name__)
 

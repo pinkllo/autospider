@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
-from .logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

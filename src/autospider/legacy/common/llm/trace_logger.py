@@ -8,9 +8,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ..config import config
-from ..logger import get_logger
-from ..utils.paths import resolve_repo_path
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.shared_kernel.utils.paths import resolve_repo_path
 
 logger = get_logger(__name__)
 _TRACE_WRITE_LOCK = threading.Lock()

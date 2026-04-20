@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
-from ..types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
+from autospider.platform.shared_kernel.types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
 from .click_utils import click_and_capture_new_page, press_and_capture_new_page
 from .stuck_detector import StuckDetector
 
 if TYPE_CHECKING:
     from .guarded_page import GuardedPage
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -10,7 +10,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.legacy.common.types import Action, ActionType
+from autospider.platform.shared_kernel.types import Action, ActionType
 from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
 from autospider.contexts.planning.domain import classify_protocol_violation
 

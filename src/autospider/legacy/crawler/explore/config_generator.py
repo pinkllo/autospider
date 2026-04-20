@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from ...common.llm import LLMDecider
 from ....contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
@@ -39,7 +39,7 @@ from .shared_workflow import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ...common.types import SoMSnapshot
+    from autospider.platform.shared_kernel.types import SoMSnapshot
 
 
 logger = get_logger(__name__)

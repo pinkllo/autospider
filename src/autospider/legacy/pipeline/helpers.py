@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..common.config import config, normalize_pipeline_mode
+from autospider.platform.config.runtime import config, normalize_pipeline_mode
 from ..common.grouping_semantics import (
     build_normalized_strategy_payload,
     has_semantic_signature_inputs,
@@ -18,7 +18,7 @@ from ...contexts.collection.infrastructure.repositories.config_repository import
     CollectionConfig,
     coerce_collection_config,
 )
-from ..common.storage.idempotent_io import write_json_idempotent
+from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from ..domain.fields import (
     FieldDefinition,
     build_field_definitions as build_domain_field_definitions,

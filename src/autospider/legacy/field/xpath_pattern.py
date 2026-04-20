@@ -13,17 +13,17 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ..common.config import config
+from autospider.platform.config.runtime import config
 from ..common.llm.streaming import ainvoke_with_stream
 from ..common.llm.trace_logger import append_llm_trace
-from ..common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from ..common.protocol import (
     extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     summarize_llm_payload,
 )
-from ..common.utils.paths import get_prompt_path
-from ..common.utils.prompt_template import render_template
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from .value_helpers import is_semantically_valid
 from .xpath_helpers import (
     build_xpath_fallback_chain,

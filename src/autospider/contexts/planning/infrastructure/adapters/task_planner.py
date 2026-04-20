@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_openai import ChatOpenAI
 
-from autospider.legacy.common.config import config
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from autospider.contexts.planning.application.use_cases.control_payloads import (
     build_planner_control_payload,
     build_planner_world_payload,

@@ -10,7 +10,7 @@ from ..common.browser.runtime import BrowserRuntimeSession
 from ..common.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLTask
 from ..common.channel.factory import create_url_channel
-from ..common.config import config
+from autospider.platform.config.runtime import config
 from autospider.contexts.collection.application.use_cases.collect_urls import URLCollector
 from autospider.contexts.collection.application.use_cases.extract_fields import (
     DetailPageWorker,
@@ -24,7 +24,7 @@ from ...contexts.planning.domain import (
     SITE_DEFENSE_CATEGORY,
     classify_runtime_exception,
 )
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from .types import ExecutionContext, PipelineMode, PipelineRunResult, TaskIdentity
 from .finalization import (
     PipelineFinalizationContext,

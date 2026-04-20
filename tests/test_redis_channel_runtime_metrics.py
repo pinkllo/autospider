@@ -4,7 +4,7 @@ import pytest
 
 from autospider.legacy.common.channel.base import ChannelRuntimeEvent
 from autospider.legacy.common.channel.redis_channel import RedisURLChannel
-from autospider.legacy.common.config import config
+from autospider.platform.config.runtime import config
 
 
 class _FakeRedisManager:

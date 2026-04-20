@@ -21,11 +21,11 @@ from ..common.som import (
 )
 from ..common.som.text_first import resolve_single_mark_id
 from ..common.browser import ActionExecutor
-from ..common.types import Action, ActionType
-from ..common.config import config
-from ..common.logger import get_logger
+from autospider.platform.shared_kernel.types import Action, ActionType
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from ..common.protocol import coerce_bool
-from ..common.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
+from autospider.platform.shared_kernel.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from ..common.llm import LLMDecider
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (

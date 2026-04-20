@@ -6,7 +6,7 @@ import asyncio
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 from .base import BaseAnomalyHandler
 

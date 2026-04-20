@@ -8,24 +8,24 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ..config import config
-from ..types import Action, ActionType, ScrollInfo
+from autospider.platform.config.runtime import config
+from autospider.platform.shared_kernel.types import Action, ActionType, ScrollInfo
 from ..protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message_diagnostics,
     summarize_llm_payload,
 )
 from ..som.text_first import resolve_single_mark_id
-from ..utils.paths import get_prompt_path
-from ..utils.prompt_template import render_template
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from ....contexts.planning.domain import classify_protocol_violation
 from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ..types import AgentState, SoMSnapshot
-from autospider.legacy.common.logger import get_logger
+    from autospider.platform.shared_kernel.types import AgentState, SoMSnapshot
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

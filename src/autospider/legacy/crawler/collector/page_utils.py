@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from ...common.config import config
+from autospider.platform.config.runtime import config
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

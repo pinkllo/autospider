@@ -14,7 +14,11 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
 
-from .utils.paths import get_repo_root, resolve_output_path, resolve_repo_path
+from autospider.platform.shared_kernel.utils.paths import (
+    get_repo_root,
+    resolve_output_path,
+    resolve_repo_path,
+)
 
 if TYPE_CHECKING:
     pass
@@ -142,7 +146,7 @@ def get_logger(name: str) -> logging.Logger:
         配置好的日志器实例
 
     Example:
-        >>> from autospider.legacy.common.logger import get_logger
+        >>> from autospider.platform.observability.logger import get_logger
         >>> logger = get_logger(__name__)
         >>> logger.info("这是一条日志")
     """

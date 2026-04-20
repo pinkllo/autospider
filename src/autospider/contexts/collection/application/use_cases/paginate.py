@@ -6,8 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from autospider.legacy.common.browser.actions import ActionExecutor
-from autospider.legacy.common.config import config
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import coerce_bool
 from autospider.legacy.common.som import (
     build_mark_id_to_xpath_map,
@@ -16,7 +16,7 @@ from autospider.legacy.common.som import (
     inject_and_scan,
 )
 from autospider.legacy.common.som.text_first import resolve_single_mark_id
-from autospider.legacy.common.types import Action, ActionType
+from autospider.platform.shared_kernel.types import Action, ActionType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -461,7 +461,7 @@ class PaginationHandler:
                     logger.info("[Pagination] 策略1: 使用提取的 xpath...")
 
                     # 获取随机延迟
-                    from autospider.legacy.common.utils.delay import get_random_delay
+                    from autospider.platform.shared_kernel.utils.delay import get_random_delay
 
                     delay = get_random_delay(
                         config.url_collector.action_delay_base,
@@ -502,7 +502,7 @@ class PaginationHandler:
                     if is_visible:
                         logger.info(f"[Pagination] 规则匹配: {selector} (共{count}个元素)")
 
-                        from autospider.legacy.common.utils.delay import get_random_delay
+                        from autospider.platform.shared_kernel.utils.delay import get_random_delay
 
                         delay = get_random_delay(
                             config.url_collector.action_delay_base,
@@ -599,7 +599,7 @@ class PaginationHandler:
                 executor = ActionExecutor(self.page)
 
                 logger.info(f"[Pagination-LLM] 尝试点击 mark_id={mark_id_value}...")
-                from autospider.legacy.common.utils.delay import get_random_delay
+                from autospider.platform.shared_kernel.utils.delay import get_random_delay
 
                 delay = get_random_delay(
                     config.url_collector.action_delay_base,

@@ -20,7 +20,7 @@ if str(SRC_ROOT) not in sys.path:
 
 
 def _reload_trace_module():
-    config_module = importlib.import_module("autospider.legacy.common.config")
+    config_module = importlib.import_module("autospider.platform.config.runtime")
     trace_logger = importlib.import_module("autospider.legacy.common.llm.trace_logger")
 
     config_module.get_config(reload=True)

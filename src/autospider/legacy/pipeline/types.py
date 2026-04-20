@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from ..common.config import normalize_pipeline_mode
+from autospider.platform.config.runtime import normalize_pipeline_mode
 
 from ..common.grouping_semantics import normalize_grouping_semantics
 

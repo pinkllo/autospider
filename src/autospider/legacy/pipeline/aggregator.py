@@ -7,8 +7,8 @@ from pathlib import Path
 
 from ..common.db.engine import session_scope
 from ..common.db.repositories import TaskRepository
-from ..common.logger import get_logger
-from ..common.storage.idempotent_io import write_json_idempotent
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from .types import (
     AggregationEligibility,
     AggregationFailure,

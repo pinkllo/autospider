@@ -14,7 +14,7 @@ from autospider.legacy.common.protocol import (
     parse_protocol_message,
     parse_protocol_message_diagnostics,
 )
-from autospider.legacy.common.types import ActionType
+from autospider.platform.shared_kernel.types import ActionType
 from autospider.contexts.planning.domain import (
     classify_protocol_violation,
     classify_runtime_exception,

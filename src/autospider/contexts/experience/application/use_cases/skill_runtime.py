@@ -5,17 +5,17 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.legacy.common.config import config
+from autospider.platform.config.runtime import config
 from autospider.legacy.common.llm.streaming import ainvoke_with_stream
 from autospider.legacy.common.llm.trace_logger import append_llm_trace
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import (
     extract_json_dict_from_llm_payload,
     extract_response_text_from_llm_payload,
     summarize_llm_payload,
 )
-from autospider.legacy.common.utils.paths import get_prompt_path
-from autospider.legacy.common.utils.prompt_template import render_template
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.contexts.experience.application.runtime_support import (
     LoadedSkill,
     serialize_task_context,

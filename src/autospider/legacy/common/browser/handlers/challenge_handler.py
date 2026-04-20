@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from playwright.async_api import Page
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 from .base import BaseAnomalyHandler
 from ..intervention import BrowserInterventionRequired, build_interrupt_payload, interrupts_enabled

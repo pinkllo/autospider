@@ -22,8 +22,8 @@ from autospider.contexts.experience.application.skill_promotion import (
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ..common.logger import get_logger
-from ..common.storage.idempotent_io import write_json_idempotent, write_text_if_changed
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.persistence.files.idempotent_io import write_json_idempotent, write_text_if_changed
 from ...contexts.planning.domain import FATAL_CATEGORY
 
 if TYPE_CHECKING:

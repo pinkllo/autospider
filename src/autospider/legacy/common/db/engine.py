@@ -15,8 +15,8 @@ from sqlalchemy import MetaData, Table, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from autospider.legacy.common.config import config
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

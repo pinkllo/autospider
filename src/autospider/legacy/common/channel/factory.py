@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..config import config, normalize_pipeline_mode
+from autospider.platform.config.runtime import config, normalize_pipeline_mode
 from .base import URLChannel
 from .redis_channel import RedisURLChannel
 

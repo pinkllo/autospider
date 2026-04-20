@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from ...common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

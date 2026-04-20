@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.infrastructure.repositories.field_xpath_repository import (
     FieldXPathQueryService,
     FieldXPathWriteService,

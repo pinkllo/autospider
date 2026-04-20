@@ -9,7 +9,7 @@ from playwright.async_api import Page
 
 from ...pipeline.types import ExecutionRequest
 from ...pipeline.runtime_controls import get_browser_budget
-from ..config import config
+from autospider.platform.config.runtime import config
 from .composition import build_default_handlers
 from .engine import get_browser_engine, shutdown_browser_engine
 from .guarded_page import GuardedPage

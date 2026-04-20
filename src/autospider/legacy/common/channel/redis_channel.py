@@ -7,11 +7,11 @@ import socket
 import os
 from collections import deque
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 from .base import ChannelRuntimeEvent, ChannelRuntimeObserver, URLChannel, URLTask
 from ..storage.redis_manager import RedisQueueManager
-from ..config import config
+from autospider.platform.config.runtime import config
 
 logger = get_logger(__name__)
 

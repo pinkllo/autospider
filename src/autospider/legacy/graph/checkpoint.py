@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 from urllib.parse import quote
 
-from ..common.config import config
+from autospider.platform.config.runtime import config
 
 _SETUP_COMPLETE: set[str] = set()
 

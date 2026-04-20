@@ -12,9 +12,9 @@
 - 输入验证
 """
 
-from .config import config, Config, get_config
-from .logger import get_logger, console
-from .exceptions import (
+from autospider.platform.config.runtime import config, Config, get_config
+from autospider.platform.observability.logger import get_logger, console
+from autospider.platform.shared_kernel.exceptions import (
     AutoSpiderError,
     LLMError,
     LLMResponseError,
@@ -24,7 +24,7 @@ from .exceptions import (
     StorageError,
     RedisConnectionError,
 )
-from .constants import (
+from autospider.platform.shared_kernel.constants import (
     DEFAULT_SCROLL_PIXELS,
     DEFAULT_RETRY_COUNT,
     DEFAULT_PAGE_TIMEOUT_MS,

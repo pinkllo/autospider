@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.logger import get_logger
-from ...common.storage.idempotent_io import write_text_if_changed
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.persistence.files.idempotent_io import write_text_if_changed
 
 if TYPE_CHECKING:
     from ...common.channel.base import URLChannel

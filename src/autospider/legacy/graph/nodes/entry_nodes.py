@@ -11,11 +11,11 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
-from ...common.config import config
+from autospider.platform.config.runtime import config
 from ...common.grouping_semantics import normalize_grouping_semantics
 from ...common.llm.streaming import ainvoke_with_stream
 from ...common.llm.trace_logger import append_llm_trace
-from ...common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from ...common.protocol import (
     extract_json_dict_from_llm_payload,
     extract_response_text_from_llm_payload,
@@ -39,7 +39,7 @@ from ....contexts.chat.domain.model import (
     RequestedField,
 )
 from ...pipeline.helpers import resolve_semantic_identity
-from ...common.validators import validate_task_description, validate_url
+from autospider.platform.shared_kernel.validators import validate_task_description, validate_url
 from ...graph.execution_handoff import build_chat_execution_params, build_chat_review_payload
 
 logger = get_logger(__name__)

@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from ..common.config import config
+from autospider.platform.config.runtime import config
 
 
 @dataclass(frozen=True, slots=True)

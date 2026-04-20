@@ -15,8 +15,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...common.config import config
-from ...common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from ..checkpoint import AdaptiveRateController
 from ..checkpoint.resume_strategy import ResumeCoordinator
 from ..collector import (

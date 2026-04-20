@@ -27,7 +27,7 @@ import json
 import time
 
 import redis.asyncio as aioredis
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 try:
     from redis.asyncio.client import Script

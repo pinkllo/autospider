@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from collections import Counter, deque
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

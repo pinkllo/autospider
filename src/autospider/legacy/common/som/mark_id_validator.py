@@ -17,11 +17,11 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING
 
-from ..config import config
-from ..logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 
 if TYPE_CHECKING:
-    from ..types import SoMSnapshot, ElementMark
+    from autospider.platform.shared_kernel.types import SoMSnapshot, ElementMark
     from playwright.async_api import Page
 
 

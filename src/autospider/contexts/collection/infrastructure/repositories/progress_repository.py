@@ -8,9 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from autospider.legacy.common.logger import get_logger
-from autospider.legacy.common.storage.idempotent_io import write_json_idempotent
-from autospider.legacy.common.utils.file_utils import ensure_directory, file_exists, load_json
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
+from autospider.platform.shared_kernel.utils.file_utils import ensure_directory, file_exists, load_json
 
 logger = get_logger(__name__)
 

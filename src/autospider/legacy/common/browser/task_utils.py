@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

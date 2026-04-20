@@ -10,7 +10,7 @@ from langgraph.types import interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
 from ...common.browser.runtime import BrowserRuntimeSession
-from ...common.config import config
+from autospider.platform.config.runtime import config
 from ....contexts.collection.application.use_cases.collect_urls import collect_detail_urls
 from ....contexts.collection.application.use_cases.extract_fields_batch import (
     run_field_pipeline,
@@ -56,7 +56,7 @@ from ...pipeline.helpers import (
 )
 from ...pipeline.runner import run_pipeline
 from ...pipeline.types import AggregationFailure, AggregationReport
-from ...common.validators import validate_url
+from autospider.platform.shared_kernel.validators import validate_url
 from ...taskplane_adapter.graph_integration import register_taskplane_plan
 
 

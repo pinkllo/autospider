@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.infrastructure.adapters._scrapy_script_template import (
     build_detail_crawler_script,
 )

@@ -6,7 +6,7 @@ import base64
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..types import BoundingBox, ElementMark, ScrollInfo, SoMSnapshot, XPathCandidate
+from autospider.platform.shared_kernel.types import BoundingBox, ElementMark, ScrollInfo, SoMSnapshot, XPathCandidate
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

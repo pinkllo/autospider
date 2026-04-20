@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..common.config import config
+from autospider.platform.config.runtime import config
 from ...contexts.planning.domain import TaskPlan
 from ..taskplane.scheduler import TaskScheduler
 from ..taskplane.store.base import TaskStore

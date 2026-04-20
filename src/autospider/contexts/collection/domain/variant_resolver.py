@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from urllib.parse import urljoin, urlparse
 
-from autospider.legacy.common.config import config
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.som.text_first import resolve_single_mark_id
 
 logger = get_logger(__name__)

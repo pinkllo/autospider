@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from autospider.legacy.common.config import config
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
@@ -20,7 +20,7 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.legacy.crawler.collector import DetailPageVisit, smart_scroll
 
 if TYPE_CHECKING:
-    from autospider.legacy.common.types import SoMSnapshot
+    from autospider.platform.shared_kernel.types import SoMSnapshot
 
 logger = get_logger(__name__)
 

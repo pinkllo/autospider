@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from autospider.legacy.common.logger import get_logger
-from autospider.legacy.common.storage.idempotent_io import (
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.persistence.files.idempotent_io import (
     load_json_if_exists,
     write_json_idempotent,
 )

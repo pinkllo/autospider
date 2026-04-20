@@ -12,7 +12,7 @@ from autospider.legacy.common.browser.click_utils import click_and_capture_new_p
 from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_navigation_decision_context,
 )
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
@@ -20,7 +20,7 @@ from autospider.legacy.common.som import (
     inject_and_scan,
     set_overlay_visibility,
 )
-from autospider.legacy.common.types import ActionType, AgentState, RunInput
+from autospider.platform.shared_kernel.types import ActionType, AgentState, RunInput
 from autospider.contexts.planning.domain import format_execution_brief
 from autospider.legacy.graph.recovery import build_recovery_directive
 

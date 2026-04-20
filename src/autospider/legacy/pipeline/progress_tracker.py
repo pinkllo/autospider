@@ -14,7 +14,7 @@ import asyncio
 import time
 from typing import Any
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.storage.pipeline_runtime_store import PipelineRuntimeStore
 
 logger = get_logger(__name__)

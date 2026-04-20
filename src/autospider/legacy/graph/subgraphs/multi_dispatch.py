@@ -7,7 +7,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Send, interrupt
 
 from ...common.browser.intervention import BrowserInterventionRequired
-from ...common.config import config
+from autospider.platform.config.runtime import config
 from ....contexts.planning.application.handlers import PlanMutationService
 from ....contexts.planning.domain import TaskPlan
 from ...domain.runtime import SubTaskRuntimeState

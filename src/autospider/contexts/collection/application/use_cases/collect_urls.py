@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from autospider.legacy.common.config import config
+from autospider.platform.config.runtime import config
 from autospider.legacy.common.llm import LLMDecider
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from autospider.legacy.common.storage.idempotent_io import (
+from autospider.platform.persistence.files.idempotent_io import (
     write_json_idempotent,
     write_text_if_changed,
 )
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
     from autospider.legacy.common.channel.base import URLChannel
-    from autospider.legacy.common.types import SoMSnapshot
+    from autospider.platform.shared_kernel.types import SoMSnapshot
 
 
 logger = get_logger(__name__)

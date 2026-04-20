@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..config import config
-from ..logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from ..llm.streaming import ainvoke_with_stream
 from ..llm.trace_logger import append_llm_trace
 from ..protocol import (
@@ -22,15 +22,15 @@ from ..protocol import (
     parse_protocol_message,
     summarize_llm_payload,
 )
-from ..utils.prompt_template import render_template
-from ..utils.paths import get_prompt_path
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from .mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks
 
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
     from playwright.async_api import Page
-    from ..types import ElementMark, SoMSnapshot
+    from autospider.platform.shared_kernel.types import ElementMark, SoMSnapshot
 
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("disambiguate_by_text.yaml")

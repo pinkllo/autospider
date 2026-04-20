@@ -20,7 +20,7 @@ class DoctorCheckSection:
 
 
 def bootstrap_cli_logging(*, output_dir: str | None = None) -> None:
-    from .common.logger import bootstrap_logging
+    from autospider.platform.observability.logger import bootstrap_logging
 
     bootstrap_logging(output_dir=output_dir)
 
@@ -32,7 +32,7 @@ def init_database(*, reset: bool = False) -> None:
 
 
 def get_default_serial_mode() -> bool:
-    from .common.config import config
+    from autospider.platform.config.runtime import config
 
     return bool(config.pipeline.local_serial_mode)
 
@@ -98,7 +98,7 @@ def _collect_runtime_checks() -> list[DoctorCheckResult]:
 
 
 def _check_runtime_log_path() -> DoctorCheckResult:
-    from .common.logger import _resolve_runtime_log_file
+    from autospider.platform.observability.logger import _resolve_runtime_log_file
 
     try:
         return DoctorCheckResult(
@@ -111,7 +111,7 @@ def _check_runtime_log_path() -> DoctorCheckResult:
 
 
 def _check_llm_trace_path() -> DoctorCheckResult:
-    from .common.config import get_config
+    from autospider.platform.config.runtime import get_config
     from .common.llm.trace_logger import _resolve_trace_path
 
     try:
@@ -133,7 +133,7 @@ def _check_llm_trace_path() -> DoctorCheckResult:
 
 
 def _check_database() -> DoctorCheckResult:
-    from .common.config import config
+    from autospider.platform.config.runtime import config
     from .common.db.engine import get_engine
 
     try:
@@ -150,7 +150,7 @@ def _check_database() -> DoctorCheckResult:
 
 
 def _check_redis() -> DoctorCheckResult:
-    from .common.config import config
+    from autospider.platform.config.runtime import config
     from .common.storage.redis_pool import get_sync_client
 
     if not config.redis.enabled:
@@ -175,7 +175,7 @@ def _check_redis() -> DoctorCheckResult:
 
 
 def _check_graph_checkpoint() -> DoctorCheckResult:
-    from .common.config import config
+    from autospider.platform.config.runtime import config
     from .graph.checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 
     if not graph_checkpoint_enabled():

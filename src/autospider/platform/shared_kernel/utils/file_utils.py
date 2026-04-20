@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

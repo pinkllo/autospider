@@ -42,14 +42,14 @@ def repo_tmp_dir() -> Path:
 @pytest.fixture()
 def load_logger_module():
     def _load():
-        import autospider.legacy.common.logger as logger_module
+        import autospider.platform.observability.logger as logger_module
 
         _detach_logger_handlers(logger_module)
         return importlib.reload(logger_module)
 
     yield _load
 
-    import autospider.legacy.common.logger as logger_module
+    import autospider.platform.observability.logger as logger_module
 
     _detach_logger_handlers(logger_module)
 

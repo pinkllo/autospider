@@ -7,10 +7,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
-from ..common.config import config
-from ..common.storage.idempotent_io import write_json_idempotent
+from autospider.platform.config.runtime import config
+from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from .field_config import (
     build_rule_xpath_chain,
     ensure_field_rules,

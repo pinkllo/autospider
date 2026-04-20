@@ -7,7 +7,7 @@ import os
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.storage.pipeline_runtime_store import PipelineRuntimeStore
 from autospider.legacy.common.storage.redis_pool import get_sync_client
 

@@ -13,7 +13,7 @@ from ....contexts.chat.domain.model import (
     DialogueMessage,
     RequestedField,
 )
-from ..config import config
+from autospider.platform.config.runtime import config
 from ..grouping_semantics import normalize_grouping_semantics
 from ..llm_contracts import validate_task_clarifier_payload
 from ..protocol import (
@@ -21,12 +21,12 @@ from ..protocol import (
     extract_response_text_from_llm_payload,
     summarize_llm_payload,
 )
-from ..utils.paths import get_prompt_path
-from ..utils.prompt_template import render_template
-from ..validators import validate_url
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
+from autospider.platform.shared_kernel.utils.prompt_template import render_template
+from autospider.platform.shared_kernel.validators import validate_url
 from .streaming import ainvoke_with_stream
 from .trace_logger import append_llm_trace
-from autospider.legacy.common.logger import get_logger
+from autospider.platform.observability.logger import get_logger
 
 # 获取日志记录器
 logger = get_logger(__name__)

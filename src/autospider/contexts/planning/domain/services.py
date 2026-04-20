@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from autospider.legacy.common.utils.string_maps import normalize_string_map
+from autospider.platform.shared_kernel.utils.string_maps import normalize_string_map
 from autospider.contexts.planning.domain.model import (
     ExecutionBrief,
     PlanNodeType,

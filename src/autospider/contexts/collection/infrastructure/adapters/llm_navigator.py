@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from autospider.legacy.common.logger import get_logger
-from autospider.legacy.common.utils.paths import get_prompt_path
+from autospider.platform.observability.logger import get_logger
+from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.contexts.collection.infrastructure.adapters._llm_decision import (
     CollectorDecisionMixin,
 )

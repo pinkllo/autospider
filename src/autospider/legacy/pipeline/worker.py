@@ -13,8 +13,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from ..common.config import config
-from ..common.logger import get_logger
+from autospider.platform.config.runtime import config
+from autospider.platform.observability.logger import get_logger
 from ..domain.fields import FieldDefinition
 from ...contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
 from ..graph.decision_context import build_decision_context
