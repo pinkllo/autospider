@@ -15,7 +15,7 @@ from .types import (
     AggregationReport,
     AggregationSubtaskDetail,
 )
-from ...contexts.planning.domain import SubTask, SubTaskStatus, TaskPlan
+from autospider.contexts.planning.domain import SubTask, SubTaskStatus, TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 
 logger = get_logger(__name__)

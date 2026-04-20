@@ -20,7 +20,7 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
     SkillRepository as ExperienceSkillRepository,
 )
 from autospider.contexts.collection.domain.fields import FieldDefinition
-from ...contexts.planning.domain import (
+from autospider.contexts.planning.domain import (
     SITE_DEFENSE_CATEGORY,
     classify_runtime_exception,
 )

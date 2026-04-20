@@ -17,11 +17,11 @@ if str(SRC_ROOT) not in sys.path:
 
 
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.legacy.graph.nodes.feedback_nodes import (
+from autospider.composition.legacy.graph.nodes.feedback_nodes import (
     REPLAN_BUDGET_EXHAUSTED_REASON,
     monitor_dispatch_node,
 )
-from autospider.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
+from autospider.composition.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
 
 
 def _system_failure_result(

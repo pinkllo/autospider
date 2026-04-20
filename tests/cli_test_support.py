@@ -12,8 +12,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 _PURGE_PREFIXES = (
     "autospider.interface.cli",
     "autospider.interface",
-    "autospider.legacy.cli_runtime",
-    "autospider.legacy.graph",
+    "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
     "typer",

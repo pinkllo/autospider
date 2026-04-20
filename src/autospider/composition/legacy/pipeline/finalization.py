@@ -24,7 +24,7 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 )
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent, write_text_if_changed
-from ...contexts.planning.domain import FATAL_CATEGORY
+from autospider.contexts.planning.domain import FATAL_CATEGORY
 
 if TYPE_CHECKING:
     from autospider.contexts.collection.domain.fields import FieldDefinition

@@ -1,5 +1,5 @@
-from autospider.legacy.taskplane.protocol import TicketStatus
-from autospider.legacy.taskplane.types import (
+from autospider.composition.legacy.taskplane.protocol import TicketStatus
+from autospider.composition.legacy.taskplane.types import (
     EnvelopeProgress,
     ReportReceipt,
     SubmitReceipt,

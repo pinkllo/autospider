@@ -1,4 +1,4 @@
-from autospider.legacy.graph.execution_handoff import (
+from autospider.composition.legacy.graph.execution_handoff import (
     build_chat_execution_params,
     build_chat_review_payload,
 )

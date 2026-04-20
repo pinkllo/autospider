@@ -7,8 +7,8 @@ from typing import AsyncGenerator
 
 from playwright.async_api import Page
 
-from autospider.legacy.pipeline.types import ExecutionRequest
-from autospider.legacy.pipeline.runtime_controls import get_browser_budget
+from autospider.composition.legacy.pipeline.types import ExecutionRequest
+from autospider.composition.legacy.pipeline.runtime_controls import get_browser_budget
 from autospider.platform.config.runtime import config
 from .composition import build_default_handlers
 from .engine import get_browser_engine, shutdown_browser_engine

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ...contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
+from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, SubTaskStatus, TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from .types import PipelineRunResult, PipelineRunSummary, SubtaskOutcomeType
 

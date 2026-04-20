@@ -9,11 +9,11 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.legacy.graph.main_graph as main_graph_module
+import autospider.composition.legacy.graph.main_graph as main_graph_module
 from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.legacy.graph.main_graph import build_main_graph, resolve_feedback_route
-from autospider.legacy.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
+from autospider.composition.legacy.graph.main_graph import build_main_graph, resolve_feedback_route
+from autospider.composition.legacy.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
 
 
 def _runtime_result(

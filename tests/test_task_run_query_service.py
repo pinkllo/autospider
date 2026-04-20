@@ -15,7 +15,7 @@ from autospider.platform.persistence.redis.task_run_query_service import (
     TaskRunQueryService,
     normalize_url,
 )
-from autospider.legacy.pipeline.helpers import build_semantic_signature
+from autospider.composition.legacy.pipeline.helpers import build_semantic_signature
 
 
 def _make_session_factory() -> sessionmaker[Session]:

@@ -16,12 +16,12 @@ from pathlib import Path
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.domain.fields import FieldDefinition
-from ...contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
+from autospider.contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
 from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
 from ..pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult, SubtaskOutcomeType
-from ...contexts.planning.application.handlers import RuntimeExpansionService
+from autospider.contexts.planning.application.handlers import RuntimeExpansionService
 from .runtime_controls import resolve_concurrency_settings
 
 logger = get_logger(__name__)

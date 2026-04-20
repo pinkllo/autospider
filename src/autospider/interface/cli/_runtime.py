@@ -21,7 +21,7 @@ class CliRuntimeProxy:
         overrides = object.__getattribute__(self, "_overrides")
         if name in overrides:
             return overrides[name]
-        module = importlib.import_module("autospider.legacy.cli_runtime")
+        module = importlib.import_module("autospider.interface.cli._legacy_runtime")
         return getattr(module, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -32,7 +32,7 @@ class CliRuntimeProxy:
         if name in overrides:
             del overrides[name]
             return
-        module = importlib.import_module("autospider.legacy.cli_runtime")
+        module = importlib.import_module("autospider.interface.cli._legacy_runtime")
         delattr(module, name)
 
 

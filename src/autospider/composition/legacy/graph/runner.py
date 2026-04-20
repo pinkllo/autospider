@@ -8,7 +8,7 @@ from typing import Any
 from langgraph.types import Command
 
 from autospider.platform.config.runtime import config
-from ...platform.shared_kernel.trace import clear_run_context, set_run_context
+from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
 from .workflow_access import coerce_workflow_state

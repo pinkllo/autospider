@@ -11,13 +11,13 @@ import pytest
 from langgraph.graph import END, StateGraph
 
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.legacy.graph.nodes.feedback_nodes import (
+from autospider.composition.legacy.graph.nodes.feedback_nodes import (
     monitor_dispatch_node,
     update_world_model_node,
 )
-from autospider.legacy.graph.nodes.planning_nodes import plan_strategy_node
-from autospider.legacy.graph.state import GraphState
-from autospider.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
+from autospider.composition.legacy.graph.nodes.planning_nodes import plan_strategy_node
+from autospider.composition.legacy.graph.state import GraphState
+from autospider.composition.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
 
 
 def _system_failure_result(*, error: str, terminal_reason: str = "") -> SubTaskRuntimeState:

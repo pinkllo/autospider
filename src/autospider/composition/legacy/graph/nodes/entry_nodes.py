@@ -32,7 +32,7 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ....contexts.chat.domain.model import (
+from autospider.contexts.chat.domain.model import (
     ClarificationSession,
     ClarifiedTask,
     DialogueMessage,

@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from autospider.legacy.pipeline.worker import SubTaskWorker
+from autospider.composition.legacy.pipeline.worker import SubTaskWorker
 
 __all__ = ["SubTaskWorker"]

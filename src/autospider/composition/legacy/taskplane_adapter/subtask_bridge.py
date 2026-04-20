@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...contexts.planning.domain import SubTask
+from autospider.contexts.planning.domain import SubTask
 from ..taskplane.protocol import TaskTicket
 
 

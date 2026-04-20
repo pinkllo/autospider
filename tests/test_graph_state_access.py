@@ -16,8 +16,8 @@ from autospider.contexts.planning.domain import (
     SubTaskMode,
     TaskPlan,
 )
-from autospider.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
-from autospider.legacy.graph.state_access import (
+from autospider.composition.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.composition.legacy.graph.state_access import (
     collection_config,
     dispatch_summary,
     get_error_state,
@@ -173,7 +173,7 @@ def test_get_stage_status_reads_workflow_control_stage_status() -> None:
         "dispatch": {"status": "fatal"},
     }
 
-    from autospider.legacy.graph.state_access import get_stage_status
+    from autospider.composition.legacy.graph.state_access import get_stage_status
 
     assert get_stage_status(state) == "ok"
 

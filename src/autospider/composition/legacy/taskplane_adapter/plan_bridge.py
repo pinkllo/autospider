@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...contexts.planning.domain import TaskPlan
+from autospider.contexts.planning.domain import TaskPlan
 from ..taskplane.protocol import PlanEnvelope
 from .subtask_bridge import SubtaskBridge
 

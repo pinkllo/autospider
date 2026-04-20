@@ -1,4 +1,4 @@
-from autospider.legacy.graph.state import (
+from autospider.composition.legacy.graph.state import (
     ConversationState,
     DispatchState,
     GraphState,
@@ -13,7 +13,7 @@ from autospider.legacy.graph.state import (
     WorkflowState,
     WorkflowWorldState,
 )
-from autospider.legacy.graph.state_access import (
+from autospider.composition.legacy.graph.state_access import (
     conversation_state,
     dispatch_state,
     get_conversation_state,
@@ -28,7 +28,7 @@ from autospider.legacy.graph.state_access import (
     subtask_results,
     task_plan,
 )
-from autospider.legacy.graph.workflow_access import coerce_workflow_state, current_plan, final_error
+from autospider.composition.legacy.graph.workflow_access import coerce_workflow_state, current_plan, final_error
 
 __all__ = [
     "ConversationState",

@@ -12,16 +12,16 @@ if str(SRC_ROOT) not in sys.path:
 from autospider.platform.config.runtime import config
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.legacy.graph.subgraphs.multi_dispatch import (
+from autospider.composition.legacy.graph.subgraphs.multi_dispatch import (
     finalize_subtask_flow,
     initialize_multi_dispatch,
     prepare_dispatch_batch,
 )
-from autospider.legacy.taskplane_adapter.graph_integration import (
+from autospider.composition.legacy.taskplane_adapter.graph_integration import (
     get_taskplane_scheduler,
     register_taskplane_plan,
 )
-import autospider.legacy.taskplane_adapter.graph_integration as graph_integration_module
+import autospider.composition.legacy.taskplane_adapter.graph_integration as graph_integration_module
 
 
 def _plan(plan_id: str = "plan-taskplane") -> TaskPlan:

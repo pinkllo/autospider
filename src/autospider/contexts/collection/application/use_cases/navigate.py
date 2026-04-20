@@ -22,7 +22,7 @@ from autospider.platform.browser.som import (
 )
 from autospider.platform.shared_kernel.types import ActionType, AgentState, RunInput
 from autospider.contexts.planning.domain import format_execution_brief
-from autospider.legacy.graph.recovery import build_recovery_directive
+from autospider.composition.legacy.graph.recovery import build_recovery_directive
 
 if TYPE_CHECKING:
     from pathlib import Path

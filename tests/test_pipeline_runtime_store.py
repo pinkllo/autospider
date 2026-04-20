@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from autospider.legacy.pipeline.progress_tracker import TaskProgressTracker
+from autospider.composition.legacy.pipeline.progress_tracker import TaskProgressTracker
 
 
 class _FakeRedisClient:

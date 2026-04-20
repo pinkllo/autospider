@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from autospider.platform.config.runtime import config
-from ...contexts.planning.domain import TaskPlan
+from autospider.contexts.planning.domain import TaskPlan
 from ..taskplane.scheduler import TaskScheduler
 from ..taskplane.store.base import TaskStore
 from ..taskplane.store.dual_store import DualLayerStore

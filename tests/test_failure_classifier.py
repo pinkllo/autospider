@@ -19,8 +19,8 @@ from autospider.contexts.planning.domain import (
     classify_protocol_violation,
     classify_runtime_exception,
 )
-from autospider.legacy.graph.nodes import capability_nodes
-from autospider.legacy.graph.recovery import build_recovery_directive
+from autospider.composition.legacy.graph.nodes import capability_nodes
+from autospider.composition.legacy.graph.recovery import build_recovery_directive
 
 
 class StateMismatchError(RuntimeError):

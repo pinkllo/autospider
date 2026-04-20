@@ -6,16 +6,16 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.legacy.graph.control_types import (
+from autospider.composition.legacy.graph.control_types import (
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.legacy.graph.decision_context import (
+from autospider.composition.legacy.graph.decision_context import (
     build_decision_context,
     summarize_failures,
 )
-from autospider.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
-from autospider.legacy.graph.world_model import build_initial_world_model, upsert_page_model
+from autospider.composition.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.composition.legacy.graph.world_model import build_initial_world_model, upsert_page_model
 
 
 def test_build_default_policies_expose_control_contract_defaults() -> None:

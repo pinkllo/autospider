@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from autospider.legacy.pipeline.finalization import (
+from autospider.composition.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
 )
-from autospider.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
+from autospider.composition.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
 
 
 class _CapturedPayload:

@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from autospider.platform.persistence.redis.task_run_query_service import TaskRunQueryService
-from autospider.legacy.pipeline.finalization import (
+from autospider.composition.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
 )

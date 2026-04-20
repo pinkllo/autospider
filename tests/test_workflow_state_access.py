@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.legacy.graph.workflow_access import (
+from autospider.composition.legacy.graph.workflow_access import (
     coerce_workflow_state,
     current_plan,
     final_error,

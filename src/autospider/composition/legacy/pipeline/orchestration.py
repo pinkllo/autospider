@@ -12,7 +12,7 @@ from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.collection.domain.fields import FieldDefinition
-from ...contexts.planning.domain import classify_runtime_exception
+from autospider.contexts.planning.domain import classify_runtime_exception
 from .progress_tracker import TaskProgressTracker
 
 logger = get_logger(__name__)

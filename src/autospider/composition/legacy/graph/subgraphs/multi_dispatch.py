@@ -8,8 +8,8 @@ from langgraph.types import Send, interrupt
 
 from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.platform.config.runtime import config
-from ....contexts.planning.application.handlers import PlanMutationService
-from ....contexts.planning.domain import TaskPlan
+from autospider.contexts.planning.application.handlers import PlanMutationService
+from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ...pipeline.runtime_controls import resolve_concurrency_settings
 from ...pipeline.subtask_runtime import (
@@ -22,7 +22,7 @@ from ...pipeline.subtask_runtime import (
     subtask_to_payload,
     subtask_signature,
 )
-from ....contexts.collection.application.use_cases.run_subtask import SubTaskWorker
+from autospider.contexts.collection.application.use_cases.run_subtask import SubTaskWorker
 from ...taskplane_adapter.graph_integration import (
     ensure_taskplane_plan_registered,
     get_taskplane_envelope_id,

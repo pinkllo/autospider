@@ -14,7 +14,7 @@ from autospider.platform.shared_kernel.grouping_semantics import (
     has_semantic_signature_inputs,
     normalize_field_names,
 )
-from ...contexts.collection.infrastructure.repositories.config_repository import (
+from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
     coerce_collection_config,
 )

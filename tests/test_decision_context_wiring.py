@@ -15,7 +15,7 @@ from autospider.contexts.collection.infrastructure.adapters.llm_navigator import
     LLMDecisionMaker,
 )
 from autospider.contexts.collection.infrastructure.field.field_decider import FieldDecider  # noqa: E402
-from autospider.legacy.pipeline.orchestration import (  # noqa: E402
+from autospider.composition.legacy.pipeline.orchestration import (  # noqa: E402
     ConsumerPool,
     PipelineRuntimeContext,
     PipelineRuntimeDependencies,

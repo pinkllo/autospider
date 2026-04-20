@@ -11,12 +11,12 @@ from langgraph.types import interrupt
 from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.platform.config.runtime import config
-from ....contexts.collection.application.use_cases.collect_urls import collect_detail_urls
-from ....contexts.collection.application.use_cases.extract_fields_batch import (
+from autospider.contexts.collection.application.use_cases.collect_urls import collect_detail_urls
+from autospider.contexts.collection.application.use_cases.extract_fields_batch import (
     run_field_pipeline,
 )
-from ....contexts.collection.application.use_cases.finalize_run import ResultAggregator
-from ....contexts.collection.infrastructure.repositories import (
+from autospider.contexts.collection.application.use_cases.finalize_run import ResultAggregator
+from autospider.contexts.collection.infrastructure.repositories import (
     CollectionProgress,
     load_collection_config,
 )
@@ -26,15 +26,15 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 )
 from autospider.contexts.collection.infrastructure.crawler.batch.batch_collector import batch_collect_urls
 from autospider.contexts.collection.infrastructure.crawler.explore.config_generator import generate_collection_config
-from ....contexts.planning.infrastructure.adapters.task_planner import (
+from autospider.contexts.planning.infrastructure.adapters.task_planner import (
     TaskPlanner,
     build_planner_control_payload,
     build_planner_world_payload,
 )
-from ....contexts.planning.domain import TaskPlan
+from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ..control_types import build_default_recovery_policy
-from ....contexts.planning.domain import classify_runtime_exception
+from autospider.contexts.planning.domain import classify_runtime_exception
 from ..recovery import RETRY_ACTION, build_recovery_directive
 from ..decision_context import build_decision_context
 from ..state_access import (

@@ -12,15 +12,15 @@ from unittest.mock import patch
 from autospider.contexts.collection.infrastructure.channel.base import URLChannel, URLTask
 from autospider.platform.persistence.redis.pipeline_runtime_store import PipelineRuntimeStore
 from autospider.contexts.collection.domain.fields import FieldDefinition
-from autospider.legacy.pipeline.finalization import (
+from autospider.composition.legacy.pipeline.finalization import (
     DURABILITY_STATE_DURABLE,
     build_run_record,
     classify_pipeline_result as _classify_result_impl,
 )
-from autospider.legacy.pipeline.helpers import build_execution_context
-from autospider.legacy.pipeline.progress_tracker import TaskProgressTracker
-from autospider.legacy.pipeline.runner import run_pipeline
-from autospider.legacy.pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult
+from autospider.composition.legacy.pipeline.helpers import build_execution_context
+from autospider.composition.legacy.pipeline.progress_tracker import TaskProgressTracker
+from autospider.composition.legacy.pipeline.runner import run_pipeline
+from autospider.composition.legacy.pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult
 from .pipeline_artifacts import build_task_plan, persist_snapshot
 from .pipeline_fakes import (
     FakeBrowserRuntimeSession,
@@ -208,80 +208,80 @@ def _patched_pipeline(state: _ContractState) -> Iterator[None]:
     with ExitStack() as stack:
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner.create_url_channel",
+                "autospider.composition.legacy.pipeline.runner.create_url_channel",
                 return_value=_FakeURLChannel(state),
             )
         )
         stack.enter_context(
-            patch("autospider.legacy.pipeline.runner.TaskProgressTracker", new=tracker_factory)
+            patch("autospider.composition.legacy.pipeline.runner.TaskProgressTracker", new=tracker_factory)
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner.BrowserRuntimeSession", FakeBrowserRuntimeSession
+                "autospider.composition.legacy.pipeline.runner.BrowserRuntimeSession", FakeBrowserRuntimeSession
             )
         )
         stack.enter_context(
-            patch("autospider.legacy.pipeline.runner.SkillRuntime", FakeSkillRuntime)
+            patch("autospider.composition.legacy.pipeline.runner.SkillRuntime", FakeSkillRuntime)
         )
         stack.enter_context(
-            patch("autospider.legacy.pipeline.runner.URLCollector", FakeURLCollector)
+            patch("autospider.composition.legacy.pipeline.runner.URLCollector", FakeURLCollector)
         )
         stack.enter_context(
-            patch("autospider.legacy.pipeline.runner.DetailPageWorker", FakeDetailPageWorker)
+            patch("autospider.composition.legacy.pipeline.runner.DetailPageWorker", FakeDetailPageWorker)
         )
         stack.enter_context(
-            patch("autospider.legacy.pipeline.runner._persist_run_snapshot", new=persist_snapshot)
+            patch("autospider.composition.legacy.pipeline.runner._persist_run_snapshot", new=persist_snapshot)
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._load_persisted_run_records",
+                "autospider.composition.legacy.pipeline.runner._load_persisted_run_records",
                 new=partial(_load_records, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._claim_persisted_item",
+                "autospider.composition.legacy.pipeline.runner._claim_persisted_item",
                 new=partial(_claim_record, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._commit_persisted_item",
+                "autospider.composition.legacy.pipeline.runner._commit_persisted_item",
                 new=partial(_commit_record, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._fail_persisted_item",
+                "autospider.composition.legacy.pipeline.runner._fail_persisted_item",
                 new=partial(_fail_record, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._ack_persisted_item",
+                "autospider.composition.legacy.pipeline.runner._ack_persisted_item",
                 new=partial(_ack_record, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._release_persisted_claim",
+                "autospider.composition.legacy.pipeline.runner._release_persisted_claim",
                 new=partial(_release_claim, state),
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._persist_pipeline_records", new=_persist_records
+                "autospider.composition.legacy.pipeline.runner._persist_pipeline_records", new=_persist_records
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.runner._classify_pipeline_result",
+                "autospider.composition.legacy.pipeline.runner._classify_pipeline_result",
                 new=_classify_pipeline_result,
             )
         )
         stack.enter_context(
             patch(
-                "autospider.legacy.pipeline.finalization.promote_pipeline_skill", return_value=None
+                "autospider.composition.legacy.pipeline.finalization.promote_pipeline_skill", return_value=None
             )
         )
         yield

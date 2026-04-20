@@ -1,4 +1,4 @@
-from autospider.legacy.taskplane.protocol import (
+from autospider.composition.legacy.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,

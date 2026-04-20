@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ...contexts.planning.domain import (
+from autospider.contexts.planning.domain import (
     CONTRACT_VIOLATION_CATEGORY,
     FATAL_CATEGORY,
     RULE_STALE_CATEGORY,

@@ -4,17 +4,17 @@ from collections.abc import Mapping
 from typing import Any
 
 from autospider.contexts.planning.domain import PlanJournalEntry, PlanNode, PlanNodeType, TaskPlan
-from autospider.legacy.graph.control_types import (
+from autospider.composition.legacy.graph.control_types import (
     PlanSpec,
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.legacy.graph.world_model import (
+from autospider.composition.legacy.graph.world_model import (
     build_initial_world_model,
     upsert_page_model,
     world_model_to_payload,
 )
-from autospider.legacy.pipeline.runtime_controls import resolve_concurrency_settings
+from autospider.composition.legacy.pipeline.runtime_controls import resolve_concurrency_settings
 
 ENTRY_JOURNAL_LIMIT = 3
 PLANNER_STAGE = "planning_seeded"

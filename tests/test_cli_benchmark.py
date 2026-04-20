@@ -17,8 +17,8 @@ SRC_ROOT = REPO_ROOT / "src"
 
 _PURGE_PREFIXES = (
     "autospider.interface.cli",
-    "autospider.legacy.cli_runtime",
-    "autospider.legacy.graph",
+    "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
     "typer",
@@ -185,7 +185,7 @@ def test_list_benchmark_scenarios_returns_fixture_data_without_runtime_imports()
 
     assert "products" in scenario_ids
     assert "categories" in scenario_ids
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules
 
 
 def test_render_latest_benchmark_report_fails_without_history(
@@ -200,7 +200,7 @@ def test_render_latest_benchmark_report_fails_without_history(
     with pytest.raises(FileNotFoundError, match="No benchmark reports found"):
         cli._render_latest_benchmark_report()
 
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules
 
 
 def test_compare_latest_benchmark_reports_fails_without_history(
@@ -215,7 +215,7 @@ def test_compare_latest_benchmark_reports_fails_without_history(
     with pytest.raises(FileNotFoundError, match="Need at least two benchmark reports"):
         cli._compare_latest_benchmark_reports()
 
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules
 
 
 def test_benchmark_command_runs_then_compares_when_compare_last_is_combined(

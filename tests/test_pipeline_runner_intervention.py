@@ -13,7 +13,7 @@ from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.contexts.collection.infrastructure.channel.base import URLTask
 from autospider.platform.persistence.sql.orm.models import Base
 from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository, TaskRunPayload
-from autospider.legacy.pipeline import runner
+from autospider.composition.legacy.pipeline import runner
 
 
 def test_runner_persistence_helpers_are_async() -> None:

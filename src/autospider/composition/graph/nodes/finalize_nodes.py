@@ -1,5 +1,5 @@
-from autospider.legacy.graph.nodes.capability_nodes import aggregate_node
-from autospider.legacy.graph.nodes.shared_nodes import (
+from autospider.composition.legacy.graph.nodes.capability_nodes import aggregate_node
+from autospider.composition.legacy.graph.nodes.shared_nodes import (
     build_artifact_index,
     build_summary,
     finalize_result,

@@ -1,4 +1,4 @@
-from autospider.legacy.graph.nodes.entry_nodes import (
+from autospider.composition.legacy.graph.nodes.entry_nodes import (
     chat_clarify,
     chat_collect_user_input,
     chat_history_match,

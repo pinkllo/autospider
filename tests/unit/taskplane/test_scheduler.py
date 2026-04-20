@@ -1,15 +1,15 @@
 import pytest
 
-from autospider.legacy.taskplane.protocol import (
+from autospider.composition.legacy.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
     TaskTicket,
     TicketStatus,
 )
-from autospider.legacy.taskplane.scheduler import TaskScheduler
-from autospider.legacy.taskplane.store.memory_store import MemoryStore
-from autospider.legacy.taskplane.subscription import Subscription
+from autospider.composition.legacy.taskplane.scheduler import TaskScheduler
+from autospider.composition.legacy.taskplane.store.memory_store import MemoryStore
+from autospider.composition.legacy.taskplane.subscription import Subscription
 
 
 @pytest.fixture

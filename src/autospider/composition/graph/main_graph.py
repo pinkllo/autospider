@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from autospider.legacy.graph.main_graph import (
+from autospider.composition.legacy.graph.main_graph import (
     resolve_chat_clarify_route,
     resolve_chat_review_route,
     resolve_entry_route,
@@ -108,6 +108,6 @@ def build_main_graph(*, checkpointer: Any | None = None):
 
 
 def _build_multi_dispatch_subgraph():
-    from autospider.legacy.graph.subgraphs import build_multi_dispatch_subgraph
+    from autospider.composition.legacy.graph.subgraphs import build_multi_dispatch_subgraph
 
     return build_multi_dispatch_subgraph()

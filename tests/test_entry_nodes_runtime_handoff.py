@@ -11,9 +11,9 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.legacy.graph.nodes.entry_nodes as entry_nodes_module
-from autospider.legacy.graph.state_access import request_params as select_request_params
-from autospider.legacy.graph.nodes.entry_nodes import (
+import autospider.composition.legacy.graph.nodes.entry_nodes as entry_nodes_module
+from autospider.composition.legacy.graph.state_access import request_params as select_request_params
+from autospider.composition.legacy.graph.nodes.entry_nodes import (
     chat_clarify,
     chat_history_match,
     chat_prepare_execution_handoff,
@@ -27,7 +27,7 @@ from autospider.contexts.chat.domain.model import (
     DialogueMessage,
     RequestedField,
 )
-from autospider.legacy.pipeline.helpers import build_semantic_signature
+from autospider.composition.legacy.pipeline.helpers import build_semantic_signature
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
 

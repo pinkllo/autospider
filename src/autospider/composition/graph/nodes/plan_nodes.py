@@ -1,5 +1,5 @@
-from autospider.legacy.graph.nodes.capability_nodes import plan_node
-from autospider.legacy.graph.nodes.planning_nodes import (
+from autospider.composition.legacy.graph.nodes.capability_nodes import plan_node
+from autospider.composition.legacy.graph.nodes.planning_nodes import (
     initialize_world_model_node,
     plan_strategy_node,
 )

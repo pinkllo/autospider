@@ -10,8 +10,8 @@ pytestmark = pytest.mark.smoke
 
 _HEAVY_PREFIXES = (
     "autospider.interface.cli",
-    "autospider.legacy.cli_runtime",
-    "autospider.legacy.graph",
+    "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
 )
@@ -39,7 +39,7 @@ def _restore_heavy_modules_after_test():
 def test_importing_cli_does_not_eagerly_import_graph_runtime() -> None:
     fresh_import_cli()
 
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules
     assert "autospider.platform.persistence.sql.orm.engine" not in sys.modules
     assert "autospider.contexts.collection.domain.fields" not in sys.modules
 
@@ -49,7 +49,7 @@ def test_root_help_registration_does_not_import_graph_runtime() -> None:
     command_names = {command.name for command in cli.app.registered_commands}
 
     assert "doctor" in command_names
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules
     assert "autospider.platform.persistence.sql.orm.engine" not in sys.modules
 
 
@@ -72,4 +72,4 @@ def test_doctor_command_reports_failure_without_importing_graph_runtime(
         cli.doctor_command()
 
     assert getattr(exc_info.value, "exit_code", None) == 1
-    assert "autospider.legacy.graph" not in sys.modules
+    assert "autospider.composition.legacy.graph" not in sys.modules

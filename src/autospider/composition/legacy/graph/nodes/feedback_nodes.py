@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..control_types import build_default_recovery_policy
-from ....contexts.planning.domain import (
+from autospider.contexts.planning.domain import (
     RULE_STALE_CATEGORY,
     STATE_MISMATCH_CATEGORY,
     build_failure_record,
