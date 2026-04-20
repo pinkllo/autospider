@@ -76,6 +76,11 @@ include = ["src/autospider"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = ["src/output"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E402"]
+"tests/**/__init__.py" = ["F401"]
 
 [tool.black]
 line-length = 100
@@ -86,6 +91,11 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+exclude = ["^src/autospider/legacy/", "^src/output/"]
+
+[[tool.mypy.overrides]]
+module = ["autospider.legacy", "autospider.legacy.*"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -71,6 +71,9 @@ test-results/
 .trae/
 .github/
 .codex/
+.task_tracker/
+.task_trash/
+/artifacts/
 .claude/
 .agents/
 test_tab_click.py
@@ -80,3 +83,5 @@ manual_*/
 tmp_*/
 agent-*/
 .claude/worktrees/
+/.mypy*/
+/refactor/
