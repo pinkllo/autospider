@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import shutil
 import sys
 import tempfile
@@ -17,7 +18,9 @@ SRC_ROOT = REPO_ROOT / "src"
 
 _PURGE_PREFIXES = (
     "autospider.interface.cli",
+    "autospider.interface.cli._runtime_support",
     "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.graph",
     "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
@@ -88,6 +91,7 @@ def _install_cli_stubs() -> None:
 
     rich_module = types.ModuleType("rich")
     rich_console = types.ModuleType("rich.console")
+    rich_logging = types.ModuleType("rich.logging")
     rich_panel = types.ModuleType("rich.panel")
     rich_table = types.ModuleType("rich.table")
     rich_text = types.ModuleType("rich.text")
@@ -100,6 +104,15 @@ def _install_cli_stubs() -> None:
         def __init__(self, *args, **kwargs) -> None:
             self.args = args
             self.kwargs = kwargs
+
+    class RichHandler(logging.Handler):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__()
+            self.args = args
+            self.kwargs = kwargs
+
+        def emit(self, _record: logging.LogRecord) -> None:
+            return None
 
     class Table:
         def __init__(self, *args, **kwargs) -> None:
@@ -115,6 +128,7 @@ def _install_cli_stubs() -> None:
         pass
 
     rich_console.Console = Console
+    rich_logging.RichHandler = RichHandler
     rich_panel.Panel = Panel
     rich_table.Table = Table
     rich_text.Text = Text
@@ -124,6 +138,7 @@ def _install_cli_stubs() -> None:
     sys.modules["click.core"] = click_core
     sys.modules["rich"] = rich_module
     sys.modules["rich.console"] = rich_console
+    sys.modules["rich.logging"] = rich_logging
     sys.modules["rich.panel"] = rich_panel
     sys.modules["rich.table"] = rich_table
     sys.modules["rich.text"] = rich_text

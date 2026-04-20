@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from autospider.composition.legacy.graph.types import GraphInput, GraphResult
+from autospider.composition.graph.types import GraphInput, GraphResult
 
 
 class GraphRunnerProtocol(Protocol):
@@ -28,6 +28,6 @@ class RunChatPipeline:
 
 
 def _build_graph_runner() -> GraphRunnerProtocol:
-    from autospider.composition.legacy.graph.runner import GraphRunner
+    from autospider.composition.graph.runner import GraphRunner
 
     return GraphRunner()

@@ -19,75 +19,74 @@ class DoctorCheckSection:
     checks: tuple[DoctorCheckResult, ...]
 
 
-def bootstrap_cli_logging(*, output_dir: str | None = None) -> None:
-    from autospider.platform.observability.logger import bootstrap_logging
+class CliRuntime:
+    DoctorCheckResult = DoctorCheckResult
+    DoctorCheckSection = DoctorCheckSection
 
-    bootstrap_logging(output_dir=output_dir)
+    def bootstrap_cli_logging(self, *, output_dir: str | None = None) -> None:
+        from autospider.platform.observability.logger import bootstrap_logging
+
+        bootstrap_logging(output_dir=output_dir)
+
+    def init_database(self, *, reset: bool = False) -> None:
+        from autospider.platform.persistence.sql.orm.engine import init_db
+
+        init_db(reset=reset)
+
+    def get_default_serial_mode(self) -> bool:
+        from autospider.platform.config.runtime import config
+
+        return bool(config.pipeline.local_serial_mode)
+
+    def load_graph_runtime(self):
+        from autospider.composition.graph.runner import GraphRunner
+        from autospider.composition.graph.types import GraphInput
+
+        return GraphInput, GraphRunner
+
+    def build_field_definition(self, payload: dict[str, Any]):
+        from autospider.contexts.collection.domain.fields import build_field_definitions
+
+        return build_field_definitions([payload])[0]
+
+    def build_field_definitions(self, payloads: list[dict[str, Any]]):
+        from autospider.contexts.collection.domain.fields import build_field_definitions
+
+        return build_field_definitions(item for item in payloads if isinstance(item, dict))
+
+    def create_field_definition(self, **payload: Any):
+        from autospider.contexts.collection.domain.fields import FieldDefinition
+
+        return FieldDefinition(**payload)
+
+    def serialize_field_definitions_payload(self, fields: list[Any]) -> list[dict[str, Any]]:
+        from autospider.contexts.collection.domain.fields import serialize_field_definitions
+
+        return serialize_field_definitions(fields)
+
+    def build_doctor_sections(self) -> list[DoctorCheckSection]:
+        return [
+            DoctorCheckSection(
+                name="core",
+                title="Core Status",
+                checks=tuple(self.run_doctor_checks()),
+            ),
+            DoctorCheckSection(
+                name="runtime",
+                title="Runtime Status",
+                checks=tuple(_collect_runtime_checks()),
+            ),
+        ]
+
+    def run_doctor_checks(self) -> list[DoctorCheckResult]:
+        return [
+            _check_database(),
+            _check_redis(),
+            _check_graph_checkpoint(),
+        ]
 
 
-def init_database(*, reset: bool = False) -> None:
-    from autospider.platform.persistence.sql.orm.engine import init_db
-
-    init_db(reset=reset)
-
-
-def get_default_serial_mode() -> bool:
-    from autospider.platform.config.runtime import config
-
-    return bool(config.pipeline.local_serial_mode)
-
-
-def load_graph_runtime():
-    from .graph import GraphInput, GraphRunner
-
-    return GraphInput, GraphRunner
-
-
-def build_field_definition(payload: dict[str, Any]):
-    from autospider.contexts.collection.domain.fields import build_field_definitions
-
-    return build_field_definitions([payload])[0]
-
-
-def build_field_definitions(payloads: list[dict[str, Any]]):
-    from autospider.contexts.collection.domain.fields import build_field_definitions as _build_field_definitions
-
-    return _build_field_definitions(item for item in payloads if isinstance(item, dict))
-
-
-def create_field_definition(**payload: Any):
-    from autospider.contexts.collection.domain.fields import FieldDefinition
-
-    return FieldDefinition(**payload)
-
-
-def serialize_field_definitions_payload(fields: list[Any]) -> list[dict[str, Any]]:
-    from autospider.contexts.collection.domain.fields import serialize_field_definitions
-
-    return serialize_field_definitions(fields)
-
-
-def build_doctor_sections() -> list[DoctorCheckSection]:
-    return [
-        DoctorCheckSection(
-            name="core",
-            title="Core Status",
-            checks=tuple(run_doctor_checks()),
-        ),
-        DoctorCheckSection(
-            name="runtime",
-            title="Runtime Status",
-            checks=tuple(_collect_runtime_checks()),
-        ),
-    ]
-
-
-def run_doctor_checks() -> list[DoctorCheckResult]:
-    return [
-        _check_database(),
-        _check_redis(),
-        _check_graph_checkpoint(),
-    ]
+cli_runtime = CliRuntime()
 
 
 def _collect_runtime_checks() -> list[DoctorCheckResult]:
@@ -175,8 +174,11 @@ def _check_redis() -> DoctorCheckResult:
 
 
 def _check_graph_checkpoint() -> DoctorCheckResult:
+    from autospider.composition.graph.checkpoint import (
+        graph_checkpoint_enabled,
+        graph_checkpointer_session,
+    )
     from autospider.platform.config.runtime import config
-    from .graph.checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 
     if not graph_checkpoint_enabled():
         return DoctorCheckResult(

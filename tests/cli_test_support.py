@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import sys
 import types
 from pathlib import Path
@@ -12,7 +13,9 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 _PURGE_PREFIXES = (
     "autospider.interface.cli",
     "autospider.interface",
+    "autospider.interface.cli._runtime_support",
     "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.graph",
     "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
@@ -92,6 +95,7 @@ def install_cli_stubs() -> None:
 
     rich_module = types.ModuleType("rich")
     rich_console = types.ModuleType("rich.console")
+    rich_logging = types.ModuleType("rich.logging")
     rich_panel = types.ModuleType("rich.panel")
     rich_table = types.ModuleType("rich.table")
 
@@ -107,6 +111,15 @@ def install_cli_stubs() -> None:
             self.args = args
             self.kwargs = kwargs
 
+    class RichHandler(logging.Handler):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__()
+            self.args = args
+            self.kwargs = kwargs
+
+        def emit(self, _record: logging.LogRecord) -> None:
+            return None
+
     class Table:
         def __init__(self, *args, **kwargs) -> None:
             self.rows: list[tuple[Any, ...]] = []
@@ -118,6 +131,7 @@ def install_cli_stubs() -> None:
             self.rows.append(args)
 
     rich_console.Console = Console
+    rich_logging.RichHandler = RichHandler
     rich_panel.Panel = Panel
     rich_table.Table = Table
 
@@ -126,6 +140,7 @@ def install_cli_stubs() -> None:
     sys.modules["click.core"] = click_core
     sys.modules["rich"] = rich_module
     sys.modules["rich.console"] = rich_console
+    sys.modules["rich.logging"] = rich_logging
     sys.modules["rich.panel"] = rich_panel
     sys.modules["rich.table"] = rich_table
 
@@ -136,6 +151,14 @@ def fresh_import_cli():
     if str(SRC_ROOT) not in sys.path:
         sys.path.insert(0, str(SRC_ROOT))
     return importlib.import_module("autospider.interface.cli")
+
+
+def fresh_import_legacy_cli():
+    purge_modules()
+    install_cli_stubs()
+    if str(SRC_ROOT) not in sys.path:
+        sys.path.insert(0, str(SRC_ROOT))
+    return importlib.import_module("autospider.interface.cli._legacy_cli")
 
 
 def fresh_import_interface_cli():

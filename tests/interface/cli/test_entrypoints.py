@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from tests.cli_test_support import fresh_import_cli, fresh_import_interface_cli
+from tests.cli_test_support import fresh_import_interface_cli, fresh_import_legacy_cli
 
 
 def test_legacy_cli_reexports_interface_cli_app() -> None:
-    legacy_cli = fresh_import_cli()
+    legacy_cli = fresh_import_legacy_cli()
     interface_cli = fresh_import_interface_cli()
 
     assert legacy_cli.app.info.name == interface_cli.app.info.name

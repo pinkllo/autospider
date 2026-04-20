@@ -7,44 +7,42 @@ from typing import Any
 import typer
 from rich.panel import Panel
 
-from autospider.composition.use_cases.run_benchmark import BenchmarkReportService
-
 from ._rendering import console
 from ._runtime import cli_runtime
 
-_SERVICE = BenchmarkReportService()
+_SERVICE = None
 
 
 def _benchmark_reports_dir() -> Path:
-    return _SERVICE.reports_dir()
+    return _benchmark_service().reports_dir()
 
 
 def _benchmark_json_reports() -> list[Path]:
-    return _SERVICE.json_reports()
+    return _benchmark_service().json_reports()
 
 
 def _latest_benchmark_report_path() -> Path:
-    return _SERVICE.latest_report_path()
+    return _benchmark_service().latest_report_path()
 
 
 def _last_two_benchmark_reports() -> tuple[Path, Path]:
-    return _SERVICE.last_two_report_paths()
+    return _benchmark_service().last_two_report_paths()
 
 
 def _benchmark_git_commit() -> str:
-    return _SERVICE.benchmark_git_commit()
+    return _benchmark_service().benchmark_git_commit()
 
 
 def _load_benchmark_runner() -> type:
-    return _SERVICE.load_runner_class()
+    return _benchmark_service().load_runner_class()
 
 
 def _load_benchmark_reporter() -> Any:
-    return _SERVICE.load_reporter()
+    return _benchmark_service().load_reporter()
 
 
 def _benchmark_paths():
-    return _SERVICE.benchmark_paths()
+    return _benchmark_service().benchmark_paths()
 
 
 def _build_benchmark_runner(base_url: str) -> Any:
@@ -57,7 +55,7 @@ def _build_benchmark_runner(base_url: str) -> Any:
 
 
 def _list_benchmark_scenarios() -> list[str]:
-    return _SERVICE.list_scenarios()
+    return _benchmark_service().list_scenarios()
 
 
 def _render_latest_benchmark_report() -> str:
@@ -101,7 +99,7 @@ def _run_benchmark_and_write_reports(selected_scenarios: list[str]) -> tuple[Pat
 def _write_benchmark_reports(results: dict[str, Any]) -> tuple[Path, Path]:
     reporter = _load_benchmark_reporter()
     reports_dir = _benchmark_reports_dir()
-    report_name = _SERVICE.report_stem()
+    report_name = _benchmark_service().report_stem()
     json_path = reports_dir / f"{report_name}.json"
     markdown_path = reports_dir / f"{report_name}.md"
     scenario_results = {
@@ -179,3 +177,12 @@ def benchmark_command(
     except Exception as exc:
         console.print(Panel(f"[red]{exc}[/red]", title="Benchmark 失败", style="red"))
         raise typer.Exit(1) from exc
+
+
+def _benchmark_service():
+    global _SERVICE
+    if _SERVICE is None:
+        from autospider.composition.use_cases.run_benchmark import BenchmarkReportService
+
+        _SERVICE = BenchmarkReportService()
+    return _SERVICE

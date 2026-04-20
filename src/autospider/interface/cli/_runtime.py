@@ -1,42 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
 import threading
 from typing import Any
 
-from autospider.composition.use_cases.resume import ResumeRun
-from autospider.composition.use_cases.run_chat_pipeline import RunChatPipeline
+from ._runtime_support import cli_runtime
 
 logger = logging.getLogger(__name__)
-
-
-class CliRuntimeProxy:
-    def __init__(self) -> None:
-        object.__setattr__(self, "_overrides", {})
-
-    def __getattr__(self, name: str) -> Any:
-        overrides = object.__getattribute__(self, "_overrides")
-        if name in overrides:
-            return overrides[name]
-        module = importlib.import_module("autospider.interface.cli._legacy_runtime")
-        return getattr(module, name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        object.__getattribute__(self, "_overrides")[name] = value
-
-    def __delattr__(self, name: str) -> None:
-        overrides = object.__getattribute__(self, "_overrides")
-        if name in overrides:
-            del overrides[name]
-            return
-        module = importlib.import_module("autospider.interface.cli._legacy_runtime")
-        delattr(module, name)
-
-
-cli_runtime = CliRuntimeProxy()
 
 
 def run_async_safely(coro: Any) -> Any:
@@ -54,7 +26,7 @@ def invoke_graph(
         raise ValueError(f"unsupported entry mode: {entry_mode}")
     _ensure_database_ready()
     graph_result = run_async_safely(
-        RunChatPipeline().run(cli_args=dict(cli_args), thread_id=thread_id)
+        _build_run_chat_pipeline().run(cli_args=dict(cli_args), thread_id=thread_id)
     )
     result = graph_result.model_dump()
     _log_graph_runtime(result)
@@ -63,7 +35,7 @@ def invoke_graph(
 
 def inspect_graph(thread_id: str) -> dict[str, Any]:
     _ensure_database_ready()
-    result = run_async_safely(ResumeRun().inspect(thread_id=thread_id)).model_dump()
+    result = run_async_safely(_build_resume_run().inspect(thread_id=thread_id)).model_dump()
     _log_graph_runtime(result)
     return result
 
@@ -76,7 +48,11 @@ def resume_graph(
 ) -> dict[str, Any]:
     _ensure_database_ready()
     result = run_async_safely(
-        ResumeRun().resume(thread_id=thread_id, resume=resume, use_command=use_command)
+        _build_resume_run().resume(
+            thread_id=thread_id,
+            resume=resume,
+            use_command=use_command,
+        )
     ).model_dump()
     _log_graph_runtime(result)
     return result
@@ -118,6 +94,18 @@ def _log_graph_runtime(result: dict[str, Any]) -> None:
         message += f", checkpoint_id={checkpoint_id}"
     message += f", status={status or 'unknown'}"
     logger.info(message)
+
+
+def _build_run_chat_pipeline():
+    from autospider.composition.use_cases.run_chat_pipeline import RunChatPipeline
+
+    return RunChatPipeline()
+
+
+def _build_resume_run():
+    from autospider.composition.use_cases.resume import ResumeRun
+
+    return ResumeRun()
 
 
 def _run_in_thread(coro: Any) -> Any:

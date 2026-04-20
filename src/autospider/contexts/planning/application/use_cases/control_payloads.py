@@ -4,12 +4,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from autospider.contexts.planning.domain import PlanJournalEntry, PlanNode, PlanNodeType, TaskPlan
-from autospider.composition.legacy.graph.control_types import (
+from autospider.composition.graph.controls import (
     PlanSpec,
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.composition.legacy.graph.world_model import (
+from autospider.composition.graph.world_model import (
     build_initial_world_model,
     upsert_page_model,
     world_model_to_payload,

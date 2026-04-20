@@ -10,7 +10,9 @@ pytestmark = pytest.mark.smoke
 
 _HEAVY_PREFIXES = (
     "autospider.interface.cli",
+    "autospider.interface.cli._runtime_support",
     "autospider.interface.cli._legacy_runtime",
+    "autospider.composition.graph",
     "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
