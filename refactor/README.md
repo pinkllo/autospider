@@ -1,3 +1,7 @@
+![status](https://img.shields.io/badge/status-%E2%9C%85%20executed%20at%20refactor--phase--5-brightgreen)
+
+> 本目录为**重构方案存档**（已执行至 efactor-phase-5）。源码改动已进入主分支历史，本目录仅保留方案文档与 ADR。
+
 # AutoSpider 重构方案（索引）
 
 本目录收录 AutoSpider 从"打补丁式单体"向"轻量 DDD + 模块化单体"演进的完整方案。**仅为方案文档，本次不包含任何源代码改动**。所有变更以本地 commit 方式推进、可随时 `git reset --hard` 回滚，默认不向远端推送。
@@ -77,3 +81,4 @@
 1. 阅读 01~05 文件，**对任何不同意之处先开 issue/便签反馈**，不要直接改源码。
 2. 确认无异议后，按 [`04-execution-plan.md`](./04-execution-plan.md) **从 commit[0.1] 开始**。
 3. 每个 commit 完成后跑 `scripts/verify.ps1`（在 commit[0.2] 中创建）。
+
