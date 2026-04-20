@@ -6,10 +6,10 @@ import asyncio
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
-from autospider.legacy.common.browser.actions import ActionExecutor
-from autospider.legacy.common.browser.click_utils import click_and_capture_new_page
+from autospider.platform.browser.actions import ActionExecutor
+from autospider.platform.browser.click_utils import click_and_capture_new_page
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.som import build_mark_id_to_xpath_map, set_overlay_visibility
+from autospider.platform.browser.som import build_mark_id_to_xpath_map, set_overlay_visibility
 from autospider.platform.shared_kernel.types import Action, ActionType
 
 if TYPE_CHECKING:

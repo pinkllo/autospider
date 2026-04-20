@@ -13,14 +13,14 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..common.som import (
+from autospider.platform.browser.som import (
     inject_and_scan,
     capture_screenshot_with_marks,
     clear_overlay,
     build_mark_id_to_xpath_map,
 )
-from ..common.som.text_first import resolve_single_mark_id
-from ..common.browser import ActionExecutor
+from autospider.platform.browser.som.text_first import resolve_single_mark_id
+from autospider.platform.browser import ActionExecutor
 from autospider.platform.shared_kernel.types import Action, ActionType
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger

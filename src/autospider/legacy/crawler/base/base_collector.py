@@ -27,12 +27,12 @@ from ..collector import (
     PaginationHandler,
     smart_scroll,
 )
-from ...common.som import (
+from autospider.platform.browser.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from ...common.som.text_first import resolve_mark_ids_from_map
+from autospider.platform.browser.som.text_first import resolve_mark_ids_from_map
 from .progress_store import ProgressStore
 from .url_publish_service import UrlPublishService
 

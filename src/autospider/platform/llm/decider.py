@@ -15,7 +15,7 @@ from autospider.legacy.common.protocol import (
     parse_protocol_message_diagnostics,
     summarize_llm_payload,
 )
-from autospider.legacy.common.som.text_first import resolve_single_mark_id
+from autospider.platform.browser.som.text_first import resolve_single_mark_id
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.contexts.planning.domain import classify_protocol_violation

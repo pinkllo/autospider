@@ -8,8 +8,8 @@ from typing import Any, Awaitable, Callable
 
 from langgraph.types import interrupt
 
-from ...common.browser.intervention import BrowserInterventionRequired
-from ...common.browser.runtime import BrowserRuntimeSession
+from autospider.platform.browser.intervention import BrowserInterventionRequired
+from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.platform.config.runtime import config
 from ....contexts.collection.application.use_cases.collect_urls import collect_detail_urls
 from ....contexts.collection.application.use_cases.extract_fields_batch import (

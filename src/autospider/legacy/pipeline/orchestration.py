@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from ..common.browser.intervention import BrowserInterventionRequired
+from autospider.platform.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLChannel, URLTask
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger

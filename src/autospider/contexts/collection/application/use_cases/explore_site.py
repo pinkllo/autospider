@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.som import (
+from autospider.platform.browser.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from autospider.legacy.common.som.text_first import (
+from autospider.platform.browser.som.text_first import (
     resolve_mark_ids_from_map,
     resolve_single_mark_id,
 )

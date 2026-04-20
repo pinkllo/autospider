@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.platform.browser.accessibility import get_accessibility_text
 from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_decision_context,
 )

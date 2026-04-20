@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.platform.browser.accessibility import get_accessibility_text
 from autospider.platform.config.runtime import config
 from autospider.platform.llm.streaming import ainvoke_with_stream
 from autospider.platform.llm.trace_logger import append_llm_trace

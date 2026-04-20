@@ -5,17 +5,17 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from autospider.legacy.common.browser.actions import ActionExecutor
+from autospider.platform.browser.actions import ActionExecutor
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.legacy.common.protocol import coerce_bool
-from autospider.legacy.common.som import (
+from autospider.platform.browser.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,
 )
-from autospider.legacy.common.som.text_first import resolve_single_mark_id
+from autospider.platform.browser.som.text_first import resolve_single_mark_id
 from autospider.platform.shared_kernel.types import Action, ActionType
 
 if TYPE_CHECKING:

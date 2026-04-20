@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from autospider.legacy.common.som import (
+from autospider.platform.browser.som import (
     capture_screenshot_with_marks,
     clear_overlay,
     inject_and_scan,

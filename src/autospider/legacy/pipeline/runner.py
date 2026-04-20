@@ -6,8 +6,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from ..common.browser.runtime import BrowserRuntimeSession
-from ..common.browser.intervention import BrowserInterventionRequired
+from autospider.platform.browser.runtime import BrowserRuntimeSession
+from autospider.platform.browser.intervention import BrowserInterventionRequired
 from ..common.channel.base import URLTask
 from ..common.channel.factory import create_url_channel
 from autospider.platform.config.runtime import config

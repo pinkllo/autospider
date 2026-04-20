@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
-from autospider.legacy.common.browser.runtime import BrowserRuntimeSession
+from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.contexts.planning.application.dto import ReplanInput, TaskPlanDTO
 from autospider.contexts.planning.application.use_cases.replan import Replan
 from autospider.contexts.planning.domain.model import (

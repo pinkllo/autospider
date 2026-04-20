@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autospider.legacy.common.accessibility import get_accessibility_text
+from autospider.platform.browser.accessibility import get_accessibility_text
 from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_decision_context,
 )
@@ -17,7 +17,7 @@ from autospider.legacy.common.protocol import (
     parse_protocol_message,
     summarize_llm_payload,
 )
-from autospider.legacy.common.som.text_first import (
+from autospider.platform.browser.som.text_first import (
     disambiguate_mark_id_by_text as _disambiguate_mark_id_by_text,
 )
 from autospider.platform.shared_kernel.utils.prompt_template import render_template

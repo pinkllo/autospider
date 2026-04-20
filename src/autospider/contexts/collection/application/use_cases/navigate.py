@@ -6,14 +6,14 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from autospider.legacy.common.accessibility import get_accessibility_text
-from autospider.legacy.common.browser import ActionExecutor
-from autospider.legacy.common.browser.click_utils import click_and_capture_new_page
+from autospider.platform.browser.accessibility import get_accessibility_text
+from autospider.platform.browser import ActionExecutor
+from autospider.platform.browser.click_utils import click_and_capture_new_page
 from autospider.legacy.common.decision_context_format import (
     format_decision_context as _format_navigation_decision_context,
 )
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.som import (
+from autospider.platform.browser.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,
     clear_overlay,
