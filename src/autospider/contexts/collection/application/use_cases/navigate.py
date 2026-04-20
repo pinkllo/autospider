@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from autospider.platform.browser.accessibility import get_accessibility_text
 from autospider.platform.browser import ActionExecutor
 from autospider.platform.browser.click_utils import click_and_capture_new_page
-from autospider.legacy.common.decision_context_format import (
+from autospider.contexts.collection.infrastructure.decision_context_format import (
     format_decision_context as _format_navigation_decision_context,
 )
 from autospider.platform.observability.logger import get_logger

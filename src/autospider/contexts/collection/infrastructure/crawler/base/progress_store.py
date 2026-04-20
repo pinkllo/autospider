@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ....contexts.collection.infrastructure.repositories.progress_repository import (
+from autospider.contexts.collection.infrastructure.repositories.progress_repository import (
     CollectionProgress,
     ProgressPersistence,
 )

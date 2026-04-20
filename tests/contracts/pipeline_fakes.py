@@ -8,7 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Iterator
 from urllib.request import urlopen
 
-from autospider.legacy.common.channel.base import URLChannel
+from autospider.contexts.collection.infrastructure.channel.base import URLChannel
 from autospider.legacy.domain.fields import FieldDefinition
 
 MOCK_HTML = (

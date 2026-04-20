@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from autospider.platform.config.runtime import normalize_pipeline_mode
 
-from ..common.grouping_semantics import normalize_grouping_semantics
+from autospider.platform.shared_kernel.grouping_semantics import normalize_grouping_semantics
 
 
 def _parse_optional_bool(raw_value: Any) -> bool | None:

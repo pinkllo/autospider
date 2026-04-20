@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from autospider.platform.browser.intervention import BrowserInterventionRequired
-from ..common.channel.base import URLChannel, URLTask
+from autospider.contexts.collection.infrastructure.channel.base import URLChannel, URLTask
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime

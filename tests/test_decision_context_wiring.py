@@ -14,7 +14,7 @@ if str(SRC_ROOT) not in sys.path:
 from autospider.contexts.collection.infrastructure.adapters.llm_navigator import (  # noqa: E402
     LLMDecisionMaker,
 )
-from autospider.legacy.field.field_decider import FieldDecider  # noqa: E402
+from autospider.contexts.collection.infrastructure.field.field_decider import FieldDecider  # noqa: E402
 from autospider.legacy.pipeline.orchestration import (  # noqa: E402
     ConsumerPool,
     PipelineRuntimeContext,
@@ -80,7 +80,7 @@ async def test_llm_decision_maker_injects_decision_context_into_prompt(
 async def test_field_decider_injects_decision_context_into_navigation_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.legacy.field.field_decider as field_decider_module
+    import autospider.contexts.collection.infrastructure.field.field_decider as field_decider_module
     from autospider.legacy.domain.fields import FieldDefinition
 
     captured: dict[str, object] = {}

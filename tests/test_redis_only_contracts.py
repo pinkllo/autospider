@@ -6,9 +6,9 @@ import pytest
 
 import autospider.platform.config.runtime as config_module
 from autospider.platform.config.runtime import normalize_pipeline_mode
-from autospider.legacy.common.channel import __all__ as channel_exports
-from autospider.legacy.common.channel.factory import create_url_channel
-from autospider.legacy.common.channel.redis_channel import RedisURLChannel
+from autospider.contexts.collection.infrastructure.channel import __all__ as channel_exports
+from autospider.contexts.collection.infrastructure.channel.factory import create_url_channel
+from autospider.contexts.collection.infrastructure.channel.redis_channel import RedisURLChannel
 from autospider.legacy.pipeline.helpers import build_execution_context
 from autospider.legacy.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
 

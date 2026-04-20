@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .llm_contracts import validate_protocol_message_payload
+from .contracts import validate_protocol_message_payload
 from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)

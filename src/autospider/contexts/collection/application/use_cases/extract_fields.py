@@ -11,10 +11,10 @@ from autospider.contexts.collection.infrastructure.repositories.field_xpath_repo
 )
 from autospider.legacy.domain.fields import FieldDefinition
 
-from autospider.legacy.field.batch_xpath_extractor import BatchXPathExtractor
-from autospider.legacy.field.field_config import ensure_extraction_config
-from autospider.legacy.field.field_extractor import FieldExtractor
-from autospider.legacy.field.models import ExtractionConfig, FieldRule, PageExtractionRecord
+from autospider.contexts.collection.infrastructure.field.batch_xpath_extractor import BatchXPathExtractor
+from autospider.contexts.collection.infrastructure.field.field_config import ensure_extraction_config
+from autospider.contexts.collection.infrastructure.field.field_extractor import FieldExtractor
+from autospider.contexts.collection.infrastructure.field.models import ExtractionConfig, FieldRule, PageExtractionRecord
 
 logger = get_logger(__name__)
 

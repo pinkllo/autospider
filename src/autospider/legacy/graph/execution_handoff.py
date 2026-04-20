@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common.grouping_semantics import normalize_grouping_semantics
+from autospider.platform.shared_kernel.grouping_semantics import normalize_grouping_semantics
 from ..domain.fields import FieldDefinition
 from ..pipeline.helpers import resolve_semantic_identity
 from ..pipeline.runtime_controls import resolve_concurrency_settings

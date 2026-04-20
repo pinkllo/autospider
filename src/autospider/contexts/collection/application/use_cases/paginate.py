@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from autospider.platform.browser.actions import ActionExecutor
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.protocol import coerce_bool
+from autospider.platform.llm.protocol import coerce_bool
 from autospider.platform.browser.som import (
     build_mark_id_to_xpath_map,
     capture_screenshot_with_marks,

@@ -122,7 +122,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
+        from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
@@ -141,7 +141,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
+        from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
 
         nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))

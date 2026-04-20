@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ..domain.fields import FieldDefinition
+from autospider.legacy.domain.fields import FieldDefinition
 from .models import ExtractionConfig, FieldRule
 from .xpath_helpers import build_xpath_fallback_chain
 

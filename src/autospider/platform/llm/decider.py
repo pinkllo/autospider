@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from autospider.platform.config.runtime import config
 from autospider.platform.shared_kernel.types import Action, ActionType, ScrollInfo
-from autospider.legacy.common.protocol import (
+from autospider.platform.llm.protocol import (
     extract_response_text_from_llm_payload,
     parse_protocol_message_diagnostics,
     summarize_llm_payload,

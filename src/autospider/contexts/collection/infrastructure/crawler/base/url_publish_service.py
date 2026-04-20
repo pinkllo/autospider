@@ -9,7 +9,7 @@ from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import write_text_if_changed
 
 if TYPE_CHECKING:
-    from ...common.channel.base import URLChannel
+    from autospider.contexts.collection.infrastructure.channel.base import URLChannel
 
 
 logger = get_logger(__name__)

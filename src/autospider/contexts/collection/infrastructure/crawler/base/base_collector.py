@@ -38,7 +38,7 @@ from .url_publish_service import UrlPublishService
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ...common.channel.base import URLChannel
+    from autospider.contexts.collection.infrastructure.channel.base import URLChannel
 
 # 日志器
 logger = get_logger(__name__)

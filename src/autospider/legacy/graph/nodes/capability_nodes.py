@@ -24,8 +24,8 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ...crawler.batch.batch_collector import batch_collect_urls
-from ...crawler.explore.config_generator import generate_collection_config
+from autospider.contexts.collection.infrastructure.crawler.batch.batch_collector import batch_collect_urls
+from autospider.contexts.collection.infrastructure.crawler.explore.config_generator import generate_collection_config
 from ....contexts.planning.infrastructure.adapters.task_planner import (
     TaskPlanner,
     build_planner_control_payload,

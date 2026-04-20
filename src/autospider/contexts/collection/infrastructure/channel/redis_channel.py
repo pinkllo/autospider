@@ -10,7 +10,7 @@ from collections import deque
 from autospider.platform.observability.logger import get_logger
 
 from .base import ChannelRuntimeEvent, ChannelRuntimeObserver, URLChannel, URLTask
-from ..storage.redis_manager import RedisQueueManager
+from autospider.platform.persistence.redis.queue_manager import RedisQueueManager
 from autospider.platform.config.runtime import config
 
 logger = get_logger(__name__)

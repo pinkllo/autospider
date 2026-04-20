@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
+from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
 
 
 class _FakeLocator:
@@ -109,7 +109,7 @@ async def test_replay_nav_steps_returns_explicit_validation_failure(
         return None
 
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.click_and_capture_new_page",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.click_and_capture_new_page",
         _no_state_change,
     )
 
@@ -134,7 +134,7 @@ async def test_replay_nav_steps_returns_passed_validation_status(
         return None
 
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.click_and_capture_new_page",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.click_and_capture_new_page",
         _activate_state,
     )
 

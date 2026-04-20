@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .grouping_semantics import (
+from autospider.platform.shared_kernel.grouping_semantics import (
     normalize_grouping_semantics,
     normalize_positive_int,
     normalize_string_list,

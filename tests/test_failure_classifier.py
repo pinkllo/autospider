@@ -10,7 +10,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.platform.llm.decider import LLMDecider
-from autospider.legacy.common.protocol import (
+from autospider.platform.llm.protocol import (
     parse_protocol_message,
     parse_protocol_message_diagnostics,
 )

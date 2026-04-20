@@ -14,13 +14,13 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from autospider.platform.browser.accessibility import get_accessibility_text
-from autospider.legacy.common.decision_context_format import (
+from autospider.contexts.collection.infrastructure.decision_context_format import (
     format_decision_context as _format_decision_context,
 )
 from autospider.platform.llm.streaming import ainvoke_with_stream
 from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
-from autospider.legacy.common.protocol import (
+from autospider.platform.llm.protocol import (
     coerce_bool,
     extract_response_text_from_llm_payload,
     parse_protocol_message,

@@ -14,9 +14,9 @@ from autospider.contexts.chat.domain.model import (
     RequestedField,
 )
 from autospider.platform.config.runtime import config
-from autospider.legacy.common.grouping_semantics import normalize_grouping_semantics
-from autospider.legacy.common.llm_contracts import validate_task_clarifier_payload
-from autospider.legacy.common.protocol import (
+from autospider.platform.shared_kernel.grouping_semantics import normalize_grouping_semantics
+from autospider.platform.llm.contracts import validate_task_clarifier_payload
+from autospider.platform.llm.protocol import (
     extract_json_dict_from_llm_payload,
     extract_response_text_from_llm_payload,
     summarize_llm_payload,

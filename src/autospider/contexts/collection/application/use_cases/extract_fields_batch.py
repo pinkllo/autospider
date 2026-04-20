@@ -13,17 +13,17 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 from autospider.platform.config.runtime import config
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from autospider.legacy.domain.fields import FieldDefinition
-from autospider.legacy.field.batch_xpath_extractor import BatchXPathExtractor
-from autospider.legacy.field.field_config import field_rules_to_payload
-from autospider.legacy.field.field_extractor import FieldExtractor
-from autospider.legacy.field.models import (
+from autospider.contexts.collection.infrastructure.field.batch_xpath_extractor import BatchXPathExtractor
+from autospider.contexts.collection.infrastructure.field.field_config import field_rules_to_payload
+from autospider.contexts.collection.infrastructure.field.field_extractor import FieldExtractor
+from autospider.contexts.collection.infrastructure.field.models import (
     CommonFieldXPath,
     ExtractionConfig,
     FieldRule,
     PageExtractionRecord,
 )
-from autospider.legacy.field.xpath_helpers import normalize_xpath_majority_key
-from autospider.legacy.field.xpath_pattern import FieldXPathExtractor
+from autospider.contexts.collection.infrastructure.field.xpath_helpers import normalize_xpath_majority_key
+from autospider.contexts.collection.infrastructure.field.xpath_pattern import FieldXPathExtractor
 
 if TYPE_CHECKING:
     from playwright.async_api import Page

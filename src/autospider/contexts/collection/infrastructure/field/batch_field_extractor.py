@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from ..common.storage import RedisQueueManager
+from autospider.legacy.common.storage import RedisQueueManager
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ..domain.fields import FieldDefinition
+from autospider.legacy.domain.fields import FieldDefinition
 
 from .models import (
     BatchExtractionResult,

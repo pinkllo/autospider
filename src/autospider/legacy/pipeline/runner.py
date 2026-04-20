@@ -8,8 +8,8 @@ from typing import Any
 
 from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.platform.browser.intervention import BrowserInterventionRequired
-from ..common.channel.base import URLTask
-from ..common.channel.factory import create_url_channel
+from autospider.contexts.collection.infrastructure.channel.base import URLTask
+from autospider.contexts.collection.infrastructure.channel.factory import create_url_channel
 from autospider.platform.config.runtime import config
 from autospider.contexts.collection.application.use_cases.collect_urls import URLCollector
 from autospider.contexts.collection.application.use_cases.extract_fields import (

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from autospider.platform.config.runtime import config, normalize_pipeline_mode
-from ..common.grouping_semantics import (
+from autospider.platform.shared_kernel.grouping_semantics import (
     build_normalized_strategy_payload,
     has_semantic_signature_inputs,
     normalize_field_names,

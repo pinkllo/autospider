@@ -34,8 +34,8 @@ from autospider.contexts.experience.application.use_cases.skill_runtime import S
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from autospider.legacy.crawler.base.base_collector import BaseCollector
-from autospider.legacy.crawler.collector import (
+from autospider.contexts.collection.infrastructure.crawler.base.base_collector import BaseCollector
+from autospider.contexts.collection.infrastructure.crawler.collector import (
     CommonPattern,
     DetailPageVisit,
     LLMDecisionMaker,
@@ -48,7 +48,7 @@ from autospider.legacy.crawler.collector import (
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
-    from autospider.legacy.common.channel.base import URLChannel
+    from autospider.contexts.collection.infrastructure.channel.base import URLChannel
     from autospider.platform.shared_kernel.types import SoMSnapshot
 
 

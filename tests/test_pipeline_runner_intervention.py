@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from autospider.platform.browser.intervention import BrowserInterventionRequired
-from autospider.legacy.common.channel.base import URLTask
+from autospider.contexts.collection.infrastructure.channel.base import URLTask
 from autospider.platform.persistence.sql.orm.models import Base
 from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository, TaskRunPayload
 from autospider.legacy.pipeline import runner

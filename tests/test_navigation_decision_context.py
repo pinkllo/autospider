@@ -11,7 +11,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.platform.shared_kernel.types import Action, ActionType
-from autospider.legacy.crawler.collector.navigation_handler import NavigationHandler
+from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
 from autospider.contexts.planning.domain import classify_protocol_violation
 
 
@@ -66,19 +66,19 @@ async def test_navigation_phase_task_plan_includes_decision_context(
         return b"", "base64-image"
 
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.clear_overlay",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.clear_overlay",
         fake_clear_overlay,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.inject_and_scan",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.inject_and_scan",
         fake_inject_and_scan,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.capture_screenshot_with_marks",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.capture_screenshot_with_marks",
         fake_capture_screenshot_with_marks,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.build_mark_id_to_xpath_map",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.build_mark_id_to_xpath_map",
         lambda _snapshot: {},
     )
 
@@ -128,19 +128,19 @@ async def test_navigation_phase_stops_on_decider_contract_violation(
         return b"", "base64-image"
 
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.clear_overlay",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.clear_overlay",
         fake_clear_overlay,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.inject_and_scan",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.inject_and_scan",
         fake_inject_and_scan,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.capture_screenshot_with_marks",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.capture_screenshot_with_marks",
         fake_capture_screenshot_with_marks,
     )
     monkeypatch.setattr(
-        "autospider.legacy.crawler.collector.navigation_handler.build_mark_id_to_xpath_map",
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.build_mark_id_to_xpath_map",
         lambda _snapshot: {},
     )
 

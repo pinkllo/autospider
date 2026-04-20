@@ -16,7 +16,7 @@ def create_url_channel(
     normalize_pipeline_mode(config.pipeline.mode if mode is None else mode)
 
     _ = output_dir
-    from ..storage.redis_manager import RedisQueueManager
+    from autospider.platform.persistence.redis.queue_manager import RedisQueueManager
 
     key_prefix = (redis_key_prefix or config.redis.key_prefix).strip() or config.redis.key_prefix
     manager = RedisQueueManager(

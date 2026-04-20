@@ -17,7 +17,7 @@ from autospider.platform.browser.som.text_first import (
     resolve_single_mark_id,
 )
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from autospider.legacy.crawler.collector import DetailPageVisit, smart_scroll
+from autospider.contexts.collection.infrastructure.crawler.collector import DetailPageVisit, smart_scroll
 
 if TYPE_CHECKING:
     from autospider.platform.shared_kernel.types import SoMSnapshot

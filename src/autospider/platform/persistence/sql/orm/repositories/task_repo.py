@@ -17,7 +17,7 @@ from autospider.platform.persistence.sql.orm.models import (
     TaskRunItem,
     TaskRunValidationFailure,
 )
-from autospider.legacy.common.grouping_semantics import (
+from autospider.platform.shared_kernel.grouping_semantics import (
     build_normalized_strategy_payload,
     build_semantic_signature_from_payload,
     has_semantic_signature_inputs,

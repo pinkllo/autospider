@@ -24,14 +24,14 @@ from autospider.platform.browser import ActionExecutor
 from autospider.platform.shared_kernel.types import Action, ActionType
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
-from ..common.protocol import coerce_bool
+from autospider.platform.llm.protocol import coerce_bool
 from autospider.platform.shared_kernel.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from autospider.platform.llm import LLMDecider
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
 )
-from ..domain.fields import FieldDefinition
+from autospider.legacy.domain.fields import FieldDefinition
 
 from .field_config import resolve_field_definition_value
 from .models import (

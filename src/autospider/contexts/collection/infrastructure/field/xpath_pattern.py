@@ -17,7 +17,7 @@ from autospider.platform.config.runtime import config
 from autospider.platform.llm.streaming import ainvoke_with_stream
 from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
-from ..common.protocol import (
+from autospider.platform.llm.protocol import (
     extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     summarize_llm_payload,

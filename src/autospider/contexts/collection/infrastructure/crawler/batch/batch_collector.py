@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from autospider.platform.observability.logger import get_logger
-from ....contexts.collection.infrastructure.repositories.config_repository import (
+from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
     ConfigPersistence,
     load_collection_config,
@@ -27,7 +27,7 @@ from ..base.base_collector import BaseCollector
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from ...common.channel.base import URLChannel
+    from autospider.contexts.collection.infrastructure.channel.base import URLChannel
 
 # 日志器
 logger = get_logger(__name__)
