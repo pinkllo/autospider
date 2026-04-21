@@ -129,10 +129,6 @@
       "target": "autospider.contexts.experience"
     },
     {
-      "source": "autospider.contexts.planning.application.event_handlers",
-      "target": "autospider.contexts.chat"
-    },
-    {
       "source": "autospider.contexts.planning.infrastructure.adapters.task_planner",
       "target": "autospider.contexts.collection"
     },

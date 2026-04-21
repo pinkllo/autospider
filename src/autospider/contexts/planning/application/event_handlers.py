@@ -4,8 +4,11 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
 
-from autospider.contexts.chat import TaskClarifiedPayload
-from autospider.contexts.planning.application.dto import CreatePlanInput, TaskPlanDTO
+from autospider.contexts.planning.application.dto import (
+    CreatePlanInput,
+    TaskClarifiedEventDTO,
+    TaskPlanDTO,
+)
 from autospider.contexts.planning.application.use_cases.create_plan import CreatePlan
 from autospider.contexts.planning.domain.model import ExecutionBrief, SubTask
 from autospider.contexts.planning.domain.ports import PlanRepository
@@ -20,7 +23,7 @@ class PlanRepositoryFactory(Protocol):
 class TaskClarifiedHandler:
     repository_factory: PlanRepositoryFactory
 
-    def handle(self, payload: TaskClarifiedPayload) -> ResultEnvelope[TaskPlanDTO]:
+    def handle(self, payload: TaskClarifiedEventDTO) -> ResultEnvelope[TaskPlanDTO]:
         task = dict(payload.task)
         repository = self.repository_factory(
             site_url=str(task.get("list_url") or ""),

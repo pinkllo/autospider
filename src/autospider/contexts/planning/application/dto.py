@@ -61,6 +61,12 @@ class FailureSignalDTO(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class TaskClarifiedEventDTO(BaseModel):
+    session_id: str
+    output_dir: str = "output"
+    task: dict[str, Any] = Field(default_factory=dict)
+
+
 def to_task_plan_dto(plan: TaskPlan) -> TaskPlanDTO:
     return TaskPlanDTO(
         plan_id=plan.plan_id,

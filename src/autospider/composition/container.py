@@ -15,7 +15,6 @@ from autospider.contexts.chat.infrastructure.publishers import (
     CHAT_EVENTS_STREAM,
     TASK_CLARIFIED_EVENT,
     ChatEventPublisher,
-    TaskClarifiedPayload,
 )
 from autospider.contexts.chat.infrastructure.repositories.session_repository import (
     RedisSessionRepository,
@@ -41,6 +40,7 @@ from autospider.contexts.planning.application.event_handlers import (
     PlanRepositoryFactory,
     TaskClarifiedHandler,
 )
+from autospider.contexts.planning.application.dto import TaskClarifiedEventDTO
 from autospider.contexts.planning.infrastructure.publishers import PlanningEventPublisher
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
@@ -181,7 +181,7 @@ class CompositionContainer:
         return processed
 
     async def _handle_task_clarified(self, event: Event) -> None:
-        payload = TaskClarifiedPayload.model_validate(event.payload)
+        payload = TaskClarifiedEventDTO.model_validate(event.payload)
         set_run_context(run_id=event.run_id, trace_id=event.trace_id)
         try:
             result = self.task_clarified_handler.handle(payload)
