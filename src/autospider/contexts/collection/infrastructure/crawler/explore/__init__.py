@@ -1,7 +1,10 @@
 """Crawler exploration (rule extraction) phase."""
 
+from autospider.contexts.collection.application.use_cases.collect_urls import (
+    URLCollector,
+    collect_detail_urls,
+)
 from .config_generator import ConfigGenerator, generate_collection_config
-from .url_collector import URLCollector, collect_detail_urls
 
 __all__ = [
     "ConfigGenerator",

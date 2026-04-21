@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autospider.contexts.collection.infrastructure.crawler.collector.url_extractor import URLExtractor
+from autospider.contexts.collection.application.use_cases.extract_urls import URLExtractor
 
 
 class _FakeLocator:
@@ -68,15 +68,15 @@ async def test_click_element_and_get_url_raises_when_restore_replay_fails(
             )
 
     monkeypatch.setattr(
-        "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor.click_and_capture_new_page",
+        "autospider.contexts.collection.application.use_cases.extract_urls.click_and_capture_new_page",
         _change_url,
     )
     monkeypatch.setattr(
-        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.NavigationHandler",
+        "autospider.contexts.collection.application.use_cases.navigate.NavigationHandler",
         _FakeNavigationHandler,
     )
     monkeypatch.setattr(
-        "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor.asyncio.sleep",
+        "autospider.contexts.collection.application.use_cases.extract_urls.asyncio.sleep",
         lambda *_args, **_kwargs: _completed_awaitable(),
     )
 

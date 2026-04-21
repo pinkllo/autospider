@@ -34,13 +34,19 @@ _EXPORTS = {
     "ExtractionConfig": ("autospider.contexts.collection.infrastructure.field.models", "ExtractionConfig"),
     "FieldRule": ("autospider.contexts.collection.infrastructure.field.models", "FieldRule"),
     "FieldExtractor": ("autospider.contexts.collection.infrastructure.field.field_extractor", "FieldExtractor"),
-    "FieldDecider": ("autospider.contexts.collection.infrastructure.field.field_decider", "FieldDecider"),
+    "FieldDecider": (
+        "autospider.contexts.collection.infrastructure.adapters.llm_field_decider",
+        "FieldDecider",
+    ),
     "FieldXPathExtractor": ("autospider.contexts.collection.infrastructure.field.xpath_pattern", "FieldXPathExtractor"),
     "BatchFieldExtractor": ("autospider.contexts.collection.infrastructure.field.batch_field_extractor", "BatchFieldExtractor"),
     "BatchXPathExtractor": ("autospider.contexts.collection.infrastructure.field.batch_xpath_extractor", "BatchXPathExtractor"),
-    "DetailPageWorker": ("autospider.contexts.collection.infrastructure.field.detail_page_worker", "DetailPageWorker"),
+    "DetailPageWorker": (
+        "autospider.contexts.collection.application.use_cases.extract_fields",
+        "DetailPageWorker",
+    ),
     "DetailPageWorkerResult": (
-        "autospider.contexts.collection.infrastructure.field.detail_page_worker",
+        "autospider.contexts.collection.application.use_cases.extract_fields",
         "DetailPageWorkerResult",
     ),
     "extract_fields_from_urls": (
@@ -52,7 +58,10 @@ _EXPORTS = {
         "batch_extract_fields_from_urls",
     ),
     "validate_xpath_pattern": ("autospider.contexts.collection.infrastructure.field.xpath_pattern", "validate_xpath_pattern"),
-    "run_field_pipeline": ("autospider.contexts.collection.infrastructure.field.runner", "run_field_pipeline"),
+    "run_field_pipeline": (
+        "autospider.contexts.collection.application.use_cases.extract_fields_batch",
+        "run_field_pipeline",
+    ),
 }
 
 

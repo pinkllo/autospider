@@ -16,6 +16,14 @@ from autospider.contexts.collection.infrastructure.repositories.config_repositor
     CollectionConfig,
     ConfigPersistence,
 )
+from autospider.contexts.collection.application.use_cases.explore_site import (
+    build_detail_visit,
+    extract_mark_id_text_map,
+    prepare_explore_skill_context,
+    resolve_click_mark_id,
+    resolve_selected_mark_ids,
+    run_detail_explore_loop,
+)
 from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
 from ..collector import (
     DetailPageVisit,
@@ -24,14 +32,6 @@ from ..collector import (
     URLExtractor,
     NavigationHandler,
     PaginationHandler,
-)
-from .shared_workflow import (
-    build_detail_visit,
-    extract_mark_id_text_map,
-    prepare_explore_skill_context,
-    resolve_click_mark_id,
-    resolve_selected_mark_ids,
-    run_detail_explore_loop,
 )
 
 if TYPE_CHECKING:

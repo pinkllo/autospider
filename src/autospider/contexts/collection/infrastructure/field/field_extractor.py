@@ -38,7 +38,7 @@ from .models import (
 from .skill_context import apply_selected_skill_context, load_field_skill_context
 from .value_helpers import is_semantically_valid
 from .xpath_helpers import xpath_stability_score
-from .field_decider import FieldDecider
+from autospider.contexts.collection.infrastructure.adapters.llm_field_decider import FieldDecider
 
 logger = get_logger(__name__)
 

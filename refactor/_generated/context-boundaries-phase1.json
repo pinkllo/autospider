@@ -99,74 +99,8 @@
       "format_execution_brief"
     ]
   },
-  "canonical_imports": [
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler",
-      "canonical_import": "autospider.contexts.collection.NavigationHandler"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.pagination_handler",
-      "canonical_import": "autospider.contexts.collection.PaginationHandler"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor",
-      "canonical_import": "autospider.contexts.collection.URLExtractor"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.explore.shared_workflow",
-      "canonical_import": "autospider.contexts.collection.application.use_cases.explore_site"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.explore.url_collector",
-      "canonical_import": "autospider.contexts.collection.URLCollector"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.field.detail_page_worker",
-      "canonical_import": "autospider.contexts.collection.DetailPageWorker"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.field.field_decider",
-      "canonical_import": "autospider.contexts.collection.infrastructure.field.FieldDecider"
-    },
-    {
-      "legacy_module": "autospider.contexts.collection.infrastructure.field.runner",
-      "canonical_import": "autospider.contexts.collection.run_field_pipeline"
-    }
-  ],
-  "compatibility_wrappers": [
-    {
-      "module": "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler",
-      "target": "autospider.contexts.collection.application.use_cases.navigate"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.crawler.collector.pagination_handler",
-      "target": "autospider.contexts.collection.application.use_cases.paginate"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor",
-      "target": "autospider.contexts.collection.application.use_cases.extract_urls"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.crawler.explore.shared_workflow",
-      "target": "autospider.contexts.collection.application.use_cases.explore_site"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.crawler.explore.url_collector",
-      "target": "autospider.contexts.collection.application.use_cases.collect_urls"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.field.detail_page_worker",
-      "target": "autospider.contexts.collection.application.use_cases.extract_fields"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.field.field_decider",
-      "target": "autospider.contexts.collection.infrastructure.adapters.llm_field_decider"
-    },
-    {
-      "module": "autospider.contexts.collection.infrastructure.field.runner",
-      "target": "autospider.contexts.collection.application.use_cases.extract_fields_batch"
-    }
-  ],
+  "canonical_imports": [],
+  "compatibility_wrappers": [],
   "facade_imports": [
     {
       "source": "autospider.contexts.collection.application.use_cases.collect_urls",
