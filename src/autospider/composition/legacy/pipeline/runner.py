@@ -67,6 +67,8 @@ def _classify_pipeline_result(
     state_error: object,
     validation_failures: list[dict],
     terminal_reason: str = "",
+    failure_category: str = "",
+    failure_detail: str = "",
 ) -> dict[str, object]:
     return _classify_pipeline_result_impl(
         total_urls=total_urls,
@@ -74,6 +76,8 @@ def _classify_pipeline_result(
         state_error=state_error,
         validation_failures=validation_failures,
         terminal_reason=terminal_reason,
+        failure_category=failure_category,
+        failure_detail=failure_detail,
     )
 
 
