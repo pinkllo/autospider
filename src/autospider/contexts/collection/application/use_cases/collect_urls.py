@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from autospider.platform.config.runtime import config
-from autospider.platform.llm import LLMDecider
+from autospider.platform.llm.decider import LLMDecider
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.browser.som import (
     capture_screenshot_with_marks,

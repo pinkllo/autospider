@@ -11,9 +11,9 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from autospider.platform.config.runtime import config
+from autospider.platform.llm.client_factory import build_runtime_json_llm
 from autospider.platform.llm.streaming import ainvoke_with_stream
 from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
@@ -953,19 +953,10 @@ class XPathValueLLMValidator:
     """字段值 LLM 语义校验器"""
 
     def __init__(self):
-        api_key = config.llm.planner_api_key or config.llm.api_key
-        api_base = config.llm.planner_api_base or config.llm.api_base
-        model = config.llm.planner_model or config.llm.model
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not set")
-        self.llm = ChatOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            model=model,
+        self.llm = build_runtime_json_llm(
+            prefer_planner=True,
             temperature=0.0,
             max_tokens=512,
-            model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": config.llm.enable_thinking},
         )
 
     async def validate_value(

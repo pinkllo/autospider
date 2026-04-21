@@ -84,6 +84,26 @@ def test_parse_protocol_message_diagnostics_returns_validation_errors() -> None:
     assert parse_protocol_message({"action": "click", "args": {}}) is None
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_action"),
+    [
+        ({"action": "scroll_down", "args": {"scroll_delta": [0, 500]}}, "scroll"),
+        ({"action": "press", "args": {}}, "retry"),
+        ({"args": {"url": "https://example.com"}}, "navigate"),
+        ({"args": {"target_text": "详情"}}, "click"),
+        ({"args": {"text": "hello", "target_text": "搜索框"}}, "type"),
+    ],
+)
+def test_parse_protocol_message_normalizes_action_aliases_and_inference(
+    payload: dict[str, object],
+    expected_action: str,
+) -> None:
+    message = parse_protocol_message(payload)
+
+    assert message is not None
+    assert message["action"] == expected_action
+
+
 def test_classify_protocol_violation_keeps_validation_details() -> None:
     diagnostics = parse_protocol_message_diagnostics({"action": "click", "args": {}})
 
@@ -138,6 +158,17 @@ def test_decider_exposes_contract_violation_via_action_contract() -> None:
     assert action.failure_record is not None
     assert action.failure_record["category"] == "contract_violation"
     assert "contract_violation" in action.thinking
+
+
+def test_decider_parses_inferred_navigation_action() -> None:
+    decider = object.__new__(LLMDecider)
+    decider.last_failure_record = None
+
+    action = decider._parse_response({"args": {"url": "https://example.com"}})
+
+    assert action.action == ActionType.NAVIGATE
+    assert action.url == "https://example.com"
+    assert action.failure_record is None
 
 
 @pytest.mark.parametrize(

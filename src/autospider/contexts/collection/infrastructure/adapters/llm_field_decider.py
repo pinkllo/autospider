@@ -32,7 +32,7 @@ from autospider.contexts.collection.domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from autospider.platform.llm import LLMDecider
+    from autospider.platform.llm.decider import LLMDecider
     from autospider.platform.shared_kernel.types import ElementMark, SoMSnapshot
 
 

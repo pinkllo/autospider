@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from langchain_openai import ChatOpenAI
-
 from autospider.platform.config.runtime import config
+from autospider.platform.llm.client_factory import build_runtime_json_llm
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.planning.application.use_cases.control_payloads import (
     build_planner_control_payload,
@@ -123,21 +122,13 @@ class TaskPlanner(
         self.terminal_reason = ""
 
         if use_main_model:
-            api_key = config.llm.api_key
-            api_base = config.llm.api_base
-            model = config.llm.model
+            prefer_planner = False
         else:
-            api_key = config.llm.planner_api_key or config.llm.api_key
-            api_base = config.llm.planner_api_base or config.llm.api_base
-            model = config.llm.planner_model or config.llm.model
+            prefer_planner = True
 
-        # 初始化 ChatOpenAI 实例
-        self.llm = ChatOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            model=model,
+        self.llm = build_runtime_json_llm(
+            prefer_planner=prefer_planner,
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
-            model_kwargs={"response_format": {"type": "json_object"}},
-            extra_body={"enable_thinking": config.llm.enable_thinking},
+            use_main_model=use_main_model,
         )

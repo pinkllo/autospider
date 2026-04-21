@@ -48,8 +48,11 @@ async def test_llm_decision_maker_injects_decision_context_into_prompt(
     monkeypatch.setattr(decision_module, "summarize_llm_payload", lambda _response: {})
     monkeypatch.setattr(
         decision_module,
-        "parse_protocol_message",
-        lambda _response: {"action": "scroll", "args": {"scroll_delta": [0, 500]}},
+        "parse_protocol_message_diagnostics",
+        lambda _response: {
+            "message": {"action": "scroll", "args": {"scroll_delta": [0, 500]}},
+            "validation_errors": [],
+        },
     )
     monkeypatch.setattr(decision_module, "append_llm_trace", lambda **_kwargs: None)
 

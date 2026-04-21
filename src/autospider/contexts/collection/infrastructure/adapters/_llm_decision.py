@@ -14,7 +14,7 @@ from autospider.platform.llm.trace_logger import append_llm_trace
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.llm.protocol import (
     extract_response_text_from_llm_payload,
-    parse_protocol_message,
+    parse_protocol_message_diagnostics,
     summarize_llm_payload,
 )
 from autospider.platform.browser.som.text_first import (
@@ -141,7 +141,8 @@ class CollectorDecisionMixin:
             response = await ainvoke_with_stream(self.decider.llm, messages)
             raw_response = extract_response_text_from_llm_payload(response)
             response_summary = summarize_llm_payload(response)
-            message = parse_protocol_message(response)
+            diagnostics = parse_protocol_message_diagnostics(response)
+            message = diagnostics.get("message")
             append_llm_trace(
                 component=component,
                 payload=build_trace_payload(
@@ -149,12 +150,21 @@ class CollectorDecisionMixin:
                     input_payload=trace_input,
                     raw_response=raw_response,
                     response_summary=response_summary,
-                    parsed_payload=message,
+                    parsed_payload={
+                        "message": message,
+                        "validation_errors": diagnostics.get("validation_errors") or [],
+                    },
                 ),
             )
-            if message:
+            if isinstance(message, dict):
                 return message
-            logger.warning("%s 响应中未找到 JSON: %s", log_prefix, raw_response[:200])
+            validation_errors = list(diagnostics.get("validation_errors") or [])
+            logger.warning(
+                "%s 协议解析失败: %s | response=%s",
+                log_prefix,
+                "; ".join(validation_errors[:2]) or "unknown_protocol_error",
+                raw_response[:200],
+            )
         except json.JSONDecodeError as exc:
             logger.warning("%s JSON 解析失败: %s", log_prefix, exc)
             self._append_trace_error(component, trace_input, raw_response, response_summary, exc)
