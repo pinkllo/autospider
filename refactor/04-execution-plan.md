@@ -316,7 +316,7 @@ src/autospider/interface/cli/__init__.py
 
 ### commit[4.1] · 大删除
 
-**删除**（用 `git rm -r`）：
+**删除**：
 ```
 src/autospider/common/
 src/autospider/crawler/
