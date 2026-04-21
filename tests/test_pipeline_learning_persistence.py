@@ -11,7 +11,11 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.platform.persistence.sql.orm.models import Base, TaskRun
-from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository, TaskRunPayload
+from autospider.platform.persistence.sql.orm.repositories import (
+    TaskRunPayload,
+    TaskRunReadRepository,
+    TaskRunWriteRepository,
+)
 
 
 def _make_session_factory() -> sessionmaker[Session]:
@@ -51,7 +55,7 @@ def test_task_repository_persists_learning_snapshots() -> None:
     )
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         run = repo.save_run(payload)
         session.commit()
         session.refresh(run)
@@ -61,7 +65,7 @@ def test_task_repository_persists_learning_snapshots() -> None:
 
     with session_factory() as session:
         run = session.query(TaskRun).filter(TaskRun.execution_id == "exec_learning_001").one()
-        repo = TaskRepository(session)
+        repo = TaskRunReadRepository(session)
         detail = repo.get_run_detail("exec_learning_001")
 
     assert run.world_snapshot["page_models"]["entry"]["page_type"] == "list_page"

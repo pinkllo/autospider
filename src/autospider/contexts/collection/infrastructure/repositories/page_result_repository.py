@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from autospider.platform.persistence.sql.orm.engine import session_scope
-from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
 
 class PageResultRepository:
     def claim(self, *, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
         with session_scope() as session:
-            return TaskRepository(session).claim_item(
+            return TaskRunWriteRepository(session).claim_item(
                 execution_id=execution_id,
                 url=url,
                 worker_id=worker_id,
@@ -25,7 +25,7 @@ class PageResultRepository:
         worker_id: str,
     ) -> dict[str, Any]:
         with session_scope() as session:
-            return TaskRepository(session).commit_item(
+            return TaskRunWriteRepository(session).commit_item(
                 execution_id=execution_id,
                 url=url,
                 item_data=item,
@@ -44,7 +44,7 @@ class PageResultRepository:
         error_kind: str,
     ) -> dict[str, Any]:
         with session_scope() as session:
-            return TaskRepository(session).fail_item(
+            return TaskRunWriteRepository(session).fail_item(
                 execution_id=execution_id,
                 url=url,
                 failure_reason=failure_reason,
@@ -56,7 +56,7 @@ class PageResultRepository:
 
     def ack(self, *, execution_id: str, url: str) -> dict[str, Any]:
         with session_scope() as session:
-            return TaskRepository(session).ack_item(execution_id=execution_id, url=url)
+            return TaskRunWriteRepository(session).ack_item(execution_id=execution_id, url=url)
 
 
 __all__ = ["PageResultRepository"]

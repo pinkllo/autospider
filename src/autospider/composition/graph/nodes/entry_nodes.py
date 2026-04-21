@@ -21,7 +21,7 @@ from autospider.platform.llm.protocol import (
     extract_response_text_from_llm_payload,
     summarize_llm_payload,
 )
-from autospider.platform.persistence.redis.task_run_query_service import TaskRunQueryService
+from autospider.platform.persistence.task_run_query_service import TaskRunQueryService
 from autospider.contexts.chat.application.dto import (
     AdvanceDialogueInput,
     StartClarificationInput,

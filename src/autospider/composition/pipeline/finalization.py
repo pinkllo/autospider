@@ -396,11 +396,11 @@ def load_persisted_run_records(execution_id: str) -> dict[str, dict]:
         return {}
 
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunReadRepository
 
     records: dict[str, dict] = {}
     with session_scope() as session:
-        persisted_items = TaskRepository(session).list_run_items(execution_id)
+        persisted_items = TaskRunReadRepository(session).list_run_items(execution_id)
     for item in persisted_items:
         url = str(item.get("url") or "").strip()
         payload = item.get("item")
@@ -625,7 +625,7 @@ def _build_task_run_payload(
     records: dict[str, dict],
 ):
     from autospider.platform.persistence.sql.orm.repositories import TaskRunPayload
-    from autospider.platform.persistence.redis.task_run_query_service import normalize_url
+    from autospider.platform.persistence.task_lookup import normalize_url
 
     normalized_url = normalize_url(context.list_url)
     if not normalized_url:
@@ -641,15 +641,15 @@ def persist_pipeline_records(
 ) -> None:
     """将现版本运行结果持久化到 PostgreSQL。"""
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
-    from autospider.platform.persistence.redis.task_run_query_service import invalidate_task_cache
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
+    from autospider.platform.persistence.task_run_query_service import invalidate_task_cache
 
     payload = _build_task_run_payload(context, records)
     if payload is None:
         return
 
     with session_scope() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         repo.save_run(payload)
     invalidate_task_cache(context.list_url)
 

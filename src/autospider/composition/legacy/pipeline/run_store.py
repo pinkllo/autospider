@@ -12,10 +12,10 @@ def _release_inflight_items_for_resume(execution_id: str) -> int:
     if not execution_id:
         return 0
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).release_inflight_items_for_resume(execution_id)
+        return TaskRunWriteRepository(session).release_inflight_items_for_resume(execution_id)
 
 
 def _persist_run_snapshot(
@@ -36,8 +36,11 @@ def _persist_run_snapshot(
     committed_records: list[dict[str, Any]] | None = None,
 ) -> None:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository, TaskRunPayload
-    from autospider.platform.persistence.redis.task_run_query_service import normalize_url
+    from autospider.platform.persistence.sql.orm.repositories import (
+        TaskRunPayload,
+        TaskRunWriteRepository,
+    )
+    from autospider.platform.persistence.task_lookup import normalize_url
 
     payload = TaskRunPayload(
         normalized_url=normalize_url(str(identity.list_url or "").strip()),
@@ -72,15 +75,15 @@ def _persist_run_snapshot(
         committed_records=list(committed_records or []),
     )
     with session_scope() as session:
-        TaskRepository(session).save_run(payload)
+        TaskRunWriteRepository(session).save_run(payload)
 
 
 def _claim_persisted_item(*, execution_id: str, url: str, worker_id: str) -> dict[str, Any]:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).claim_item(
+        return TaskRunWriteRepository(session).claim_item(
             execution_id=execution_id,
             url=url,
             worker_id=worker_id,
@@ -96,10 +99,10 @@ def _commit_persisted_item(
     worker_id: str,
 ) -> dict[str, Any]:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).commit_item(
+        return TaskRunWriteRepository(session).commit_item(
             execution_id=execution_id,
             url=url,
             item_data=item,
@@ -119,10 +122,10 @@ def _fail_persisted_item(
     error_kind: str,
 ) -> dict[str, Any]:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).fail_item(
+        return TaskRunWriteRepository(session).fail_item(
             execution_id=execution_id,
             url=url,
             failure_reason=failure_reason,
@@ -135,10 +138,10 @@ def _fail_persisted_item(
 
 def _ack_persisted_item(*, execution_id: str, url: str) -> dict[str, Any]:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).ack_item(execution_id=execution_id, url=url)
+        return TaskRunWriteRepository(session).ack_item(execution_id=execution_id, url=url)
 
 
 def _release_persisted_claim(
@@ -149,10 +152,10 @@ def _release_persisted_claim(
     terminal_reason: str,
 ) -> dict[str, Any]:
     from autospider.platform.persistence.sql.orm.engine import session_scope
-    from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+    from autospider.platform.persistence.sql.orm.repositories import TaskRunWriteRepository
 
     with session_scope() as session:
-        return TaskRepository(session).release_claimed_item(
+        return TaskRunWriteRepository(session).release_claimed_item(
             execution_id=execution_id,
             url=url,
             worker_id=worker_id,

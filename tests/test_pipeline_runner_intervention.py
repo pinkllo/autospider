@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.contexts.collection.infrastructure.channel.base import URLTask
 from autospider.platform.persistence.sql.orm.models import Base
-from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository, TaskRunPayload
+from autospider.platform.persistence.sql.orm.repositories import (
+    TaskRunPayload,
+    TaskRunReadRepository,
+    TaskRunWriteRepository,
+)
 from autospider.composition.legacy.pipeline import runner
 
 
@@ -296,7 +300,7 @@ async def test_process_task_awaits_async_fail_helper(
 def test_release_claimed_item_resets_inflight_state() -> None:
     session = _build_repo_session()
     try:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         execution_id = "exec-claim-release"
         url = "https://example.com/item-2"
         repo.save_run(_build_run_payload(execution_id))
@@ -320,7 +324,7 @@ def test_release_claimed_item_resets_inflight_state() -> None:
         assert released["worker_id"] == ""
         assert released["attempt_count"] == 1
 
-        persisted = repo.get_item(execution_id, url)
+        persisted = TaskRunReadRepository(session).get_item(execution_id, url)
         assert persisted is not None
         assert persisted["claim_state"] == "pending"
         assert persisted["durability_state"] == "staged"

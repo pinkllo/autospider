@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from autospider.platform.persistence.redis.task_run_query_service import TaskRunQueryService
+from autospider.platform.persistence.task_run_query_service import TaskRunQueryService
 from autospider.composition.legacy.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,

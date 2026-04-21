@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from autospider.platform.observability.logger import get_logger
-from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from autospider.platform.shared_kernel.utils.file_utils import ensure_directory, file_exists, load_json
+from autospider.platform.persistence.files.idempotent_io import (
+    load_json_if_exists,
+    write_json_idempotent,
+)
 
 logger = get_logger(__name__)
 
@@ -81,7 +83,7 @@ class CollectionProgress:
 class ProgressPersistence:
     def __init__(self, output_dir: str | Path = "output"):
         self.output_dir = Path(output_dir)
-        ensure_directory(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.progress_file = self.output_dir / "progress.json"
 
     def save_progress(self, progress: CollectionProgress) -> None:
@@ -97,10 +99,10 @@ class ProgressPersistence:
         progress.last_updated = normalized.last_updated
 
     def load_progress(self) -> CollectionProgress | None:
-        if not file_exists(self.progress_file):
+        if not self.progress_file.exists():
             return None
         try:
-            data = load_json(self.progress_file)
+            data = load_json_if_exists(self.progress_file)
             if data is None:
                 raise ValueError(f"进度文件内容无效: {self.progress_file}")
             return CollectionProgress.from_storage_record(data)
@@ -109,10 +111,10 @@ class ProgressPersistence:
             raise RuntimeError(f"failed_to_load_collection_progress: {self.progress_file}") from exc
 
     def has_checkpoint(self) -> bool:
-        return file_exists(self.progress_file)
+        return self.progress_file.exists()
 
     def clear(self) -> None:
-        if file_exists(self.progress_file):
+        if self.progress_file.exists():
             self.progress_file.unlink()
 
 

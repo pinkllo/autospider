@@ -4,9 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect
-
-from autospider.platform.persistence.sql.engine import build_engine
+from sqlalchemy import create_engine, inspect
 
 EXPECTED_TABLES = {
     "ch_sessions",
@@ -31,7 +29,7 @@ def test_alembic_upgrade_head_creates_phase1_tables() -> None:
 
     command.upgrade(config, "head")
 
-    engine = build_engine(f"sqlite+pysqlite:///{database_path}")
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}", future=True)
     tables = set(inspect(engine).get_table_names())
 
     assert EXPECTED_TABLES.issubset(tables)

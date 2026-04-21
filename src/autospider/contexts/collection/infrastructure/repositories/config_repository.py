@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from autospider.platform.observability.logger import get_logger
-from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from autospider.platform.shared_kernel.utils.file_utils import ensure_directory, file_exists, load_json
+from autospider.platform.persistence.files.idempotent_io import (
+    load_json_if_exists,
+    write_json_idempotent,
+)
 
 logger = get_logger(__name__)
 
@@ -100,7 +102,7 @@ class CollectionConfig:
 class ConfigPersistence:
     def __init__(self, config_dir: str | Path = "output"):
         self.config_dir = Path(config_dir)
-        ensure_directory(self.config_dir)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "collection_config.json"
 
     def save(self, config: CollectionConfig) -> None:
@@ -126,11 +128,11 @@ class ConfigPersistence:
         logger.info("[持久化] 配置已保存到: %s", self.config_file)
 
     def load(self) -> CollectionConfig | None:
-        if not file_exists(self.config_file):
+        if not self.config_file.exists():
             logger.info("[持久化] 配置文件不存在: %s", self.config_file)
             return None
         try:
-            data = load_json(self.config_file)
+            data = load_json_if_exists(self.config_file)
             if data is None:
                 raise ValueError(f"配置文件内容无效: {self.config_file}")
             config = CollectionConfig.from_storage_record(data)
@@ -141,7 +143,7 @@ class ConfigPersistence:
             raise RuntimeError(f"failed_to_load_collection_config: {self.config_file}") from exc
 
     def exists(self) -> bool:
-        return file_exists(self.config_file)
+        return self.config_file.exists()
 
 
 def load_collection_config(
@@ -150,12 +152,11 @@ def load_collection_config(
     path = Path(config_path)
     if not path.exists():
         return None
-    try:
-        data = load_json(path)
-    except Exception as exc:
+    data = load_json_if_exists(path)
+    if data is None:
         if not strict:
             return None
-        raise CollectionConfigLoadError(f"collection config load failed: {path}") from exc
+        raise CollectionConfigLoadError(f"collection config load failed: {path}")
     if not isinstance(data, dict):
         if not strict:
             return None

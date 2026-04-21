@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from autospider.platform.persistence.sql.orm.engine import session_scope
-from autospider.platform.persistence.sql.orm.repositories import TaskRepository
+from autospider.platform.persistence.sql.orm.repositories import TaskRunReadRepository
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
 from .types import (
@@ -54,7 +54,7 @@ class ResultAggregator:
     @staticmethod
     def _load_execution_items(execution_id: str) -> list[dict]:
         with session_scope() as session:
-            return TaskRepository(session).list_eligible_items_by_execution(execution_id)
+            return TaskRunReadRepository(session).list_eligible_items_by_execution(execution_id)
 
     @staticmethod
     def _included_detail_ids(details: list[AggregationSubtaskDetail]) -> set[str]:

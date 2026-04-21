@@ -6,12 +6,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from autospider.platform.persistence.sql.orm.models import Base, TaskRecord, TaskRun
-from autospider.platform.persistence.sql.orm.repositories.task_repo import (
-    TaskRepository,
+from autospider.platform.persistence.sql.orm.repositories import (
     TaskRunPayload,
+    TaskRunReadRepository,
+    TaskRunWriteRepository,
+)
+from autospider.platform.persistence.sql.orm.repositories.task_run_support import (
     _build_registry_id,
 )
-from autospider.platform.persistence.redis.task_run_query_service import (
+from autospider.platform.persistence.task_run_query_service import (
     TaskRunQueryService,
     normalize_url,
 )
@@ -132,7 +135,7 @@ def test_task_repository_reuses_registry_identity_by_semantic_signature() -> Non
     expected_signature = _expected_semantic_signature()
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         first_run = repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-001",
@@ -191,7 +194,7 @@ def test_task_repository_does_not_merge_legacy_empty_signature_row_by_descriptio
             },
             field_names=["title", "published_at"],
         )
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         run = repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-legacy-mismatch",
@@ -221,7 +224,7 @@ def test_task_repository_save_run_computes_missing_semantic_signature_for_new_wr
     expected_signature = _expected_semantic_signature()
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         run = repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-005",
@@ -258,7 +261,7 @@ def test_task_repository_save_run_rejects_new_empty_signature_task_record_when_s
     session_factory = _make_session_factory()
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         payload = TaskRunPayload(
             normalized_url="example.com/list",
             original_url="https://example.com/list?page=1",
@@ -291,7 +294,7 @@ def test_task_repository_save_run_reconciles_stale_explicit_semantic_signature_t
     expected_signature = _expected_semantic_signature()
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         first_run = repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-008",
@@ -324,7 +327,7 @@ def test_save_run_with_missing_semantic_signature_upgrades_legacy_history_semant
 
     with session_factory() as session:
         _insert_legacy_reusable_task(session)
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         run = repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-006",
@@ -347,7 +350,7 @@ def test_save_run_with_missing_semantic_signature_upgrades_legacy_history_semant
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.platform.persistence.redis.task_run_query_service._cache",
+        "autospider.platform.persistence.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),
@@ -360,7 +363,7 @@ def test_save_run_with_missing_semantic_signature_upgrades_legacy_history_semant
 
     def _db_find_by_url(normalized_url: str) -> list[dict[str, object]]:
         with session_factory() as session:
-            return TaskRepository(session).find_by_url(normalized_url)
+            return TaskRunReadRepository(session).find_by_url(normalized_url)
 
     monkeypatch.setattr(service, "_db_find_by_url", _db_find_by_url)
 
@@ -382,7 +385,7 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
     expected_signature = _expected_semantic_signature()
 
     with session_factory() as session:
-        repo = TaskRepository(session)
+        repo = TaskRunWriteRepository(session)
         repo.save_run(
             _build_payload(
                 execution_id="exec-semantic-003",
@@ -399,7 +402,7 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
 
     service = TaskRunQueryService()
     monkeypatch.setattr(
-        "autospider.platform.persistence.redis.task_run_query_service._cache",
+        "autospider.platform.persistence.task_run_query_service._cache",
         type(
             "_NoopCache",
             (),
@@ -412,7 +415,7 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
 
     def _db_find_by_url(normalized_url: str) -> list[dict[str, object]]:
         with session_factory() as session:
-            return TaskRepository(session).find_by_url(normalized_url)
+            return TaskRunReadRepository(session).find_by_url(normalized_url)
 
     monkeypatch.setattr(service, "_db_find_by_url", _db_find_by_url)
 

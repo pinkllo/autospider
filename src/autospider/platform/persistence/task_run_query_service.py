@@ -1,21 +1,20 @@
-"""Canonical read-side task run query service."""
+"""Read-side task run query service with SQL + Redis overlay."""
 
 from __future__ import annotations
 
 import json
 import os
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse
 
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.redis.pipeline_runtime_store import PipelineRuntimeStore
 from autospider.platform.persistence.redis.pool import get_sync_client
+from autospider.platform.persistence.task_lookup import build_task_lookup_key, normalize_url
 
 logger = get_logger(__name__)
 
 _CACHE_PREFIX = "autospider:task_cache:"
 _CACHE_TTL_S = int(os.getenv("TASK_CACHE_TTL", "300"))
-_PAGINATION_PARAMS = {"page", "p", "offset", "start", "pagenum", "pn"}
 
 
 class _RedisCache:
@@ -80,45 +79,6 @@ def _normalize_query_results(data: list[dict[str, Any]] | None) -> list[dict[str
     return rows
 
 
-def normalize_url(url: str) -> str:
-    raw = (url or "").strip()
-    if not raw:
-        return ""
-
-    parsed = urlparse(raw)
-    netloc = parsed.netloc.lower().removeprefix("www.")
-    path = parsed.path.rstrip("/") or "/"
-    filtered = {
-        key: value
-        for key, value in parse_qs(parsed.query).items()
-        if key.lower() not in _PAGINATION_PARAMS
-    }
-    query = urlencode(filtered, doseq=True) if filtered else ""
-    result = f"{netloc}{path}"
-    if query:
-        result += f"?{query}"
-    return result
-
-
-def _clean_lookup_value(value: str) -> str:
-    return str(value or "").strip()
-
-
-def build_task_lookup_key(
-    url: str,
-    *,
-    page_state_signature: str = "",
-    anchor_url: str = "",
-    variant_label: str = "",
-) -> dict[str, str]:
-    return {
-        "normalized_url": normalize_url(url),
-        "page_state_signature": _clean_lookup_value(page_state_signature),
-        "anchor_url": _clean_lookup_value(anchor_url),
-        "variant_label": _clean_lookup_value(variant_label),
-    }
-
-
 def invalidate_task_cache(url: str) -> None:
     normalized = build_task_lookup_key(url)["normalized_url"]
     if normalized:
@@ -149,15 +109,14 @@ class TaskRunQueryService:
         target = str(execution_id or "").strip()
         if not target:
             return None
-        return self._runtime_store_get(target)
+        return self._runtime_store.get_runtime_state(target)
 
     def _db_find_by_url(self, normalized_url: str) -> list[dict[str, Any]]:
         from autospider.platform.persistence.sql.orm.engine import session_scope
-        from autospider.platform.persistence.sql.orm.repositories.task_repo import TaskRepository
+        from autospider.platform.persistence.sql.orm.repositories import TaskRunReadRepository
 
         with session_scope() as session:
-            repo = TaskRepository(session)
-            return repo.find_by_url(normalized_url)
+            return TaskRunReadRepository(session).find_by_url(normalized_url)
 
     def get_latest_site_profile(self, url: str) -> dict[str, Any] | None:
         target = normalize_url(url)
