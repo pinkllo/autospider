@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.composition.legacy.taskplane_adapter.result_bridge import ResultBridge
+from autospider.composition.taskplane_adapter.result_bridge import ResultBridge
 
 from . import contract_tmp_dir, run_contract_pipeline, snapshot_shape
 
@@ -160,3 +160,4 @@ def test_current_result_envelopes_match_contract_snapshots() -> None:
                 "ticket_id": "str",
             },
         }
+

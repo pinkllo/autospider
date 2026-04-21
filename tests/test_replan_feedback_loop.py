@@ -17,11 +17,11 @@ if str(SRC_ROOT) not in sys.path:
 
 
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.composition.legacy.graph.nodes.feedback_nodes import (
+from autospider.composition.graph.nodes.feedback_nodes import (
     REPLAN_BUDGET_EXHAUSTED_REASON,
     monitor_dispatch_node,
 )
-from autospider.composition.legacy.graph.subgraphs.multi_dispatch import route_after_feedback
+from autospider.composition.graph._multi_dispatch import route_after_feedback
 
 
 def _system_failure_result(
@@ -183,3 +183,4 @@ def test_monitor_honors_request_params_recovery_policy_budget() -> None:
     assert active["name"] == "aggregate"
     assert active["reason"] == REPLAN_BUDGET_EXHAUSTED_REASON
     assert active["max_replans"] == 1
+

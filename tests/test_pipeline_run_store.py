@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from autospider.composition.legacy.pipeline.finalization import (
+from autospider.composition.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
 )
-from autospider.composition.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
+from autospider.composition.pipeline.helpers import build_semantic_signature, build_strategy_payload
 
 
 class _CapturedPayload:
@@ -182,3 +182,4 @@ def test_build_task_run_payload_includes_semantic_identity(monkeypatch) -> None:
     assert payload.semantic_signature == "semantic::category::001"
     assert payload.strategy_payload["group_by"] == "category"
     assert payload.strategy_payload["requested_categories"] == ["土木工程", "交通运输工程"]
+

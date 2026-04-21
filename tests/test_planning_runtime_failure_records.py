@@ -18,7 +18,7 @@ from autospider.contexts.planning.infrastructure.adapters.task_planner import (
     build_planner_world_payload,
 )
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.composition.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.composition.graph.nodes.capability_nodes import build_planning_runtime_payload
 
 
 def _sample_plan() -> TaskPlan:
@@ -122,3 +122,4 @@ def test_build_planning_runtime_payload_without_failures_yields_empty_lists() ->
 
     assert payload["request_params"]["failure_records"] == []
     assert payload["world"]["failure_records"] == []
+

@@ -1,5 +1,5 @@
 from autospider.contexts.planning.domain import SubTask, TaskPlan
-from autospider.composition.legacy.taskplane_adapter.plan_bridge import PlanBridge
+from autospider.composition.taskplane_adapter.plan_bridge import PlanBridge
 
 
 def _sample_plan() -> TaskPlan:
@@ -46,3 +46,4 @@ class TestPlanBridge:
 
         assert restored.original_request == plan.original_request
         assert restored.site_url == plan.site_url
+

@@ -1,7 +1,5 @@
 """LangGraph state shells and public access helpers."""
 
-from __future__ import annotations
-
 from typing import Any, TypedDict
 
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState

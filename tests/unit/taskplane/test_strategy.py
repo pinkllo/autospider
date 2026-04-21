@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autospider.composition.legacy.taskplane.protocol import TaskTicket
-from autospider.composition.legacy.taskplane.strategy import (
+from autospider.composition.taskplane.protocol import TaskTicket
+from autospider.composition.taskplane.strategy import (
     BatchAwareStrategy,
     FIFOStrategy,
     PriorityStrategy,
@@ -58,3 +58,4 @@ class TestBatchAwareStrategy:
 
         assert same_gap == pytest.approx(1.0)
         assert cross_gap > same_gap
+

@@ -16,8 +16,8 @@ from autospider.contexts.planning.domain import (
     SubTaskMode,
     TaskPlan,
 )
-from autospider.composition.legacy.graph.nodes.capability_nodes import build_planning_runtime_payload
-from autospider.composition.legacy.graph.state_access import (
+from autospider.composition.graph.nodes.capability_nodes import build_planning_runtime_payload
+from autospider.composition.graph.state_access import (
     collection_config,
     dispatch_summary,
     get_error_state,
@@ -173,7 +173,7 @@ def test_get_stage_status_reads_workflow_control_stage_status() -> None:
         "dispatch": {"status": "fatal"},
     }
 
-    from autospider.composition.legacy.graph.state_access import get_stage_status
+    from autospider.composition.graph.state_access import get_stage_status
 
     assert get_stage_status(state) == "ok"
 
@@ -246,3 +246,4 @@ def test_request_params_reads_planner_runtime_payload_from_world_namespace() -> 
     assert params["world_snapshot"] == payload["world"]
     assert params["control_snapshot"] == payload["control"]
     assert params["decision_context"]["current_plan"]["goal"] == "进入招标公告列表"
+

@@ -64,7 +64,7 @@ def _build_graph_redis_url(env: dict[str, str] | None) -> str:
 
 
 def _repo_root(path: Path) -> Path:
-    if path.is_file():
+    if path.is_file() or bool(path.suffix):
         path = path.parent
     return path.parents[2]
 

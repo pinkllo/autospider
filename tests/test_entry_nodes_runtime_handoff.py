@@ -11,9 +11,9 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.composition.legacy.graph.nodes.entry_nodes as entry_nodes_module
-from autospider.composition.legacy.graph.state_access import request_params as select_request_params
-from autospider.composition.legacy.graph.nodes.entry_nodes import (
+import autospider.composition.graph.nodes.entry_nodes as entry_nodes_module
+from autospider.composition.graph.state_access import request_params as select_request_params
+from autospider.composition.graph.nodes.entry_nodes import (
     chat_clarify,
     chat_history_match,
     chat_prepare_execution_handoff,
@@ -27,7 +27,7 @@ from autospider.contexts.chat.domain.model import (
     DialogueMessage,
     RequestedField,
 )
-from autospider.composition.legacy.pipeline.helpers import build_semantic_signature
+from autospider.composition.pipeline.helpers import build_semantic_signature
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
 
@@ -508,3 +508,4 @@ async def test_chat_history_match_preserves_current_task_description_when_reusin
     assert handoff["normalized_params"]["semantic_signature"] == build_semantic_signature(task)
     assert handoff["normalized_params"]["strategy_payload"]["group_by"] == "category"
     assert handoff["normalized_params"]["task_description"] == "把专业按分类各抓 3 条"
+

@@ -7,12 +7,12 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.composition.legacy.graph.execution_handoff import (
+from autospider.composition.graph.execution_handoff import (
     build_chat_execution_params,
     build_chat_review_payload,
 )
-from autospider.composition.legacy.pipeline.helpers import build_semantic_signature, build_strategy_payload
-from autospider.composition.legacy.pipeline.types import ExecutionRequest
+from autospider.composition.pipeline.helpers import build_semantic_signature, build_strategy_payload
+from autospider.composition.pipeline.types import ExecutionRequest
 
 
 def test_build_chat_handoff_preserves_grouping_semantics() -> None:
@@ -168,3 +168,4 @@ def test_execution_request_from_params_normalizes_invalid_grouping_inputs() -> N
     assert request.category_discovery_mode == "auto"
     assert request.requested_categories == []
     assert request.category_examples == ["交通运输工程"]
+

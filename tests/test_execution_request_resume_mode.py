@@ -9,7 +9,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.composition.legacy.pipeline.types import ExecutionRequest, ResumeMode
+from autospider.composition.pipeline.types import ExecutionRequest, ResumeMode
 
 
 @pytest.mark.parametrize(
@@ -26,3 +26,4 @@ def test_execution_request_accepts_resume_mode_enum_input(
     request = ExecutionRequest.from_params({"resume_mode": raw_resume_mode})
 
     assert request.resume_mode is expected
+

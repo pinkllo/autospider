@@ -9,8 +9,8 @@ from autospider.platform.config.runtime import normalize_pipeline_mode
 from autospider.contexts.collection.infrastructure.channel import __all__ as channel_exports
 from autospider.contexts.collection.infrastructure.channel.factory import create_url_channel
 from autospider.contexts.collection.infrastructure.channel.redis_channel import RedisURLChannel
-from autospider.composition.legacy.pipeline.helpers import build_execution_context
-from autospider.composition.legacy.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
+from autospider.composition.pipeline.helpers import build_execution_context
+from autospider.composition.pipeline.types import ExecutionRequest, PipelineMode, ResumeMode
 
 
 def _reset_config_cache() -> None:
@@ -80,3 +80,4 @@ def test_create_url_channel_accepts_redis() -> None:
 def test_common_channel_stops_exporting_legacy_channels() -> None:
     assert "MemoryURLChannel" not in channel_exports
     assert "FileURLChannel" not in channel_exports
+

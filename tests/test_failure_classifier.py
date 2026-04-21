@@ -19,8 +19,8 @@ from autospider.contexts.planning.domain import (
     classify_protocol_violation,
     classify_runtime_exception,
 )
-from autospider.composition.legacy.graph.nodes import capability_nodes
-from autospider.composition.legacy.graph.recovery import build_recovery_directive
+from autospider.composition.graph.nodes import capability_nodes
+from autospider.composition.graph.recovery import build_recovery_directive
 
 
 class StateMismatchError(RuntimeError):
@@ -319,3 +319,4 @@ def test_capability_recovery_exposes_directive_for_unknown_runtime_error() -> No
 
     assert failure_record["category"] == "fatal"
     assert directive.action == "fail"
+

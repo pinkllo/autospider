@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from autospider.composition.legacy.pipeline import runner as legacy_runner
+from autospider.composition.pipeline import runner as legacy_runner
 from autospider.composition.pipeline import runner as active_runner
 
 
@@ -34,3 +34,4 @@ def test_legacy_runner_classification_wrapper_accepts_failure_metadata() -> None
     assert result["failure_category"] == "site_defense"
     assert result["failure_detail"] == "captcha detected"
     assert result["outcome_state"] == "system_failure"
+

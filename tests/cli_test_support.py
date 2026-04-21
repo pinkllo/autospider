@@ -16,7 +16,6 @@ _PURGE_PREFIXES = (
     "autospider.interface.cli._runtime_support",
     "autospider.interface.cli._legacy_runtime",
     "autospider.composition.graph",
-    "autospider.composition.legacy.graph",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
     "typer",
@@ -211,3 +210,4 @@ def _split_decl(decl: str) -> list[str]:
     if "/" not in decl:
         return [decl]
     return [item for item in decl.split("/") if item]
+

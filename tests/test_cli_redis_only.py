@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from tests.cli_test_support import fresh_import_cli
 
-from autospider.composition.legacy.graph.execution_handoff import build_chat_execution_params
-from autospider.composition.legacy.pipeline.types import ExecutionRequest
+from autospider.composition.graph.execution_handoff import build_chat_execution_params
+from autospider.composition.pipeline.types import ExecutionRequest
 
 
 def test_cli_help_exposes_only_current_public_commands() -> None:
@@ -59,3 +59,4 @@ def test_cli_originated_grouped_handoff_preserves_category_semantics() -> None:
     assert request.requested_categories == []
     assert request.category_examples == ["交通运输工程", "土木工程"]
     assert request.pipeline_mode.value == "redis"
+

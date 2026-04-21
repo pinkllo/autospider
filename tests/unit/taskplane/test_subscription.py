@@ -2,10 +2,10 @@ import asyncio
 
 import pytest
 
-from autospider.composition.legacy.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket
-from autospider.composition.legacy.taskplane.scheduler import TaskScheduler
-from autospider.composition.legacy.taskplane.store.memory_store import MemoryStore
-from autospider.composition.legacy.taskplane.subscription import Subscription
+from autospider.composition.taskplane.protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket
+from autospider.composition.taskplane.scheduler import TaskScheduler
+from autospider.composition.taskplane.store.memory_store import MemoryStore
+from autospider.composition.taskplane.subscription import Subscription
 
 
 @pytest.fixture
@@ -56,3 +56,4 @@ class TestSubscription:
         await subscription.start()
         await asyncio.sleep(0.1)
         await subscription.stop()
+

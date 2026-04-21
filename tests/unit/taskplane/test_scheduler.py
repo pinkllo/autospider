@@ -1,15 +1,15 @@
 import pytest
 
-from autospider.composition.legacy.taskplane.protocol import (
+from autospider.composition.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
     TaskTicket,
     TicketStatus,
 )
-from autospider.composition.legacy.taskplane.scheduler import TaskScheduler
-from autospider.composition.legacy.taskplane.store.memory_store import MemoryStore
-from autospider.composition.legacy.taskplane.subscription import Subscription
+from autospider.composition.taskplane.scheduler import TaskScheduler
+from autospider.composition.taskplane.store.memory_store import MemoryStore
+from autospider.composition.taskplane.subscription import Subscription
 
 
 @pytest.fixture
@@ -187,3 +187,4 @@ class TestRelease:
 
         assert ticket is not None
         assert ticket.status == TicketStatus.QUEUED
+

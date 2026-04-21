@@ -18,7 +18,7 @@ from autospider.platform.persistence.task_run_query_service import (
     TaskRunQueryService,
     normalize_url,
 )
-from autospider.composition.legacy.pipeline.helpers import build_semantic_signature
+from autospider.composition.pipeline.helpers import build_semantic_signature
 
 
 def _make_session_factory() -> sessionmaker[Session]:
@@ -429,3 +429,4 @@ def test_task_run_query_service_keeps_url_lookup_stable_with_semantic_identity(
         expected_signature,
         "sig-category",
     )
+

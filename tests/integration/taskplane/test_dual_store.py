@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from autospider.composition.legacy.taskplane.protocol import (
+from autospider.composition.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
@@ -30,7 +30,7 @@ def _ticket(ticket_id: str, *, priority: int = 0) -> TaskTicket:
 
 
 def test_dual_store_module_exists() -> None:
-    from autospider.composition.legacy.taskplane.store.dual_store import DualLayerStore
+    from autospider.composition.taskplane.store.dual_store import DualLayerStore
 
     assert DualLayerStore is not None
 
@@ -51,9 +51,9 @@ async def test_hot_write_reaches_cold_store_asynchronously(
     redis_namespace: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.composition.legacy.taskplane.store.dual_store import DualLayerStore
-    from autospider.composition.legacy.taskplane.store.pg_store import PgColdStore
-    from autospider.composition.legacy.taskplane.store.redis_store import RedisHotStore
+    from autospider.composition.taskplane.store.dual_store import DualLayerStore
+    from autospider.composition.taskplane.store.pg_store import PgColdStore
+    from autospider.composition.taskplane.store.redis_store import RedisHotStore
 
     hot_store = RedisHotStore(redis_url=taskplane_redis_url, namespace=redis_namespace)
     cold_store = PgColdStore(database_url=taskplane_database_url)
@@ -78,9 +78,9 @@ async def test_get_ticket_falls_back_to_pg_on_hot_miss(
     redis_namespace: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.composition.legacy.taskplane.store.dual_store import DualLayerStore
-    from autospider.composition.legacy.taskplane.store.pg_store import PgColdStore
-    from autospider.composition.legacy.taskplane.store.redis_store import RedisHotStore
+    from autospider.composition.taskplane.store.dual_store import DualLayerStore
+    from autospider.composition.taskplane.store.pg_store import PgColdStore
+    from autospider.composition.taskplane.store.redis_store import RedisHotStore
 
     hot_store = RedisHotStore(redis_url=taskplane_redis_url, namespace=redis_namespace)
     cold_store = PgColdStore(database_url=taskplane_database_url)
@@ -109,9 +109,9 @@ async def test_save_result_is_durable_in_pg(
     redis_namespace: str,
     pg_isolated_tables: None,
 ) -> None:
-    from autospider.composition.legacy.taskplane.store.dual_store import DualLayerStore
-    from autospider.composition.legacy.taskplane.store.pg_store import PgColdStore
-    from autospider.composition.legacy.taskplane.store.redis_store import RedisHotStore
+    from autospider.composition.taskplane.store.dual_store import DualLayerStore
+    from autospider.composition.taskplane.store.pg_store import PgColdStore
+    from autospider.composition.taskplane.store.redis_store import RedisHotStore
 
     hot_store = RedisHotStore(redis_url=taskplane_redis_url, namespace=redis_namespace)
     cold_store = PgColdStore(database_url=taskplane_database_url)
@@ -135,3 +135,4 @@ async def test_save_result_is_durable_in_pg(
         assert stored_result.output == {"items": 7}
     finally:
         await store.aclose()
+

@@ -9,11 +9,11 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import autospider.composition.legacy.graph.main_graph as main_graph_module
+import autospider.composition.graph.main_graph as main_graph_module
 from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.composition.legacy.graph.main_graph import build_main_graph, resolve_feedback_route
-from autospider.composition.legacy.graph.subgraphs.multi_dispatch import build_multi_dispatch_subgraph
+from autospider.composition.graph.main_graph import build_main_graph, resolve_feedback_route
+from autospider.composition.graph._multi_dispatch import build_multi_dispatch_subgraph
 
 
 def _runtime_result(
@@ -258,3 +258,4 @@ async def test_build_multi_dispatch_subgraph_accepts_control_task_plan_boundary(
     assert result["node_status"] == "ok"
     assert result["control"]["task_plan"].plan_id == "plan_001"
     assert result["execution"]["dispatch_summary"]["total"] == 0
+

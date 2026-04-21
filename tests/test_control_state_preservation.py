@@ -19,7 +19,7 @@ if str(SRC_ROOT) not in sys.path:
 import pytest
 
 from autospider.contexts.planning.domain import TaskPlan
-from autospider.composition.legacy.graph.subgraphs.multi_dispatch import (
+from autospider.composition.graph._multi_dispatch import (
     complete_dispatch,
     merge_dispatch_round,
 )
@@ -57,7 +57,7 @@ class _FakePlanMutationService:
 def _install_fakes(
     monkeypatch: pytest.MonkeyPatch, plan: TaskPlan, progress: _FakeProgress
 ) -> None:
-    import autospider.composition.legacy.graph.subgraphs.multi_dispatch as md
+    import autospider.composition.graph._multi_dispatch as md
 
     monkeypatch.setattr(md, "_taskplane_scheduler", lambda state, plan: _FakeScheduler(progress))
     monkeypatch.setattr(md, "_taskplane_envelope_id", lambda state, plan: "env-1")
@@ -103,3 +103,4 @@ def test_complete_dispatch_preserves_active_strategy(monkeypatch: pytest.MonkeyP
     assert active["name"] == "replan"
     assert active["replan_count"] == 2
     assert active["max_replans"] == 3
+

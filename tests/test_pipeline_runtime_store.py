@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from autospider.composition.legacy.pipeline.progress_tracker import TaskProgressTracker
+from autospider.composition.pipeline.progress_tracker import TaskProgressTracker
 
 
 class _FakeRedisClient:
@@ -277,3 +277,4 @@ async def test_progress_tracker_mark_done_preserves_canonical_fields_and_finishe
     assert isinstance(state["updated_at"], int)
     assert isinstance(state["finished_at"], int)
     assert client.expire_calls[-1] == ("autospider:task_progress:run-4", 600)
+

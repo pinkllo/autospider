@@ -1,1 +1,0 @@
-"""Legacy modules retained pending physical removal (see ADR 0001)."""

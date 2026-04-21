@@ -10,18 +10,18 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.composition.legacy.pipeline.helpers import build_execution_context
-from autospider.composition.legacy.pipeline.runner import run_pipeline
-from autospider.composition.legacy.pipeline.types import ExecutionRequest
-from autospider.composition.legacy.pipeline.worker import SubTaskWorker
-from autospider.composition.legacy.graph.subgraphs.multi_dispatch import run_subtask_worker_node
-from autospider.composition.legacy.graph.control_types import (
+from autospider.composition.pipeline.helpers import build_execution_context
+from autospider.composition.pipeline.runner import run_pipeline
+from autospider.composition.pipeline.types import ExecutionRequest
+from autospider.composition.pipeline.worker import SubTaskWorker
+from autospider.composition.graph._multi_dispatch import run_subtask_worker_node
+from autospider.composition.graph.control_types import (
     build_default_dispatch_policy,
     build_default_recovery_policy,
 )
-from autospider.composition.legacy.graph.decision_context import build_decision_context
+from autospider.composition.graph.decision_context import build_decision_context
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode, TaskPlan
-from autospider.composition.legacy.graph.world_model import build_initial_world_model, upsert_page_model
+from autospider.composition.graph.world_model import build_initial_world_model, upsert_page_model
 
 
 def test_execution_request_from_params_preserves_decision_payloads() -> None:
@@ -192,7 +192,7 @@ def test_runtime_context_prefers_workflow_payloads_over_legacy_compat_fields() -
 async def test_run_pipeline_passes_learning_snapshots_into_finalization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.composition.legacy.pipeline.runner as runner_module
+    import autospider.composition.pipeline.runner as runner_module
 
     captured: dict[str, object] = {}
 
@@ -423,7 +423,7 @@ def test_subtask_worker_prepare_fields_does_not_override_non_category_fields() -
 async def test_run_subtask_worker_node_uses_per_subtask_target_count_when_global_target_is_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.composition.legacy.graph.subgraphs.multi_dispatch as dispatch_module
+    import autospider.composition.graph._multi_dispatch as dispatch_module
 
     captured: dict[str, object] = {}
 
@@ -478,7 +478,7 @@ async def test_run_subtask_worker_node_uses_per_subtask_target_count_when_global
 async def test_run_subtask_worker_node_prefers_per_subtask_target_count_for_grouped_category_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.composition.legacy.graph.subgraphs.multi_dispatch as dispatch_module
+    import autospider.composition.graph._multi_dispatch as dispatch_module
 
     captured: dict[str, object] = {}
 
@@ -535,3 +535,4 @@ async def test_run_subtask_worker_node_prefers_per_subtask_target_count_for_grou
     )
 
     assert captured["target_url_count"] == 3
+

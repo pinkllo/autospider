@@ -1,14 +1,14 @@
 import pytest
 
-from autospider.composition.legacy.taskplane.protocol import (
+from autospider.composition.taskplane.protocol import (
     PlanEnvelope,
     ResultStatus,
     TaskResult,
     TaskTicket,
     TicketStatus,
 )
-from autospider.composition.legacy.taskplane.store.memory_store import MemoryStore
-from autospider.composition.legacy.taskplane.strategy import PriorityStrategy
+from autospider.composition.taskplane.store.memory_store import MemoryStore
+from autospider.composition.taskplane.strategy import PriorityStrategy
 
 
 @pytest.fixture
@@ -162,3 +162,4 @@ class TestMemoryStoreQuery:
 
         assert len(result) == 1
         assert result[0].ticket_id == "t1"
+

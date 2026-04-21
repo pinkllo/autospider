@@ -9,8 +9,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.composition.legacy.graph.runner import GraphRunner
-from autospider.composition.legacy.graph.types import GraphInput, GraphResult
+from autospider.composition.graph.runner import GraphRunner
+from autospider.composition.graph.types import GraphInput, GraphResult
 
 
 @pytest.mark.asyncio
@@ -41,3 +41,4 @@ async def test_graph_runner_invoke_does_not_seed_empty_world_request_params(
     world = dict(initial_state.get("world") or {})
 
     assert "request_params" not in world
+

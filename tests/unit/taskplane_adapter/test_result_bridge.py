@@ -1,6 +1,6 @@
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
-from autospider.composition.legacy.taskplane.protocol import ResultStatus, TaskResult
-from autospider.composition.legacy.taskplane_adapter.result_bridge import ResultBridge
+from autospider.composition.taskplane.protocol import ResultStatus, TaskResult
+from autospider.composition.taskplane_adapter.result_bridge import ResultBridge
 
 
 def _sample_runtime_state() -> SubTaskRuntimeState:
@@ -61,3 +61,4 @@ class TestResultBridge:
         )
 
         assert state.subtask_id == "s1"
+

@@ -1,5 +1,5 @@
 from autospider.contexts.planning.domain import SubTask
-from autospider.composition.legacy.taskplane_adapter.subtask_bridge import SubtaskBridge
+from autospider.composition.taskplane_adapter.subtask_bridge import SubtaskBridge
 
 
 def _sample_subtask() -> SubTask:
@@ -38,3 +38,4 @@ class TestSubtaskBridge:
 
         assert restored.task_description == subtask.task_description
         assert restored.priority == subtask.priority
+

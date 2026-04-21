@@ -15,7 +15,7 @@ from autospider.contexts.collection.infrastructure.adapters.llm_navigator import
     LLMDecisionMaker,
 )
 from autospider.contexts.collection.infrastructure.field.field_decider import FieldDecider  # noqa: E402
-from autospider.composition.legacy.pipeline.orchestration import (  # noqa: E402
+from autospider.composition.pipeline.orchestration import (  # noqa: E402
     ConsumerPool,
     PipelineRuntimeContext,
     PipelineRuntimeDependencies,
@@ -281,3 +281,4 @@ async def test_consumer_pool_passes_decision_payloads_to_detail_worker() -> None
     assert captured["decision_context"] == {"page_model": {"page_type": "detail_page"}}
     assert captured["world_snapshot"] == {"world_model": {"page_models": {"entry": {}}}}
     assert captured["failure_records"] == [{"category": "navigation", "detail": "timed_out"}]
+

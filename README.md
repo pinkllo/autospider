@@ -2,7 +2,7 @@
 
 A pure-vision browser agent built on **LangGraph** and **Set-of-Mark (SoM)** prompting. Organised as a lightweight-DDD modular monolith with four Bounded Contexts, Redis as both queue and store, and a single `output/runs/<run_id>/` artifact layout.
 
-> Status: `refactor-phase-4` (physical legacy removal) and `refactor-phase-5` (guardrails + docs) both executed. Some residual `composition/legacy/` modules remain pending architectural redesign in a follow-up.
+> Status: `refactor-phase-4` (physical legacy removal) and `refactor-phase-5` (guardrails + docs) both executed.
 
 ---
 

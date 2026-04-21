@@ -11,16 +11,16 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask, SubTaskMode
-from autospider.composition.legacy.pipeline.types import PipelineRunResult
-from autospider.composition.legacy.pipeline.worker import SubTaskWorker
+from autospider.composition.pipeline.types import PipelineRunResult
+from autospider.composition.pipeline.worker import SubTaskWorker
 
 
 @pytest.mark.asyncio
 async def test_subtask_worker_execute_builds_execution_request_from_runtime_payloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import autospider.composition.legacy.pipeline.runner as runner_module
-    import autospider.composition.legacy.pipeline.worker as worker_module
+    import autospider.composition.pipeline.runner as runner_module
+    import autospider.composition.pipeline.worker as worker_module
 
     captured: dict[str, object] = {}
 
@@ -131,3 +131,4 @@ async def test_subtask_worker_execute_builds_execution_request_from_runtime_payl
             "metadata": {},
         }
     ]
+

@@ -17,7 +17,7 @@ from autospider.platform.persistence.sql.orm.repositories import (
     TaskRunReadRepository,
     TaskRunWriteRepository,
 )
-from autospider.composition.legacy.pipeline import runner
+from autospider.composition.pipeline import runner
 
 
 def test_runner_persistence_helpers_are_async() -> None:
@@ -331,3 +331,4 @@ def test_release_claimed_item_resets_inflight_state() -> None:
         assert persisted["worker_id"] == ""
     finally:
         session.close()
+

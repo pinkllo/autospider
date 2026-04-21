@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from autospider.platform.persistence.task_run_query_service import TaskRunQueryService
-from autospider.composition.legacy.pipeline.finalization import (
+from autospider.composition.pipeline.finalization import (
     PipelineFinalizationContext,
     _build_task_run_payload,
 )
@@ -113,3 +113,4 @@ def test_task_run_query_service_returns_latest_site_profile() -> None:
     profile = service.get_latest_site_profile("https://example.com/list")
 
     assert profile == {"host": "example.com", "from_execution": "exec-002"}
+

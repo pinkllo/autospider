@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.composition.legacy.graph.workflow_access import (
+from autospider.composition.graph.workflow_access import (
     coerce_workflow_state,
     current_plan,
     final_error,
@@ -101,3 +101,4 @@ def test_coerce_workflow_state_preserves_real_legacy_field_list_shape() -> None:
     )
 
     assert workflow["intent"]["fields"] == FIELD_LIST
+
