@@ -4,7 +4,7 @@ import importlib
 import logging
 import shutil
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -32,7 +32,10 @@ def _detach_logger_handlers(logger_module) -> None:
 
 @pytest.fixture()
 def repo_tmp_dir() -> Path:
-    path = Path(tempfile.mkdtemp(prefix="logger-tests-"))
+    base_dir = REPO_ROOT / "artifacts" / "test_tmp"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    path = base_dir / f"logger-tests-{uuid.uuid4().hex[:8]}"
+    path.mkdir(parents=True, exist_ok=True)
     try:
         yield path
     finally:

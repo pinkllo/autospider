@@ -1,37 +1,32 @@
-"""统一日志系统
-
-提供项目统一的日志配置，支持 Rich 格式化输出。
-"""
+"""统一日志系统。"""
 
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
 
-from autospider.platform.shared_kernel.utils.paths import (
-    get_repo_root,
-    resolve_output_path,
-    resolve_repo_path,
+from autospider.platform.config.runtime import get_config
+from autospider.platform.observability.log_schema import (
+    DEFAULT_CONTEXT,
+    DEFAULT_EVENT,
+    DEFAULT_LAYER,
+    event_name,
 )
+from autospider.platform.shared_kernel.trace import get_run_id, get_trace_id
+from autospider.platform.shared_kernel.utils.paths import resolve_output_path, resolve_repo_path
 
-if TYPE_CHECKING:
-    pass
-
-
-# 全局控制台实例
 console = Console()
 _BOOTSTRAPPED = False
 _CURRENT_LOG_FILE = ""
+_CURRENT_SHOW_LOCALS = False
+_EVENT_PREFIX = "autospider"
 _CONSOLE_HANDLER: logging.Handler | None = None
 _FILE_HANDLER: logging.Handler | None = None
 
-# 日志级别映射
 LOG_LEVEL_MAP = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
@@ -41,43 +36,57 @@ LOG_LEVEL_MAP = {
 }
 
 
-def _load_logging_environment() -> None:
-    env_file = get_repo_root() / ".env"
-    load_dotenv(env_file, override=False)
+class StructuredLoggerAdapter(logging.LoggerAdapter):
+    def bind(self, **context: Any) -> "StructuredLoggerAdapter":
+        payload = dict(self.extra)
+        payload.update({key: value for key, value in context.items() if value is not None})
+        return StructuredLoggerAdapter(self.logger, payload)
+
+    def process(self, msg: object, kwargs: dict[str, Any]) -> tuple[object, dict[str, Any]]:
+        payload = dict(self.extra)
+        payload.update(dict(kwargs.pop("extra", {}) or {}))
+        payload.setdefault("context", DEFAULT_CONTEXT)
+        payload.setdefault("layer", DEFAULT_LAYER)
+        payload.setdefault("event", _default_event_name())
+        payload["run_id"] = get_run_id()
+        payload["trace_id"] = get_trace_id()
+        kwargs["extra"] = payload
+        return msg, kwargs
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.logger, name)
+
+
+def _logging_config(*, reload: bool = False):
+    return get_config(reload=reload).logging
+
+
+def _resolve_log_level(level_name: str) -> int:
+    return LOG_LEVEL_MAP.get(str(level_name or "").strip().upper(), logging.INFO)
+
+
+def _default_event_name() -> str:
+    return event_name(_EVENT_PREFIX, DEFAULT_EVENT)
 
 
 def get_log_level() -> int:
-    """从环境变量获取日志级别
-
-    Returns:
-        日志级别常量
-    """
-    _load_logging_environment()
-    level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-    return LOG_LEVEL_MAP.get(level_str, logging.INFO)
-
-
-def _should_show_locals() -> bool:
-    _load_logging_environment()
-    return os.getenv("LOG_SHOW_LOCALS", "false").lower() == "true"
+    return _resolve_log_level(_logging_config().log_level)
 
 
 def _resolve_runtime_log_file(output_dir: str | None = None) -> Path:
     if output_dir:
         return resolve_output_path(output_dir, "runtime.log")
-
-    _load_logging_environment()
-    configured = os.getenv("LOG_FILE", "output/runtime.log").strip() or "output/runtime.log"
+    configured = str(_logging_config().log_file or "").strip() or "output/runtime.log"
     return resolve_repo_path(configured)
 
 
-def _build_console_handler(level: int) -> logging.Handler:
+def _build_console_handler(level: int, *, show_locals: bool) -> logging.Handler:
     handler = RichHandler(
         console=console,
         show_time=True,
         show_path=False,
         rich_tracebacks=True,
-        tracebacks_show_locals=_should_show_locals(),
+        tracebacks_show_locals=show_locals,
         markup=False,
     )
     handler.setLevel(level)
@@ -98,17 +107,23 @@ def _build_file_handler(log_file: Path, level: int) -> logging.Handler:
     return handler
 
 
-def _configure_root_logger(level: int, log_file: Path) -> None:
-    global _CONSOLE_HANDLER, _FILE_HANDLER, _CURRENT_LOG_FILE
+def _configure_root_logger(level: int, log_file: Path, *, show_locals: bool) -> None:
+    global _CONSOLE_HANDLER, _FILE_HANDLER, _CURRENT_LOG_FILE, _CURRENT_SHOW_LOCALS
+
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
+    if _CONSOLE_HANDLER is not None and _CURRENT_SHOW_LOCALS != show_locals:
+        root_logger.removeHandler(_CONSOLE_HANDLER)
+        _CONSOLE_HANDLER.close()
+        _CONSOLE_HANDLER = None
+
     if _CONSOLE_HANDLER is None:
-        _CONSOLE_HANDLER = _build_console_handler(level)
-        root_logger.addHandler(_CONSOLE_HANDLER)
+        _CONSOLE_HANDLER = _build_console_handler(level, show_locals=show_locals)
+        _CURRENT_SHOW_LOCALS = show_locals
     else:
         _CONSOLE_HANDLER.setLevel(level)
-        root_logger.addHandler(_CONSOLE_HANDLER)
+    root_logger.addHandler(_CONSOLE_HANDLER)
 
     target_log_file = str(log_file)
     if _FILE_HANDLER is not None and _CURRENT_LOG_FILE != target_log_file:
@@ -119,86 +134,64 @@ def _configure_root_logger(level: int, log_file: Path) -> None:
     if _FILE_HANDLER is None:
         _FILE_HANDLER = _build_file_handler(log_file, level)
         _CURRENT_LOG_FILE = target_log_file
-        root_logger.addHandler(_FILE_HANDLER)
     else:
         _FILE_HANDLER.setLevel(level)
-        root_logger.addHandler(_FILE_HANDLER)
+    root_logger.addHandler(_FILE_HANDLER)
 
 
 def bootstrap_logging(*, output_dir: str | None = None) -> None:
-    """初始化统一日志系统，并按需切换输出目录。"""
-    global _BOOTSTRAPPED
-    level = get_log_level()
+    global _BOOTSTRAPPED, _EVENT_PREFIX
+
+    logging_config = _logging_config(reload=True)
+    _EVENT_PREFIX = str(logging_config.event_prefix or "").strip() or "autospider"
+    level = _resolve_log_level(logging_config.log_level)
     log_file = _resolve_runtime_log_file(output_dir)
-    _configure_root_logger(level, log_file)
+    _configure_root_logger(level, log_file, show_locals=bool(logging_config.show_locals))
     _BOOTSTRAPPED = True
 
 
-def get_logger(name: str) -> logging.Logger:
-    """获取统一配置的日志器
-
-    所有模块应使用此函数获取日志器，以确保统一的格式和输出。
-
-    Args:
-        name: 日志器名称，通常使用 __name__
-
-    Returns:
-        配置好的日志器实例
-
-    Example:
-        >>> from autospider.platform.observability.logger import get_logger
-        >>> logger = get_logger(__name__)
-        >>> logger.info("这是一条日志")
-    """
+def get_logger(
+    name: str,
+    *,
+    context: str = DEFAULT_CONTEXT,
+    layer: str = DEFAULT_LAYER,
+) -> StructuredLoggerAdapter:
     if not _BOOTSTRAPPED:
         bootstrap_logging()
     logger = logging.getLogger(name)
     logger.setLevel(logging.NOTSET)
     logger.propagate = True
-    return logger
+    return StructuredLoggerAdapter(
+        logger,
+        {
+            "context": str(context or "").strip() or DEFAULT_CONTEXT,
+            "layer": str(layer or "").strip() or DEFAULT_LAYER,
+        },
+    )
 
 
 def setup_file_logging(
-    logger: logging.Logger,
+    logger: logging.Logger | StructuredLoggerAdapter,
     log_file: str,
     level: int = logging.DEBUG,
 ) -> None:
-    """为日志器添加文件输出
-
-    Args:
-        logger: 日志器实例
-        log_file: 日志文件路径
-        level: 文件日志级别
-    """
-    resolved = resolve_repo_path(log_file)
-    file_handler = _build_file_handler(resolved, level)
-    logger.addHandler(file_handler)
+    target = logger.logger if isinstance(logger, StructuredLoggerAdapter) else logger
+    target.addHandler(_build_file_handler(resolve_repo_path(log_file), level))
 
 
 class LogContext:
-    """日志上下文管理器
-
-    用于在日志中添加上下文信息。
-
-    Example:
-        >>> with LogContext(logger, page_num=5, url="https://example.com"):
-        ...     logger.info("处理页面")
-    """
-
-    def __init__(self, logger: logging.Logger, **context):
+    def __init__(self, logger: logging.Logger | StructuredLoggerAdapter, **context: Any):
         self.logger = logger
         self.context = context
-        self._old_extra = {}
+        self._old_extra: dict[str, Any] = {}
 
     def __enter__(self):
-        # 保存旧的 extra 并设置新的
         for key, value in self.context.items():
             self._old_extra[key] = getattr(self.logger, key, None)
             setattr(self.logger, key, value)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # 恢复旧的 extra
         for key, old_value in self._old_extra.items():
             if old_value is None:
                 delattr(self.logger, key)
@@ -207,17 +200,13 @@ class LogContext:
         return False
 
 
-# 预配置的模块日志器
-def get_crawler_logger() -> logging.Logger:
-    """获取爬虫模块日志器"""
+def get_crawler_logger() -> StructuredLoggerAdapter:
     return get_logger("autospider.crawler")
 
 
-def get_llm_logger() -> logging.Logger:
-    """获取 LLM 模块日志器"""
+def get_llm_logger() -> StructuredLoggerAdapter:
     return get_logger("autospider.llm")
 
 
-def get_browser_logger() -> logging.Logger:
-    """获取浏览器模块日志器"""
+def get_browser_logger() -> StructuredLoggerAdapter:
     return get_logger("autospider.browser")

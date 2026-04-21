@@ -23,6 +23,18 @@ def _load_environment() -> None:
     _DOTENV_LOADED = True
 
 
+def _env_value(name: str, default: str, *, legacy: str | None = None) -> str:
+    value = os.getenv(name)
+    if value is None and legacy:
+        value = os.getenv(legacy)
+    return default if value is None else str(value)
+
+
+def _env_bool(name: str, default: bool, *, legacy: str | None = None) -> bool:
+    fallback = "true" if default else "false"
+    return _env_value(name, fallback, legacy=legacy).lower() == "true"
+
+
 def normalize_pipeline_mode(value: object) -> str:
     if isinstance(value, Enum):
         value = value.value
@@ -88,6 +100,50 @@ class AgentConfig(BaseModel):
     screenshot_dir: str = "screenshots"
     output_dir: str = "output"
     skills_dir: str = Field(default_factory=lambda: os.getenv("AUTOSPIDER_SKILLS_DIR", "skills"))
+
+
+class LoggingConfig(BaseModel):
+    """日志配置。"""
+
+    log_level: str = Field(
+        default_factory=lambda: _env_value(
+            "AUTOSPIDER_LOG_LEVEL",
+            "INFO",
+            legacy="LOG_LEVEL",
+        )
+    )
+    log_file: str = Field(
+        default_factory=lambda: _env_value(
+            "AUTOSPIDER_LOG_FILE",
+            "output/runtime.log",
+            legacy="LOG_FILE",
+        )
+    )
+    show_locals: bool = Field(
+        default_factory=lambda: _env_bool(
+            "AUTOSPIDER_LOG_SHOW_LOCALS",
+            False,
+            legacy="LOG_SHOW_LOCALS",
+        )
+    )
+    log_json: bool = Field(
+        default_factory=lambda: _env_bool(
+            "AUTOSPIDER_LOG_JSON",
+            False,
+            legacy="LOG_JSON",
+        )
+    )
+    event_prefix: str = Field(
+        default_factory=lambda: _env_value(
+            "AUTOSPIDER_LOG_EVENT_PREFIX",
+            "autospider",
+        )
+    )
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: object) -> str:
+        return str(value or "INFO").strip().upper()
 
 
 class RedisConfig(BaseModel):
@@ -367,6 +423,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     url_collector: URLCollectorConfig = Field(default_factory=URLCollectorConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     graph_checkpoint: GraphCheckpointConfig = Field(default_factory=GraphCheckpointConfig)
