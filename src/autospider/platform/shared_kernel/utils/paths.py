@@ -20,7 +20,7 @@ def get_repo_root() -> Path:
 
 def get_package_root() -> Path:
     """Return the Python package root."""
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def resolve_repo_path(path: str | Path) -> Path:

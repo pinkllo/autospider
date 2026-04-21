@@ -19,7 +19,7 @@ try:
 except ImportError:
     _JINJA2_ENV = None
 
-_SHARED_RULES_PATH = str(Path(__file__).resolve().parents[2] / "prompts" / "_shared.yaml")
+_SHARED_RULES_PATH = str(Path(__file__).resolve().parents[3] / "prompts" / "_shared.yaml")
 
 
 def is_jinja2_available() -> bool:
