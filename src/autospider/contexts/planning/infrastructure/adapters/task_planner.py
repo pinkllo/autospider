@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from autospider.platform.config.runtime import config
 from autospider.platform.llm.client_factory import build_runtime_json_llm
 from autospider.platform.observability.logger import get_logger
+from autospider.contexts.collection import NavigationHandler
 from autospider.contexts.planning.application.use_cases.control_payloads import (
     build_planner_control_payload,
     build_planner_world_payload,
@@ -53,6 +54,15 @@ __all__ = [
     "build_planner_control_payload",
     "build_planner_world_payload",
 ]
+
+
+def _build_planner_navigation_replayer(
+    *,
+    page: "Page",
+    target_url: str,
+    max_nav_steps: int,
+) -> NavigationHandler:
+    return NavigationHandler(page, target_url, "", max_nav_steps)
 
 
 class TaskPlanner(
@@ -112,7 +122,10 @@ class TaskPlanner(
         self._knowledge_entries: list[dict] = []  # 规划发现过程中收集的知识条目
         self._journal_entries: list[dict] = []
         self._sibling_category_registry: dict[str, set[str]] = {}
-        self._page_state = PlannerPageState(page)
+        self._page_state = PlannerPageState(
+            page,
+            navigation_replayer_factory=_build_planner_navigation_replayer,
+        )
         self._artifacts = ArtifactPlanRepository(
             site_url=site_url,
             user_request=user_request,

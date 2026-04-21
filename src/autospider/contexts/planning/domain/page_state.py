@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from autospider.platform.observability.logger import get_logger
+from autospider.contexts.planning.domain.ports import NavigationStepReplayerFactory
 
 logger = get_logger(__name__)
 
@@ -19,8 +20,13 @@ _EMPTY_HREF_VALUES = {"", "#", "javascript:void(0)", "javascript:void(0);", "jav
 class PlannerPageState:
     """Encapsulates planner page state normalization and replay."""
 
-    def __init__(self, page: Any) -> None:
+    def __init__(
+        self,
+        page: Any,
+        navigation_replayer_factory: NavigationStepReplayerFactory | None = None,
+    ) -> None:
         self.page = page
+        self._navigation_replayer_factory = navigation_replayer_factory
 
     def _stable_xpath_candidates(self, step: dict[str, Any]) -> list[dict[str, object]]:
         xpath_candidates = step.get("clicked_element_xpath_candidates") or []
@@ -122,8 +128,8 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        nav_handler = self._build_navigation_handler(target_url, nav_steps)
-        replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
+        nav_replayer = self._build_navigation_replayer(target_url, nav_steps)
+        replay_ok = await nav_replayer.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
         if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
             return False
@@ -139,8 +145,8 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        nav_handler = self._build_navigation_handler(target_url, nav_steps)
-        replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
+        nav_replayer = self._build_navigation_replayer(target_url, nav_steps)
+        replay_ok = await nav_replayer.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
         if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 基于当前页面重放子状态失败，nav_steps=%d", len(nav_steps))
             return False
@@ -199,14 +205,19 @@ class PlannerPageState:
             return step
         return None
 
-    def _build_navigation_handler(
+    def _build_navigation_replayer(
         self,
         target_url: str,
         nav_steps: list[dict[str, Any]],
     ) -> Any:
-        from autospider.contexts.collection import NavigationHandler
-
-        return NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
+        factory = self._navigation_replayer_factory
+        if factory is None:
+            raise RuntimeError("planner_page_state_navigation_replayer_factory_missing")
+        return factory(
+            page=self.page,
+            target_url=target_url,
+            max_nav_steps=max(len(nav_steps), 1),
+        )
 
     def _is_replay_result_valid(self, replay_result: Any) -> bool:
         success = getattr(replay_result, "success", None)

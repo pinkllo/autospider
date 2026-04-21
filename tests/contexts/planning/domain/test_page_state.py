@@ -54,16 +54,13 @@ def test_build_nav_click_step_marks_same_page_validation_for_tab_like_elements()
 
 @pytest.mark.asyncio
 async def test_restore_page_state_rejects_successful_but_unvalidated_replay(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage()
-    state = PlannerPageState(page=page)
 
     class _FakeNavigationHandler:
-        def __init__(self, page, list_url: str, task_description: str, max_nav_steps: int) -> None:
+        def __init__(self, page, list_url: str, max_nav_steps: int) -> None:
             del page
             del list_url
-            del task_description
             del max_nav_steps
 
         async def replay_nav_steps(self, nav_steps: list[dict[str, object]]):
@@ -76,9 +73,13 @@ async def test_restore_page_state_rejects_successful_but_unvalidated_replay(
                 validated_steps=0,
             )
 
-    monkeypatch.setattr(
-        "autospider.contexts.collection.NavigationHandler",
-        _FakeNavigationHandler,
+    state = PlannerPageState(
+        page=page,
+        navigation_replayer_factory=lambda *, page, target_url, max_nav_steps: _FakeNavigationHandler(
+            page,
+            target_url,
+            max_nav_steps,
+        ),
     )
 
     restored = await state.restore_page_state(
