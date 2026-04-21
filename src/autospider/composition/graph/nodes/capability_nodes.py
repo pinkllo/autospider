@@ -11,11 +11,11 @@ from langgraph.types import interrupt
 from autospider.platform.browser.intervention import BrowserInterventionRequired
 from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.platform.config.runtime import config
-from autospider.contexts.collection.application.use_cases.collect_urls import collect_detail_urls
-from autospider.contexts.collection.application.use_cases.extract_fields_batch import (
+from autospider.contexts.collection import (
+    ResultAggregator,
+    collect_detail_urls,
     run_field_pipeline,
 )
-from autospider.contexts.collection.application.use_cases.finalize_run import ResultAggregator
 from autospider.contexts.collection.infrastructure.repositories import (
     CollectionProgress,
     load_collection_config,

@@ -8,13 +8,10 @@ from typing import Any
 
 from autospider.platform.browser.runtime import BrowserRuntimeSession
 from autospider.platform.browser.intervention import BrowserInterventionRequired
+from autospider.contexts.collection import DetailPageWorker, URLCollector
 from autospider.contexts.collection.infrastructure.channel.base import URLTask
 from autospider.contexts.collection.infrastructure.channel.factory import create_url_channel
 from autospider.platform.config.runtime import config
-from autospider.contexts.collection.application.use_cases.collect_urls import URLCollector
-from autospider.contexts.collection.application.use_cases.extract_fields import (
-    DetailPageWorker,
-)
 from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository as ExperienceSkillRepository,
