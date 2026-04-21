@@ -6,22 +6,57 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from playwright.async_api import Locator, Page
-    from .guarded_page import GuardedPage
+    from playwright.async_api import Locator
+
+from .page_handle import coerce_context_pages
+
+
+async def _capture_new_page_after_action(
+    *,
+    page: Any,
+    action: Callable[[], Awaitable[None]],
+    expect_page_timeout_ms: int,
+    load_state: str,
+    load_timeout_ms: int,
+) -> Any | None:
+    pages_before = len(coerce_context_pages(page))
+    new_page = None
+    await action()
+
+    wait_seconds = max(0.0, expect_page_timeout_ms / 1000)
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            pages = coerce_context_pages(page)
+            if len(pages) > pages_before:
+                new_page = pages[-1]
+                break
+        except Exception:
+            break
+        await asyncio.sleep(0.05)
+
+    if new_page is not None:
+        try:
+            await new_page.wait_for_load_state(load_state, timeout=load_timeout_ms)
+        except Exception:
+            pass
+
+    return new_page
 
 
 async def click_and_capture_new_page(
     *,
-    page: "Page | GuardedPage",
+    page: Any,
     locator: "Locator",
     click_timeout_ms: int = 5000,
     expect_page_timeout_ms: int = 3000,
     load_state: str = "domcontentloaded",
     load_timeout_ms: int = 10000,
-) -> "Page | GuardedPage | None":
+) -> Any | None:
     """点击定位器并捕获新打开的页面（如果有）。
 
     说明：
@@ -29,46 +64,28 @@ async def click_and_capture_new_page(
     - 不使用 expect_page，避免事件 future 在关闭阶段残留未消费异常。
     - 此助手函数仅返回新页面；它不会切换或关闭页面。
     """
-    # 获取当前上下文和页面数量，用于后续对比
-    context = page.context
-    pages_before = len(context.pages)
+    async def _click() -> None:
+        await locator.click(timeout=click_timeout_ms)
 
-    new_page: "Page | None" = None
-    await locator.click(timeout=click_timeout_ms)
-
-    # 通过轮询页面数量检测新标签页，避免 expect_page 在关闭阶段残留未消费 Future。
-    wait_seconds = max(0.0, expect_page_timeout_ms / 1000)
-    deadline = asyncio.get_running_loop().time() + wait_seconds
-    while asyncio.get_running_loop().time() < deadline:
-        try:
-            if len(context.pages) > pages_before:
-                new_page = context.pages[-1]
-                break
-        except Exception:
-            break
-        await asyncio.sleep(0.05)
-
-    if new_page is not None:
-        try:
-            # 等待新页面达到指定的加载状态（默认是 domcontentloaded）
-            await new_page.wait_for_load_state(load_state, timeout=load_timeout_ms)
-        except Exception:
-            # 加载状态等待超时通常不影响页面对象的使用，因此捕获并忽略
-            pass
-
-    return new_page
+    return await _capture_new_page_after_action(
+        page=page,
+        action=_click,
+        expect_page_timeout_ms=expect_page_timeout_ms,
+        load_state=load_state,
+        load_timeout_ms=load_timeout_ms,
+    )
 
 
 async def press_and_capture_new_page(
     *,
-    page: "Page | GuardedPage",
+    page: Any,
     locator: "Locator",
     key: str,
     press_timeout_ms: int = 5000,
     expect_page_timeout_ms: int = 3000,
     load_state: str = "domcontentloaded",
     load_timeout_ms: int = 10000,
-) -> "Page | GuardedPage | None":
+) -> Any | None:
     """按键并捕获新打开的页面（如果有）。
 
     说明：
@@ -76,34 +93,20 @@ async def press_and_capture_new_page(
     - 通过轮询 context.pages 检测新页面，避免 expect_page 相关 future 噪音。
     - 此助手函数仅返回新页面；它不会切换或关闭页面。
     """
-    context = page.context
-    pages_before = len(context.pages)
-
-    new_page: "Page | None" = None
-    try:
-        await locator.press(key, timeout=press_timeout_ms)
-    except Exception:
-        # 如果元素无法直接接收按键，尝试使用全局键盘模拟
+    async def _press() -> None:
         try:
-            await page.keyboard.press(key)
+            await locator.press(key, timeout=press_timeout_ms)
         except Exception:
-            pass
+            # 如果元素无法直接接收按键，尝试使用全局键盘模拟
+            try:
+                await page.keyboard.press(key)
+            except Exception:
+                pass
 
-    wait_seconds = max(0.0, expect_page_timeout_ms / 1000)
-    deadline = asyncio.get_running_loop().time() + wait_seconds
-    while asyncio.get_running_loop().time() < deadline:
-        try:
-            if len(context.pages) > pages_before:
-                new_page = context.pages[-1]
-                break
-        except Exception:
-            break
-        await asyncio.sleep(0.05)
-
-    if new_page is not None:
-        try:
-            await new_page.wait_for_load_state(load_state, timeout=load_timeout_ms)
-        except Exception:
-            pass
-
-    return new_page
+    return await _capture_new_page_after_action(
+        page=page,
+        action=_press,
+        expect_page_timeout_ms=expect_page_timeout_ms,
+        load_state=load_state,
+        load_timeout_ms=load_timeout_ms,
+    )

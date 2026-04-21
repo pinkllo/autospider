@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, FrozenSet
 
 from playwright.async_api import Page
 
-from .task_utils import create_monitored_task
+from .page_handle import wrap_page_with_guard
 
 if TYPE_CHECKING:
     from .guard import PageGuard
@@ -134,20 +134,8 @@ class GuardedContext:
         object.__setattr__(self, "_guard", guard)
 
     def _wrap_page(self, page: Any) -> Any:
-        if not isinstance(page, Page):
-            return page
-        if isinstance(page, GuardedPage):
-            return page
-
         guard = object.__getattribute__(self, "_guard")
-        if not getattr(page, "_guard_attached", False):
-            guard.attach_to_page(page)
-            create_monitored_task(
-                guard.run_inspection(page),
-                task_name="GuardedContext.wrap_page_inspection",
-            )
-
-        return GuardedPage(page, guard)
+        return wrap_page_with_guard(page, guard)
 
     @property
     def pages(self) -> list["GuardedPage"]:
@@ -168,64 +156,8 @@ class GuardedContext:
         await asyncio.sleep(0.1)
         return self._wrap_page(page)
 
-    def expect_page(self, predicate=None, timeout: float = 30000) -> "GuardedEventContextManager":
-        context = object.__getattribute__(self, "_context")
-        raw_manager = context.expect_page(predicate=predicate, timeout=timeout)
-        return GuardedEventContextManager(raw_manager, self._wrap_page)
-
     def __getattr__(self, name: str) -> Any:
         return getattr(object.__getattribute__(self, "_context"), name)
-
-
-class GuardedEventContextManager:
-    """包装 Playwright 的 EventContextManager。"""
-
-    def __init__(self, raw_manager: Any, wrap_fn: Any):
-        self._raw_manager = raw_manager
-        self._wrap_fn = wrap_fn
-        self._event_info = None
-        self._raw_value_future = None
-        self._value_consumed = False
-
-    async def __aenter__(self) -> "GuardedEventContextManager":
-        self._event_info = await self._raw_manager.__aenter__()
-        try:
-            self._raw_value_future = self._event_info.value
-        except Exception:
-            self._raw_value_future = None
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> Any:
-        try:
-            return await self._raw_manager.__aexit__(exc_type, exc_val, exc_tb)
-        finally:
-            if not self._value_consumed and self._raw_value_future is not None:
-                raw_future = self._raw_value_future
-
-                def _consume_exception(done_future: Any) -> None:
-                    try:
-                        done_future.exception()
-                    except BaseException:
-                        pass
-
-                try:
-                    raw_future.add_done_callback(_consume_exception)
-                    if raw_future.done():
-                        _consume_exception(raw_future)
-                except Exception:
-                    pass
-
-    @property
-    def value(self) -> Any:
-        self._value_consumed = True
-        raw_future = self._raw_value_future or self._event_info.value
-
-        async def wrapped_future() -> Any:
-            page = await raw_future
-            await asyncio.sleep(0.1)
-            return self._wrap_fn(page)
-
-        return wrapped_future()
 
 
 class GuardedKeyboard:

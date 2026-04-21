@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from autospider.platform.browser.accessibility import get_accessibility_text
-from autospider.platform.browser import ActionExecutor
+from autospider.platform.browser.actions import ActionExecutor
 from autospider.platform.browser.click_utils import click_and_capture_new_page
+from autospider.platform.browser.page_handle import pages_match, resolve_previous_page
 from autospider.contexts.collection.infrastructure.decision_context_format import (
     format_decision_context as _format_navigation_decision_context,
 )
@@ -27,12 +28,13 @@ from autospider.composition.graph.recovery import build_recovery_directive
 if TYPE_CHECKING:
     from pathlib import Path
     from playwright.async_api import Page
-    from autospider.platform.llm import LLMDecider
+    from autospider.platform.llm.decider import LLMDecider
 
 
 logger = get_logger(__name__)
 _ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
 _ARIA_CURRENT_ACTIVE_VALUES = {"true", "page", "step", "location"}
+_REPLAY_LOCATOR_POLL_INTERVALS_MS = (0, 300, 800, 1500)
 
 
 @dataclass(slots=True)
@@ -448,22 +450,14 @@ class NavigationHandler:
                 try:
                     logger.info("[Replay] 返回上一个标签页")
                     current_page = self.page
-                    raw_current = (
-                        current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
-                    )
-                    pages = list(raw_current.context.pages)
-                    target_page = None
-                    for candidate in reversed(pages):
-                        if candidate is raw_current:
-                            continue
-                        target_page = candidate
-                        break
+                    target_page = await resolve_previous_page(current_page)
                     if target_page is None:
                         step_success = False
                         failure_reason = "replay_tab_not_found"
                     else:
                         try:
-                            await current_page.close()
+                            if not pages_match(current_page, target_page):
+                                await current_page.close()
                         except Exception:
                             pass
                         self.page = target_page
@@ -516,6 +510,23 @@ class NavigationHandler:
         target_text = str(step.get("target_text") or step.get("clicked_element_text") or "").strip()
         xpath_candidates_sorted = sorted(xpath_candidates, key=lambda x: x.get("priority", 99))
 
+        for wait_ms in _REPLAY_LOCATOR_POLL_INTERVALS_MS:
+            if wait_ms:
+                await self._wait_for_replay_locator(wait_ms)
+            locator = await self._resolve_replay_locator_once(
+                xpath_candidates_sorted=xpath_candidates_sorted,
+                target_text=target_text,
+            )
+            if locator is not None:
+                return locator
+        return None
+
+    async def _resolve_replay_locator_once(
+        self,
+        *,
+        xpath_candidates_sorted: list[dict],
+        target_text: str,
+    ):
         for candidate in xpath_candidates_sorted:
             xpath = str(candidate.get("xpath") or "").strip()
             if not xpath:
@@ -530,15 +541,39 @@ class NavigationHandler:
                 matched = await self._pick_locator_by_text(locator, target_text, count)
                 if matched is not None:
                     return matched
+        if not target_text:
+            return None
+        return await self._find_replay_text_fallback(target_text)
 
-        if target_text:
-            fallback = self.page.get_by_text(target_text, exact=True)
-            if await fallback.count() > 0:
-                return fallback.first
-            contains = self.page.get_by_text(target_text, exact=False)
-            if await contains.count() > 0:
-                return contains.first
+    async def _find_replay_text_fallback(self, target_text: str):
+        fallback = self.page.get_by_text(target_text, exact=True)
+        exact_count = await fallback.count()
+        if exact_count == 1:
+            return fallback.first
+        if exact_count > 1:
+            matched = await self._pick_locator_by_text(fallback, target_text, exact_count)
+            if matched is not None:
+                return matched
+
+        contains = self.page.get_by_text(target_text, exact=False)
+        contains_count = await contains.count()
+        if contains_count == 1:
+            return contains.first
+        if contains_count > 1:
+            matched = await self._pick_locator_by_text(contains, target_text, contains_count)
+            if matched is not None:
+                return matched
         return None
+
+    async def _wait_for_replay_locator(self, wait_ms: int) -> None:
+        wait_for_timeout = getattr(self.page, "wait_for_timeout", None)
+        if callable(wait_for_timeout):
+            try:
+                await wait_for_timeout(wait_ms)
+                return
+            except Exception:
+                pass
+        await asyncio.sleep(wait_ms / 1000)
 
     async def _pick_locator_by_text(self, locator, target_text: str, count: int | None = None):
         normalized_target = "".join(str(target_text or "").split())

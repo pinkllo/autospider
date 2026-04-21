@@ -9,6 +9,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from autospider.platform.shared_kernel.types import Action, ActionResult, ActionType, ScriptStep, ScriptStepType
 from .click_utils import click_and_capture_new_page, press_and_capture_new_page
+from .page_handle import is_page_closed, pages_match, resolve_previous_page
 from .stuck_detector import StuckDetector
 
 if TYPE_CHECKING:
@@ -284,15 +285,6 @@ class ActionExecutor:
                     used_xpath = f"text={target_text}"
 
         return locator, used_xpath, resolved_mark_id, xpaths
-
-    def _is_page_closed(self, page: "GuardedPage") -> bool:
-        """
-        判断 GuardedPage 是否已关闭。
-        """
-        try:
-            return bool(page.unwrap().is_closed())
-        except Exception:
-            return False
 
     async def _execute_click(
         self,
@@ -614,73 +606,20 @@ class ActionExecutor:
         关闭当前标签页并返回到上一个（父）标签页。
         常用于处理点击后产生的新窗口。
         """
+        del step_index
         try:
             current_page = self.page
-            raw_current = current_page.unwrap() if hasattr(current_page, "unwrap") else current_page
-
-            # 1. 寻找目标返回页面
-            # 优先使用执行器记录的 previous_page（通常是 GuardedPage，最稳定）
-            target_page = getattr(self, "_previous_page", None)
-
-            # 再尝试 window.opener（Playwright async API 中 opener() 需要 await）
-            opener_page = None
-            try:
-                opener = getattr(raw_current, "opener", None)
-                if callable(opener):
-                    opener_result = opener()
-                    if asyncio.iscoroutine(opener_result):
-                        opener_result = await opener_result
-                    opener_page = opener_result
-            except Exception:
-                opener_page = None
-
-            # 如果 previous_page 不可用，则回退到 opener_page
-            if target_page is None:
-                target_page = opener_page
-
-            # 最后在 context 中寻找最后一个非当前的页面（使用 GuardedContext）
-            if target_page is None:
-                try:
-                    # 通过 GuardedPage.context.pages 获取 GuardedPage 列表
-                    pages = current_page.context.pages
-                    for candidate in reversed(pages):
-                        # GuardedPage 比较：解包后比较原始页面
-                        raw_candidate = (
-                            candidate.unwrap() if hasattr(candidate, "unwrap") else candidate
-                        )
-                        if raw_candidate is raw_current:
-                            continue
-                        target_page = candidate
-                        break
-                except Exception:
-                    target_page = None
-
-            # 如果 opener 返回的是原生 Page，尽量映射为 GuardedPage
-            if target_page is not None and not hasattr(target_page, "unwrap"):
-                try:
-                    pages = current_page.context.pages
-                    for candidate in pages:
-                        raw_candidate = (
-                            candidate.unwrap() if hasattr(candidate, "unwrap") else candidate
-                        )
-                        if raw_candidate is target_page:
-                            target_page = candidate
-                            break
-                except Exception:
-                    pass
-
-            # 兜底：防止协程对象被误写入 self.page
-            if asyncio.iscoroutine(target_page):
-                target_page = await target_page
+            target_page = await resolve_previous_page(
+                current_page,
+                getattr(self, "_previous_page", None),
+            )
 
             if target_page is None:
                 return ActionResult(success=False, error="无法找到可切回的标签页"), None
 
             # 2. 关闭当前页
             try:
-                # 对于 GuardedPage，比较时需要解包
-                target_raw = target_page.unwrap() if hasattr(target_page, "unwrap") else target_page
-                if raw_current is not target_raw and not self._is_page_closed(current_page):
+                if not pages_match(current_page, target_page) and not is_page_closed(current_page):
                     await current_page.close()
             except Exception:
                 pass

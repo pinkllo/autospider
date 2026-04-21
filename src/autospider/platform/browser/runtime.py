@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from typing import Any
 
-from playwright.async_api import Page
-
-from autospider.composition.pipeline.runtime_controls import get_browser_budget
-from autospider.composition.pipeline.types import ExecutionRequest
 from autospider.platform.config.runtime import config
+from .budget import get_browser_budget
 from .composition import build_default_handlers
 from .engine import get_browser_engine, shutdown_browser_engine
 from .guarded_page import GuardedPage
+
+
+def _request_option(request: Any, name: str) -> Any:
+    if isinstance(request, Mapping):
+        return request.get(name)
+    return getattr(request, name, None)
 
 
 class BrowserRuntimeSession:
@@ -45,19 +50,20 @@ class BrowserRuntimeSession:
         self._budget = None
 
     @classmethod
-    def build_options(cls, request: ExecutionRequest) -> dict[str, object]:
+    def build_options(cls, request: Any) -> dict[str, object]:
         return {
-            "headless": request.headless,
-            "guard_intervention_mode": request.guard_intervention_mode,
-            "guard_thread_id": request.guard_thread_id,
-            "budget_key": request.execution_id or request.guard_thread_id,
-            "global_browser_budget": request.global_browser_budget,
+            "headless": _request_option(request, "headless"),
+            "guard_intervention_mode": _request_option(request, "guard_intervention_mode"),
+            "guard_thread_id": _request_option(request, "guard_thread_id"),
+            "budget_key": _request_option(request, "execution_id")
+            or _request_option(request, "guard_thread_id"),
+            "global_browser_budget": _request_option(request, "global_browser_budget"),
         }
 
     @classmethod
     @asynccontextmanager
     async def from_request(
-        cls, request: ExecutionRequest
+        cls, request: Any
     ) -> AsyncGenerator["BrowserRuntimeSession", None]:
         session = cls(**cls.build_options(request), close_engine=True)
         try:
@@ -66,7 +72,7 @@ class BrowserRuntimeSession:
         finally:
             await session.stop()
 
-    async def start(self) -> Page | GuardedPage:
+    async def start(self) -> GuardedPage:
         if self.global_browser_budget is not None:
             self._budget = await get_browser_budget(
                 budget_key=self.budget_key,
@@ -107,7 +113,7 @@ class BrowserRuntimeSession:
                 pass
 
     @property
-    def page(self) -> Page | GuardedPage | None:
+    def page(self) -> GuardedPage | None:
         return self._page
 
     async def navigate(self, url: str, wait_until: str = "domcontentloaded") -> None:

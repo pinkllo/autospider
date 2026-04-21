@@ -77,6 +77,34 @@ class _FakePage:
         del key
 
 
+class _DelayedLocator(_FakeLocator):
+    def __init__(self, page: "_DelayedPage") -> None:
+        super().__init__(page)
+        self._page = page
+
+    async def count(self) -> int:
+        return 1 if self._page.wait_for_timeout_calls >= 1 else 0
+
+
+class _DelayedPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_for_timeout_calls = 0
+
+    def locator(self, query: str) -> _DelayedLocator:
+        assert query.startswith("xpath=")
+        return _DelayedLocator(self)
+
+    def get_by_text(self, text: str, exact: bool = False) -> _DelayedLocator:
+        del text
+        del exact
+        return _DelayedLocator(self)
+
+    async def wait_for_timeout(self, timeout: int) -> None:
+        del timeout
+        self.wait_for_timeout_calls += 1
+
+
 def _same_page_step() -> dict[str, object]:
     return {
         "action": "click",
@@ -144,3 +172,26 @@ async def test_replay_nav_steps_returns_passed_validation_status(
     assert result.validation_status == "passed"
     assert result.required_validation_steps == 1
     assert result.validated_steps == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_nav_steps_waits_for_delayed_locator_before_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _DelayedPage()
+    handler = NavigationHandler(page=page, list_url=page.url, task_description="", max_nav_steps=3)
+
+    async def _activate_state(**kwargs):
+        page.state["aria_selected"] = "true"
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.click_and_capture_new_page",
+        _activate_state,
+    )
+
+    result = await handler.replay_nav_steps([_same_page_step()])
+
+    assert result.success is True
+    assert page.wait_for_timeout_calls >= 1
