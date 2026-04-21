@@ -122,9 +122,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
-
-        nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
+        nav_handler = self._build_navigation_handler(target_url, nav_steps)
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
         if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 恢复页面状态失败，nav_steps=%d", len(nav_steps))
@@ -141,9 +139,7 @@ class PlannerPageState:
         if not nav_steps:
             return True
 
-        from autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler import NavigationHandler
-
-        nav_handler = NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
+        nav_handler = self._build_navigation_handler(target_url, nav_steps)
         replay_ok = await nav_handler.replay_nav_steps(self.normalize_replay_nav_steps(nav_steps))
         if not self._is_replay_result_valid(replay_ok):
             logger.warning("[Planner] 基于当前页面重放子状态失败，nav_steps=%d", len(nav_steps))
@@ -202,6 +198,15 @@ class PlannerPageState:
                 step["state_validation"] = state_validation
             return step
         return None
+
+    def _build_navigation_handler(
+        self,
+        target_url: str,
+        nav_steps: list[dict[str, Any]],
+    ) -> Any:
+        from autospider.contexts.collection import NavigationHandler
+
+        return NavigationHandler(self.page, target_url, "", max(len(nav_steps), 1))
 
     def _is_replay_result_valid(self, replay_result: Any) -> bool:
         success = getattr(replay_result, "success", None)

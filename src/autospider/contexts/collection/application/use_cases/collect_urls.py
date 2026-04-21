@@ -30,10 +30,7 @@ from autospider.contexts.collection.infrastructure.repositories.config_repositor
     CollectionConfig,
     ConfigPersistence,
 )
-from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
-    SkillRepository as ExperienceSkillRepository,
-)
+from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
 from autospider.contexts.collection.infrastructure.crawler.base.base_collector import BaseCollector
 from autospider.contexts.collection.infrastructure.crawler.collector import (
     CommonPattern,

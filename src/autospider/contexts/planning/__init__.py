@@ -38,6 +38,7 @@ from .domain import (
     build_failure_record,
     classify_protocol_violation,
     classify_runtime_exception,
+    format_execution_brief,
 )
 from .infrastructure import ArtifactPlanRepository
 
@@ -78,4 +79,5 @@ __all__ = [
     "build_failure_record",
     "classify_protocol_violation",
     "classify_runtime_exception",
+    "format_execution_brief",
 ]

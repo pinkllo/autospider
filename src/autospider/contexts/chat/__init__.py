@@ -9,7 +9,7 @@ from .domain import (
     DialogueMessage,
     RequestedField,
 )
-from .infrastructure import RedisSessionRepository, TaskClarifierAdapter
+from .infrastructure import RedisSessionRepository, TaskClarifierAdapter, TaskClarifiedPayload
 
 __all__ = [
     "AdvanceDialogue",
@@ -23,4 +23,5 @@ __all__ = [
     "RequestedField",
     "StartClarification",
     "TaskClarifierAdapter",
+    "TaskClarifiedPayload",
 ]

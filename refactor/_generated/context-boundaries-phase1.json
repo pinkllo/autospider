@@ -1,0 +1,260 @@
+{
+  "ownership": {
+    "chat": "会话澄清、会话状态与任务定稿事件。",
+    "planning": "任务建模、计划分解、失败分类与页面状态恢复。",
+    "collection": "站点交互、导航、URL 收集与字段抽取执行。",
+    "experience": "skills 查询、选择、沉淀与技能仓储访问。"
+  },
+  "public_exports": {
+    "autospider.contexts.chat": [
+      "AdvanceDialogue",
+      "ClarificationResult",
+      "ClarificationSession",
+      "ClarificationSessionService",
+      "ClarifiedTask",
+      "DialogueMessage",
+      "FinalizeTask",
+      "RedisSessionRepository",
+      "RequestedField",
+      "StartClarification",
+      "TaskClarifierAdapter",
+      "TaskClarifiedPayload"
+    ],
+    "autospider.contexts.collection": [
+      "CollectionRun",
+      "DetailPageWorker",
+      "DetailPageWorkerResult",
+      "FieldBinding",
+      "FieldDefinition",
+      "NavigationHandler",
+      "PageResult",
+      "PaginationHandler",
+      "ReplayNavigationResult",
+      "ResultAggregator",
+      "ScriptGenerator",
+      "URLCollector",
+      "URLExtractor",
+      "VariantResolver",
+      "XPathPattern",
+      "XPathSegment",
+      "append_page_result",
+      "build_navigation_task_plan",
+      "build_xpath_fallback_chain",
+      "collect_detail_urls",
+      "generate_crawler_script",
+      "normalize_xpath",
+      "run_field_pipeline",
+      "strip_indexes",
+      "xpath_similarity",
+      "xpath_stability_score"
+    ],
+    "autospider.contexts.experience": [
+      "LookupSkill",
+      "SkillCandidate",
+      "SkillDocument",
+      "SkillFieldRule",
+      "SkillMetadata",
+      "SkillRepository",
+      "SkillRuntime",
+      "SkillRuleData",
+      "SkillVariantRule"
+    ],
+    "autospider.contexts.planning": [
+      "CONTRACT_VIOLATION_CATEGORY",
+      "FATAL_CATEGORY",
+      "INVALID_PROTOCOL_DETAIL",
+      "RULE_STALE_CATEGORY",
+      "SITE_DEFENSE_CATEGORY",
+      "STATE_MISMATCH_CATEGORY",
+      "TRANSIENT_CATEGORY",
+      "UNKNOWN_EXCEPTION_REASON",
+      "ArtifactPlanRepository",
+      "ClassifyProtocolViolationInput",
+      "ClassifyRuntimeException",
+      "ClassifyRuntimeExceptionInput",
+      "CreatePlan",
+      "CreatePlanInput",
+      "DecomposePlan",
+      "DecomposePlanInput",
+      "ExecutionBrief",
+      "FailureClassifier",
+      "FailureSignalDTO",
+      "PlanJournalEntry",
+      "PlanNode",
+      "PlanNodeType",
+      "PlannerCategoryCandidate",
+      "PlannerIntent",
+      "Replan",
+      "ReplanInput",
+      "ReplanStrategy",
+      "SubTask",
+      "SubTaskFailedHandler",
+      "SubTaskMode",
+      "SubTaskStatus",
+      "TaskPlan",
+      "TaskPlanDTO",
+      "build_failure_record",
+      "classify_protocol_violation",
+      "classify_runtime_exception",
+      "format_execution_brief"
+    ]
+  },
+  "canonical_imports": [
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler",
+      "canonical_import": "autospider.contexts.collection.NavigationHandler"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.pagination_handler",
+      "canonical_import": "autospider.contexts.collection.PaginationHandler"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor",
+      "canonical_import": "autospider.contexts.collection.URLExtractor"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.explore.shared_workflow",
+      "canonical_import": "autospider.contexts.collection.application.use_cases.explore_site"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.crawler.explore.url_collector",
+      "canonical_import": "autospider.contexts.collection.URLCollector"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.field.detail_page_worker",
+      "canonical_import": "autospider.contexts.collection.DetailPageWorker"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.field.field_decider",
+      "canonical_import": "autospider.contexts.collection.infrastructure.field.FieldDecider"
+    },
+    {
+      "legacy_module": "autospider.contexts.collection.infrastructure.field.runner",
+      "canonical_import": "autospider.contexts.collection.run_field_pipeline"
+    }
+  ],
+  "compatibility_wrappers": [
+    {
+      "module": "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler",
+      "target": "autospider.contexts.collection.application.use_cases.navigate"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.crawler.collector.pagination_handler",
+      "target": "autospider.contexts.collection.application.use_cases.paginate"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.crawler.collector.url_extractor",
+      "target": "autospider.contexts.collection.application.use_cases.extract_urls"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.crawler.explore.shared_workflow",
+      "target": "autospider.contexts.collection.application.use_cases.explore_site"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.crawler.explore.url_collector",
+      "target": "autospider.contexts.collection.application.use_cases.collect_urls"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.field.detail_page_worker",
+      "target": "autospider.contexts.collection.application.use_cases.extract_fields"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.field.field_decider",
+      "target": "autospider.contexts.collection.infrastructure.adapters.llm_field_decider"
+    },
+    {
+      "module": "autospider.contexts.collection.infrastructure.field.runner",
+      "target": "autospider.contexts.collection.application.use_cases.extract_fields_batch"
+    }
+  ],
+  "facade_imports": [
+    {
+      "source": "autospider.contexts.collection.application.use_cases.collect_urls",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.explore_site",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.extract_fields_batch",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.navigate",
+      "target": "autospider.contexts.planning"
+    },
+    {
+      "source": "autospider.contexts.collection.infrastructure.adapters._llm_decision",
+      "target": "autospider.contexts.planning"
+    },
+    {
+      "source": "autospider.contexts.collection.infrastructure.crawler.explore.config_generator",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.infrastructure.field.batch_field_extractor",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.infrastructure.field.field_extractor",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.collection.infrastructure.field.skill_context",
+      "target": "autospider.contexts.experience"
+    },
+    {
+      "source": "autospider.contexts.planning.application.event_handlers",
+      "target": "autospider.contexts.chat"
+    },
+    {
+      "source": "autospider.contexts.planning.domain.page_state",
+      "target": "autospider.contexts.collection"
+    },
+    {
+      "source": "autospider.contexts.planning.infrastructure.repositories.artifact_store",
+      "target": "autospider.contexts.experience"
+    }
+  ],
+  "temporary_internal_imports": [
+    {
+      "source": "autospider.contexts.planning.infrastructure.adapters.task_planner",
+      "target": "autospider.contexts.collection.domain.variant_resolver"
+    }
+  ],
+  "composition_backedges": [
+    {
+      "source": "autospider.contexts.collection.application.use_cases.finalize_run",
+      "target": "autospider.composition.pipeline.aggregator"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.finalize_run",
+      "target": "autospider.composition.pipeline.finalization"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.navigate",
+      "target": "autospider.composition.graph.recovery"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.run_subtask",
+      "target": "autospider.composition.pipeline.worker"
+    },
+    {
+      "source": "autospider.contexts.planning.application.handlers",
+      "target": "autospider.composition.pipeline.types"
+    },
+    {
+      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
+      "target": "autospider.composition.graph.controls"
+    },
+    {
+      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
+      "target": "autospider.composition.graph.world_model"
+    },
+    {
+      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
+      "target": "autospider.composition.pipeline.runtime_controls"
+    }
+  ]
+}

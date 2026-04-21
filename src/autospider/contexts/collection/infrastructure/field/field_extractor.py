@@ -27,10 +27,7 @@ from autospider.platform.observability.logger import get_logger
 from autospider.platform.llm.protocol import coerce_bool
 from autospider.platform.shared_kernel.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from autospider.platform.llm.decider import LLMDecider
-from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
-    SkillRepository as ExperienceSkillRepository,
-)
+from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
 from autospider.contexts.collection.domain.fields import FieldDefinition
 
 from .field_config import resolve_field_definition_value

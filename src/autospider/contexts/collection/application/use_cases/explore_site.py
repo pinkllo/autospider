@@ -16,7 +16,7 @@ from autospider.platform.browser.som.text_first import (
     resolve_mark_ids_from_map,
     resolve_single_mark_id,
 )
-from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
+from autospider.contexts.experience import SkillRuntime
 from autospider.contexts.collection.infrastructure.crawler.collector import DetailPageVisit, smart_scroll
 
 if TYPE_CHECKING:

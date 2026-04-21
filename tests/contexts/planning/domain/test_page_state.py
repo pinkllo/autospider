@@ -77,7 +77,7 @@ async def test_restore_page_state_rejects_successful_but_unvalidated_replay(
             )
 
     monkeypatch.setattr(
-        "autospider.contexts.collection.infrastructure.crawler.collector.navigation_handler.NavigationHandler",
+        "autospider.contexts.collection.NavigationHandler",
         _FakeNavigationHandler,
     )
 

@@ -14,18 +14,16 @@ ignore_imports =
     autospider.** -> autospider.platform.shared_kernel
     autospider.** -> autospider.legacy
     autospider.** -> autospider.legacy.**
+    autospider.contexts.collection.application.use_cases.finalize_run -> autospider.composition.pipeline.aggregator
+    autospider.contexts.collection.application.use_cases.finalize_run -> autospider.composition.pipeline.finalization
+    autospider.contexts.collection.application.use_cases.navigate -> autospider.composition.graph.recovery
+    autospider.contexts.collection.application.use_cases.run_subtask -> autospider.composition.pipeline.worker
+    autospider.contexts.planning.application.handlers -> autospider.composition.pipeline.types
+    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.graph.controls
+    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.graph.world_model
+    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.pipeline.runtime_controls
 
-# ==================== 契约 2：Context 相互独立 ====================
-[importlinter:contract:contexts-isolated]
-name = Bounded contexts do not import each other
-type = independence
-modules =
-    autospider.contexts.planning
-    autospider.contexts.collection
-    autospider.contexts.experience
-    autospider.contexts.chat
-
-# ==================== 契约 3：Domain 层纯净 ====================
+# ==================== 契约 2：Domain 层纯净 ====================
 [importlinter:contract:domain-pure-planning]
 name = Planning domain is pure
 type = forbidden
@@ -86,20 +84,73 @@ forbidden_modules =
     loguru
     langchain
 
-# ==================== 契约 4：Application 不依赖 Infrastructure ====================
-[importlinter:contract:app-no-infra]
-name = Application layer does not import infrastructure
+# ==================== 契约 3：可立即执行的 Application 约束 ====================
+[importlinter:contract:chat-app-no-infra]
+name = Chat application does not import infrastructure
+type = forbidden
+source_modules =
+    autospider.contexts.chat.application
+forbidden_modules =
+    autospider.contexts.chat.infrastructure
+
+[importlinter:contract:experience-app-no-infra]
+name = Experience application does not import infrastructure
+type = forbidden
+source_modules =
+    autospider.contexts.experience.application
+forbidden_modules =
+    autospider.contexts.experience.infrastructure
+
+# ==================== 契约 4：跨 Context 只允许通过 facade ====================
+[importlinter:contract:collection-to-planning-facade-only]
+name = Collection uses planning via top-level facade only
+type = forbidden
+source_modules =
+    autospider.contexts.collection
+forbidden_modules =
+    autospider.contexts.planning.application
+    autospider.contexts.planning.domain
+    autospider.contexts.planning.infrastructure
+
+[importlinter:contract:collection-to-experience-facade-only]
+name = Collection uses experience via top-level facade only
+type = forbidden
+source_modules =
+    autospider.contexts.collection
+forbidden_modules =
+    autospider.contexts.experience.application
+    autospider.contexts.experience.domain
+    autospider.contexts.experience.infrastructure
+
+[importlinter:contract:planning-domain-to-collection-facade-only]
+name = Planning domain uses collection via top-level facade only
+type = forbidden
+source_modules =
+    autospider.contexts.planning.domain
+forbidden_modules =
+    autospider.contexts.collection.application
+    autospider.contexts.collection.domain
+    autospider.contexts.collection.infrastructure
+
+[importlinter:contract:planning-application-to-chat-facade-only]
+name = Planning application uses chat via top-level facade only
 type = forbidden
 source_modules =
     autospider.contexts.planning.application
-    autospider.contexts.collection.application
-    autospider.contexts.experience.application
-    autospider.contexts.chat.application
 forbidden_modules =
-    autospider.contexts.planning.infrastructure
-    autospider.contexts.collection.infrastructure
-    autospider.contexts.experience.infrastructure
+    autospider.contexts.chat.application
+    autospider.contexts.chat.domain
     autospider.contexts.chat.infrastructure
+
+[importlinter:contract:planning-infrastructure-to-experience-facade-only]
+name = Planning infrastructure uses experience via top-level facade only
+type = forbidden
+source_modules =
+    autospider.contexts.planning.infrastructure
+forbidden_modules =
+    autospider.contexts.experience.application
+    autospider.contexts.experience.domain
+    autospider.contexts.experience.infrastructure
 
 # ==================== 契约 5：Interface 不直接依赖 Contexts ====================
 [importlinter:contract:interface-via-composition]

@@ -11,7 +11,7 @@ from autospider.platform.persistence.files.idempotent_io import (
     load_json_if_exists,
     write_json_idempotent,
 )
-from autospider.contexts.experience.application.skill_promotion import SkillCandidate
+from autospider.contexts.experience import SkillCandidate
 from autospider.contexts.planning.domain.model import (
     PlanJournalEntry,
     PlanNode,

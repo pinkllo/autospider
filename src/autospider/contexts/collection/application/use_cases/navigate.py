@@ -22,7 +22,7 @@ from autospider.platform.browser.som import (
     set_overlay_visibility,
 )
 from autospider.platform.shared_kernel.types import ActionType, AgentState, RunInput
-from autospider.contexts.planning.domain import format_execution_brief
+from autospider.contexts.planning import format_execution_brief
 from autospider.composition.graph.recovery import build_recovery_directive
 
 if TYPE_CHECKING:

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
 
-from autospider.contexts.chat.infrastructure.publishers import TaskClarifiedPayload
+from autospider.contexts.chat import TaskClarifiedPayload
 from autospider.contexts.planning.application.dto import CreatePlanInput, TaskPlanDTO
 from autospider.contexts.planning.application.use_cases.create_plan import CreatePlan
 from autospider.contexts.planning.domain.model import ExecutionBrief, SubTask

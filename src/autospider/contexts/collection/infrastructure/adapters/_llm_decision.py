@@ -22,7 +22,7 @@ from autospider.platform.browser.som.text_first import (
 )
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.contexts.collection.infrastructure.adapters._llm_shared import build_trace_payload
-from autospider.contexts.planning.domain import format_execution_brief
+from autospider.contexts.planning import format_execution_brief
 
 if TYPE_CHECKING:
     from autospider.platform.shared_kernel.types import ElementMark, SoMSnapshot
