@@ -149,10 +149,6 @@
     {
       "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
       "target": "autospider.contexts.experience.infrastructure.repositories.skill_repository"
-    },
-    {
-      "source": "autospider.contexts.planning.infrastructure.adapters.task_planner",
-      "target": "autospider.contexts.collection.domain.variant_resolver"
     }
   ],
   "composition_backedges": [

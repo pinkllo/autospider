@@ -12,7 +12,6 @@ from autospider.contexts.planning.application.use_cases.control_payloads import 
     build_planner_control_payload,
     build_planner_world_payload,
 )
-from autospider.contexts.collection.domain.variant_resolver import PlannerVariantResolverMixin
 from autospider.contexts.planning.domain import PlannerIntent
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
     PlannerAnalysisSupportMixin,
@@ -27,6 +26,9 @@ from autospider.contexts.planning.infrastructure.adapters.page_runtime import (
 )
 from autospider.contexts.planning.infrastructure.adapters.plan_records import (
     PlannerPlanRecordsMixin,
+)
+from autospider.contexts.planning.infrastructure.adapters.variant_resolution import (
+    PlannerVariantResolverMixin,
 )
 from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
     PlannerAnalysisPostProcessMixin,
