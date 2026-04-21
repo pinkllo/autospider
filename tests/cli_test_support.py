@@ -161,6 +161,14 @@ def fresh_import_legacy_cli():
     return importlib.import_module("autospider.interface.cli._legacy_cli")
 
 
+def fresh_import_top_level_cli():
+    purge_modules()
+    install_cli_stubs()
+    if str(SRC_ROOT) not in sys.path:
+        sys.path.insert(0, str(SRC_ROOT))
+    return importlib.import_module("autospider.cli")
+
+
 def fresh_import_interface_cli():
     purge_modules()
     install_cli_stubs()

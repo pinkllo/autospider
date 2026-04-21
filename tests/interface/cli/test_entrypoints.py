@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tests.cli_test_support import fresh_import_interface_cli, fresh_import_legacy_cli
+from tests.cli_test_support import (
+    fresh_import_interface_cli,
+    fresh_import_legacy_cli,
+    fresh_import_top_level_cli,
+)
 
 
 def test_legacy_cli_reexports_interface_cli_app() -> None:
@@ -9,6 +13,16 @@ def test_legacy_cli_reexports_interface_cli_app() -> None:
 
     assert legacy_cli.app.info.name == interface_cli.app.info.name
     assert [command.name for command in legacy_cli.app.registered_commands] == [
+        command.name for command in interface_cli.app.registered_commands
+    ]
+
+
+def test_top_level_cli_reexports_interface_cli_app() -> None:
+    top_level_cli = fresh_import_top_level_cli()
+    interface_cli = fresh_import_interface_cli()
+
+    assert top_level_cli.app.info.name == interface_cli.app.info.name
+    assert [command.name for command in top_level_cli.app.registered_commands] == [
         command.name for command in interface_cli.app.registered_commands
     ]
 
