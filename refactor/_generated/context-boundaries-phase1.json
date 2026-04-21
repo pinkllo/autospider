@@ -21,6 +21,7 @@
       "TaskClarifiedPayload"
     ],
     "autospider.contexts.collection": [
+      "CollectionExploreDependencies",
       "CollectionRun",
       "DetailPageWorker",
       "DetailPageWorkerResult",
@@ -37,6 +38,7 @@
       "VariantResolver",
       "XPathPattern",
       "XPathSegment",
+      "build_collection_explore_dependencies",
       "append_page_result",
       "build_navigation_task_plan",
       "build_xpath_fallback_chain",
@@ -103,14 +105,6 @@
   "compatibility_wrappers": [],
   "facade_imports": [
     {
-      "source": "autospider.contexts.collection.application.use_cases.collect_urls",
-      "target": "autospider.contexts.experience"
-    },
-    {
-      "source": "autospider.contexts.collection.application.use_cases.explore_site",
-      "target": "autospider.contexts.experience"
-    },
-    {
       "source": "autospider.contexts.collection.application.use_cases.extract_fields_batch",
       "target": "autospider.contexts.experience"
     },
@@ -121,10 +115,6 @@
     {
       "source": "autospider.contexts.collection.infrastructure.adapters._llm_decision",
       "target": "autospider.contexts.planning"
-    },
-    {
-      "source": "autospider.contexts.collection.infrastructure.crawler.explore.config_generator",
-      "target": "autospider.contexts.experience"
     },
     {
       "source": "autospider.contexts.collection.infrastructure.field.batch_field_extractor",
@@ -152,6 +142,14 @@
     }
   ],
   "temporary_internal_imports": [
+    {
+      "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
+      "target": "autospider.contexts.experience.application.use_cases.skill_runtime"
+    },
+    {
+      "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
+      "target": "autospider.contexts.experience.infrastructure.repositories.skill_repository"
+    },
     {
       "source": "autospider.contexts.planning.infrastructure.adapters.task_planner",
       "target": "autospider.contexts.collection.domain.variant_resolver"

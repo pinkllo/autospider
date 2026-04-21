@@ -1,6 +1,7 @@
 """Collection application exports."""
 
 from autospider.contexts.collection.application.use_cases import (
+    CollectionExploreDependencies,
     DetailPageWorker,
     DetailPageWorkerResult,
     NavigationHandler,
@@ -10,6 +11,7 @@ from autospider.contexts.collection.application.use_cases import (
     ScriptGenerator,
     URLCollector,
     URLExtractor,
+    build_collection_explore_dependencies,
     build_navigation_task_plan,
     collect_detail_urls,
     generate_crawler_script,
@@ -17,6 +19,7 @@ from autospider.contexts.collection.application.use_cases import (
 )
 
 __all__ = [
+    "CollectionExploreDependencies",
     "DetailPageWorker",
     "DetailPageWorkerResult",
     "NavigationHandler",
@@ -26,6 +29,7 @@ __all__ = [
     "ScriptGenerator",
     "URLCollector",
     "URLExtractor",
+    "build_collection_explore_dependencies",
     "build_navigation_task_plan",
     "collect_detail_urls",
     "generate_crawler_script",

@@ -2,6 +2,10 @@ from autospider.contexts.collection.application.use_cases.collect_urls import (
     URLCollector,
     collect_detail_urls,
 )
+from autospider.contexts.collection.application.use_cases.explore_dependencies import (
+    CollectionExploreDependencies,
+    build_collection_explore_dependencies,
+)
 from autospider.contexts.collection.application.use_cases.extract_fields import (
     DetailPageWorker,
     DetailPageWorkerResult,
@@ -23,6 +27,7 @@ from autospider.contexts.collection.application.use_cases.navigate import (
 from autospider.contexts.collection.application.use_cases.paginate import PaginationHandler
 
 __all__ = [
+    "CollectionExploreDependencies",
     "DetailPageWorker",
     "DetailPageWorkerResult",
     "NavigationHandler",
@@ -32,6 +37,7 @@ __all__ = [
     "ScriptGenerator",
     "URLCollector",
     "URLExtractor",
+    "build_collection_explore_dependencies",
     "build_navigation_task_plan",
     "collect_detail_urls",
     "generate_crawler_script",

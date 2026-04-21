@@ -86,7 +86,8 @@ def test_script_generator_extracts_common_detail_xpath() -> None:
 
 def test_script_generator_hydrates_missing_config() -> None:
     output_dir = _workspace_tmp("script_generator")
-    ConfigPersistence(config_dir=output_dir).save(
+    persistence = ConfigPersistence(config_dir=output_dir)
+    persistence.save(
         CollectionConfig(
             nav_steps=[{"action": "click", "target_text": "News"}],
             common_detail_xpath="//a[@class='detail']",
@@ -94,7 +95,7 @@ def test_script_generator_hydrates_missing_config() -> None:
             task_description="collect items",
         )
     )
-    generator = ScriptGenerator(output_dir=str(output_dir))
+    generator = ScriptGenerator(config_persistence=persistence)
 
     nav_steps, detail_xpath = generator._hydrate_missing_config([], None)
 

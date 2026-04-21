@@ -17,8 +17,12 @@ logger = get_logger(__name__)
 
 
 class ScriptGenerator:
-    def __init__(self, output_dir: str = "output"):
-        self.config_persistence = ConfigPersistence(output_dir)
+    def __init__(
+        self,
+        output_dir: str = "output",
+        config_persistence: ConfigPersistence | None = None,
+    ):
+        self.config_persistence = config_persistence or ConfigPersistence(output_dir)
 
     async def generate_scrapy_playwright_script(
         self,

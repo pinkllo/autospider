@@ -16,8 +16,8 @@ from autospider.platform.browser.som.text_first import (
     resolve_mark_ids_from_map,
     resolve_single_mark_id,
 )
-from autospider.contexts.experience import SkillRuntime
 from autospider.contexts.collection.infrastructure.crawler.collector import DetailPageVisit, smart_scroll
+from .explore_dependencies import SkillRuntimeLike
 
 if TYPE_CHECKING:
     from autospider.platform.shared_kernel.types import SoMSnapshot
@@ -43,7 +43,7 @@ def _serialize_selected_skills(selected: Sequence[Any]) -> list[dict[str, str]]:
 
 async def prepare_explore_skill_context(
     *,
-    skill_runtime: SkillRuntime,
+    skill_runtime: SkillRuntimeLike,
     phase: str,
     url: str,
     task_context: dict[str, Any],

@@ -11,10 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from autospider.platform.observability.logger import get_logger
-from autospider.platform.llm.decider import LLMDecider
 from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
-    ConfigPersistence,
 )
 from autospider.contexts.collection.application.use_cases.explore_site import (
     build_detail_visit,
@@ -24,14 +22,17 @@ from autospider.contexts.collection.application.use_cases.explore_site import (
     resolve_selected_mark_ids,
     run_detail_explore_loop,
 )
-from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
 from ..collector import (
     DetailPageVisit,
-    XPathExtractor,
     LLMDecisionMaker,
     URLExtractor,
     NavigationHandler,
     PaginationHandler,
+)
+from autospider.contexts.collection.application.use_cases.explore_dependencies import (
+    CollectionExploreDependencies,
+    SkillRuntimeLike,
+    build_collection_explore_dependencies,
 )
 
 if TYPE_CHECKING:
@@ -60,9 +61,10 @@ class ConfigGenerator:
         explore_count: int = 3,
         max_nav_steps: int = 10,
         output_dir: str = "output",
-        skill_runtime: SkillRuntime | None = None,
+        skill_runtime: SkillRuntimeLike | None = None,
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
+        explore_dependencies: CollectionExploreDependencies | None = None,
     ):
         """初始化配置生成器
 
@@ -81,7 +83,11 @@ class ConfigGenerator:
         self.max_nav_steps = max_nav_steps
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
+        resolved_dependencies = explore_dependencies or build_collection_explore_dependencies(
+            output_dir=output_dir,
+            skill_runtime=skill_runtime,
+        )
+        self.skill_runtime = resolved_dependencies.skill_runtime
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
 
@@ -98,18 +104,16 @@ class ConfigGenerator:
         self.nav_steps: list[dict] = []
         self.common_detail_xpath: str | None = None
 
-        # LLM 决策器
-        self.decider = LLMDecider()
-
         # 处理器（延迟初始化）
-        self.xpath_extractor = XPathExtractor()
+        self.decider = resolved_dependencies.decider
+        self.xpath_extractor = resolved_dependencies.xpath_extractor
         self.url_extractor = URLExtractor(page, list_url)
         self.llm_decision_maker: LLMDecisionMaker | None = None
         self.navigation_handler: NavigationHandler | None = None
         self.pagination_handler: PaginationHandler | None = None
 
         # 配置持久化
-        self.config_persistence = ConfigPersistence(config_dir=output_dir)
+        self.config_persistence = resolved_dependencies.config_persistence
 
     async def generate_config(self) -> CollectionConfig:
         """生成配置文件（主流程）
@@ -407,8 +411,9 @@ async def generate_collection_config(
     explore_count: int = 3,
     output_dir: str = "output",
     persist_progress: bool = True,
-    skill_runtime: SkillRuntime | None = None,
+    skill_runtime: SkillRuntimeLike | None = None,
     selected_skills: list[dict] | None = None,
+    explore_dependencies: CollectionExploreDependencies | None = None,
 ) -> CollectionConfig:
     """生成爬取配置的便捷函数
 
@@ -430,5 +435,6 @@ async def generate_collection_config(
         output_dir=output_dir,
         skill_runtime=skill_runtime,
         selected_skills=selected_skills,
+        explore_dependencies=explore_dependencies,
     )
     return await generator.generate_config()

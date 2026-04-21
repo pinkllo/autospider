@@ -6,7 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from autospider.platform.config.runtime import config
-from autospider.platform.llm.decider import LLMDecider
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.browser.som import (
     capture_screenshot_with_marks,
@@ -23,14 +22,9 @@ from autospider.contexts.collection.application.use_cases.explore_site import (
     prepare_explore_skill_context,
     resolve_selected_mark_ids,
 )
-from autospider.contexts.collection.infrastructure.adapters.scrapy_generator import (
-    ScriptGenerator,
-)
 from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
-    ConfigPersistence,
 )
-from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
 from autospider.contexts.collection.infrastructure.crawler.base.base_collector import BaseCollector
 from autospider.contexts.collection.infrastructure.crawler.collector import (
     CommonPattern,
@@ -38,8 +32,12 @@ from autospider.contexts.collection.infrastructure.crawler.collector import (
     LLMDecisionMaker,
     NavigationHandler,
     URLCollectorResult,
-    XPathExtractor,
     smart_scroll,
+)
+from .explore_dependencies import (
+    CollectionExploreDependencies,
+    SkillRuntimeLike,
+    build_collection_explore_dependencies,
 )
 
 if TYPE_CHECKING:
@@ -71,11 +69,12 @@ class URLCollector(BaseCollector):
         output_dir: str = "output",
         url_channel: "URLChannel | None" = None,
         persist_progress: bool = True,
-        skill_runtime: SkillRuntime | None = None,
+        skill_runtime: SkillRuntimeLike | None = None,
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         initial_nav_steps: list[dict] | None = None,
         decision_context: dict | None = None,
+        explore_dependencies: CollectionExploreDependencies | None = None,
     ):
         super().__init__(
             page=page,
@@ -91,7 +90,13 @@ class URLCollector(BaseCollector):
 
         self.explore_count = explore_count
         self.max_nav_steps = max_nav_steps
-        self.skill_runtime = skill_runtime or SkillRuntime(ExperienceSkillRepository())
+        resolved_dependencies = explore_dependencies or build_collection_explore_dependencies(
+            output_dir=output_dir,
+            skill_runtime=skill_runtime,
+        )
+        if resolved_dependencies.script_generator is None:
+            raise ValueError("collection_explore_dependencies_missing_script_generator")
+        self.skill_runtime = resolved_dependencies.skill_runtime
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.initial_nav_steps = list(initial_nav_steps or [])
@@ -102,10 +107,10 @@ class URLCollector(BaseCollector):
         self.visited_detail_urls: set[str] = set()
         self.common_pattern: CommonPattern | None = None
 
-        self.decider = LLMDecider()
-        self.script_generator = ScriptGenerator(output_dir)
-        self.config_persistence = ConfigPersistence(output_dir)
-        self.xpath_extractor = XPathExtractor()
+        self.decider = resolved_dependencies.decider
+        self.script_generator = resolved_dependencies.script_generator
+        self.config_persistence = resolved_dependencies.config_persistence
+        self.xpath_extractor = resolved_dependencies.xpath_extractor
 
     async def run(self) -> URLCollectorResult:
         logger.info("\n[URLCollector] ===== 开始在线收集详情页 URL =====")
@@ -530,8 +535,9 @@ async def collect_detail_urls(
     max_pages: int | None = None,
     output_dir: str = "output",
     persist_progress: bool = True,
-    skill_runtime: SkillRuntime | None = None,
+    skill_runtime: SkillRuntimeLike | None = None,
     selected_skills: list[dict] | None = None,
+    explore_dependencies: CollectionExploreDependencies | None = None,
 ) -> URLCollectorResult:
     collector = URLCollector(
         page=page,
@@ -544,5 +550,6 @@ async def collect_detail_urls(
         persist_progress=persist_progress,
         skill_runtime=skill_runtime,
         selected_skills=selected_skills,
+        explore_dependencies=explore_dependencies,
     )
     return await collector.run()

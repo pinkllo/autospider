@@ -1,6 +1,7 @@
 """Collection context exports."""
 
 from .application import (
+    CollectionExploreDependencies,
     DetailPageWorker,
     DetailPageWorkerResult,
     NavigationHandler,
@@ -10,6 +11,7 @@ from .application import (
     ScriptGenerator,
     URLCollector,
     URLExtractor,
+    build_collection_explore_dependencies,
     build_navigation_task_plan,
     collect_detail_urls,
     generate_crawler_script,
@@ -32,6 +34,7 @@ from .domain import (
 )
 
 __all__ = [
+    "CollectionExploreDependencies",
     "CollectionRun",
     "DetailPageWorker",
     "DetailPageWorkerResult",
@@ -48,6 +51,7 @@ __all__ = [
     "VariantResolver",
     "XPathPattern",
     "XPathSegment",
+    "build_collection_explore_dependencies",
     "append_page_result",
     "build_navigation_task_plan",
     "build_xpath_fallback_chain",
