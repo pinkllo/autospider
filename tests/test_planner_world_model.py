@@ -7,7 +7,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from autospider.contexts.planning.infrastructure.adapters.task_planner import (
+from autospider.composition.graph.planning_payloads import (
     build_planner_control_payload,
     build_planner_world_payload,
 )

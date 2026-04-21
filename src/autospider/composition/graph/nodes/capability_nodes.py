@@ -26,12 +26,12 @@ from autospider.contexts.experience.infrastructure.repositories.skill_repository
 )
 from autospider.contexts.collection.infrastructure.crawler.batch.batch_collector import batch_collect_urls
 from autospider.contexts.collection.infrastructure.crawler.explore.config_generator import generate_collection_config
-from autospider.contexts.planning.infrastructure.adapters.task_planner import (
-    TaskPlanner,
+from autospider.contexts.planning.infrastructure.adapters.task_planner import TaskPlanner
+from autospider.contexts.planning.domain import TaskPlan
+from autospider.composition.graph.planning_payloads import (
     build_planner_control_payload,
     build_planner_world_payload,
 )
-from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from ..control_types import build_default_recovery_policy
 from autospider.contexts.planning.domain import classify_runtime_exception

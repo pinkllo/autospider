@@ -167,18 +167,6 @@
     {
       "source": "autospider.contexts.planning.application.handlers",
       "target": "autospider.composition.pipeline.types"
-    },
-    {
-      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
-      "target": "autospider.composition.graph.controls"
-    },
-    {
-      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
-      "target": "autospider.composition.graph.world_model"
-    },
-    {
-      "source": "autospider.contexts.planning.application.use_cases.control_payloads",
-      "target": "autospider.composition.pipeline.runtime_controls"
     }
   ]
 }
