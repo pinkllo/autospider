@@ -5,11 +5,14 @@ from autospider.contexts.chat.application.dto import (
     ClarificationSessionDTO,
     to_session_dto,
 )
+from autospider.contexts.chat.application.use_cases._result_support import (
+    failed_result,
+    require_trace_id,
+)
 from autospider.contexts.chat.domain.ports import LLMClarifier, SessionRepository
 from autospider.contexts.chat.domain.services import ClarificationSessionService
 from autospider.platform.shared_kernel.errors import DomainError
-from autospider.platform.shared_kernel.result import ErrorInfo, ResultEnvelope
-from autospider.platform.shared_kernel.trace import get_trace_id
+from autospider.platform.shared_kernel.result import ResultEnvelope
 
 
 class AdvanceDialogue:
@@ -22,10 +25,10 @@ class AdvanceDialogue:
         self,
         command: AdvanceDialogueInput,
     ) -> ResultEnvelope[ClarificationSessionDTO]:
-        trace_id = _require_trace_id()
+        trace_id = require_trace_id()
         session = await self._repository.get(command.session_id)
         if session is None:
-            return _failed(trace_id, "chat.session_not_found", "chat session not found")
+            return failed_result(trace_id, "chat.session_not_found", "chat session not found")
 
         try:
             updated_session = self._service.append_user_message(session, command.user_message)
@@ -38,23 +41,7 @@ class AdvanceDialogue:
             updated_session, _ = self._service.apply_result(updated_session, result)
             await self._repository.save(updated_session)
         except DomainError as exc:
-            return _failed(trace_id, exc.code, str(exc))
+            return failed_result(trace_id, exc.code, str(exc))
         return ResultEnvelope.success(
             data=to_session_dto(updated_session, result), trace_id=trace_id
         )
-
-
-def _require_trace_id() -> str:
-    trace_id = get_trace_id()
-    if not trace_id:
-        raise RuntimeError("trace_id is not set")
-    return trace_id
-
-
-def _failed(
-    trace_id: str,
-    code: str,
-    message: str,
-) -> ResultEnvelope[ClarificationSessionDTO]:
-    error = ErrorInfo(kind="domain", code=code, message=message)
-    return ResultEnvelope.failed(trace_id=trace_id, errors=[error])
