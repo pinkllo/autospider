@@ -2,7 +2,7 @@
 
 A pure-vision browser agent built on **LangGraph** and **Set-of-Mark (SoM)** prompting. Organised as a lightweight-DDD modular monolith with four Bounded Contexts, Redis as both queue and store, and a single `output/runs/<run_id>/` artifact layout.
 
-> Status: `refactor-phase-4` (physical legacy removal) and `refactor-phase-5` (guardrails + docs) both executed.
+> Status: `refactor-phase-4` (physical legacy removal) executed; `refactor-phase-5` (guardrails + verification/docs cutover) is still being tightened.
 
 ---
 
@@ -51,6 +51,9 @@ Runtime artifacts appear under `output/runs/<run_id>/` (see ADR 0003).
 ## Development Workflow
 
 ```powershell
+# bootstrap dev tooling first
+pip install -e ".[dev,redis,db]"
+
 # lint + format + type
 ruff check src tests
 black --check src tests
@@ -58,6 +61,9 @@ mypy src/autospider
 
 # layered architecture contracts
 lint-imports
+
+# preferred local verification entrypoint
+scripts/verify.ps1
 
 # pre-commit hooks
 pre-commit run --all-files
@@ -69,6 +75,7 @@ pytest tests/contexts tests/platform tests/composition tests/interface -q
 ```
 
 `scripts/_gate_file_size.py` blocks new `.py` files beyond 500 lines (tests and prompts exempt).
+If `.importlinter` exists but `lint-imports` is missing, `scripts/verify.ps1` / `scripts/verify.sh` now fail fast instead of silently skipping architecture checks.
 
 ---
 
