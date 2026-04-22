@@ -7,6 +7,9 @@ from urllib.parse import urljoin
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.browser.som.text_first import resolve_single_mark_id
+from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
+    ResolvedPlannerVariant,
+)
 from autospider.contexts.planning.infrastructure.adapters.variant_navigation import (
     PlannerVariantNavigationMixin,
 )
@@ -14,7 +17,58 @@ from autospider.contexts.planning.infrastructure.adapters.variant_navigation imp
 logger = get_logger(__name__)
 
 
-class PlannerVariantResolverMixin(PlannerVariantNavigationMixin):
+class PlannerVariantResolver(PlannerVariantNavigationMixin):
+    ResolvedPlannerVariant = ResolvedPlannerVariant
+
+    def __init__(self, planner) -> None:
+        self._planner = planner
+
+    @property
+    def page(self):
+        return self._planner.page
+
+    @property
+    def llm(self):
+        return self._planner.llm
+
+    def _build_subtask_context(
+        self,
+        name: str,
+        parent_context: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        return self._planner._build_subtask_context(name, parent_context=parent_context)
+
+    def _build_variant_label(self, context: dict[str, str] | None) -> str | None:
+        return self._planner._build_variant_label(context)
+
+    def _looks_like_current_category(self, name: str, analysis: dict) -> bool:
+        return self._planner._looks_like_current_category(name, analysis)
+
+    def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
+        return self._planner._build_page_state_signature(current_url, nav_steps)
+
+    def _build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
+        return self._planner._build_nav_click_step(snapshot, mark_id)
+
+    async def _get_dom_signature(self) -> str:
+        return await self._planner._get_dom_signature()
+
+    async def _get_element_interaction_state(self, xpath: str) -> dict[str, str]:
+        return await self._planner._get_element_interaction_state(xpath)
+
+    def _did_interaction_state_activate(
+        self,
+        before: dict | None,
+        after: dict | None,
+    ) -> bool:
+        return self._planner._did_interaction_state_activate(before, after)
+
+    async def _restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
+        return await self._planner._restore_page_state(target_url, nav_steps)
+
+    def _sanitize_context(self, context: dict[str, str] | None) -> dict[str, str]:
+        return self._planner._sanitize_context(context)
+
     def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
         marks = getattr(snapshot, "marks", None) or []
         if not marks:

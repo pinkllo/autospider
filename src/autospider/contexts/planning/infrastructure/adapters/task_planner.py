@@ -24,7 +24,7 @@ from autospider.contexts.planning.infrastructure.adapters.plan_records import (
     PlannerPlanRecordBook,
 )
 from autospider.contexts.planning.infrastructure.adapters.variant_resolution import (
-    PlannerVariantResolverMixin,
+    PlannerVariantResolver,
 )
 from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
     PlannerAnalysisPostProcessor,
@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-PlannerVariantResolverMixin.ResolvedPlannerVariant = ResolvedPlannerVariant
 __all__ = [
     "ResolvedPlannerVariant",
     "RuntimeSubtaskPlanResult",
@@ -62,7 +61,6 @@ def _build_planner_navigation_replayer(
 class TaskPlanner(
     PlannerPageRuntimeMixin,
     PlannerCategorySemanticsMixin,
-    PlannerVariantResolverMixin,
 ):
     """任务规划器：负责将用户的采集请求转化为具体的执行计划。
 
@@ -124,6 +122,7 @@ class TaskPlanner(
         self._site_analyzer = PlannerSiteAnalyzer(self)
         self._entry_planner = PlannerEntryPlanner(self)
         self._subtask_builder = PlannerSubtaskBuilder(self)
+        self._variant_resolver = PlannerVariantResolver(self)
         self.planner_status = "success"
         self.terminal_reason = ""
 
@@ -163,6 +162,13 @@ class TaskPlanner(
             self._subtask_builder = builder
         return builder
 
+    def _get_variant_resolver(self) -> PlannerVariantResolver:
+        resolver = getattr(self, "_variant_resolver", None)
+        if resolver is None:
+            resolver = PlannerVariantResolver(self)
+            self._variant_resolver = resolver
+        return resolver
+
     def _append_observation_note(self, result: dict, note: str) -> dict:
         return self._get_site_analyzer()._append_observation_note(result, note)
 
@@ -185,6 +191,26 @@ class TaskPlanner(
             snapshot,
             node_context=node_context,
             nav_steps=nav_steps,
+        )
+
+    def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str:
+        return self._get_variant_resolver()._build_planner_candidates(
+            snapshot,
+            max_candidates=max_candidates,
+        )
+
+    async def _extract_subtask_variants(
+        self,
+        analysis: dict,
+        snapshot: object,
+        parent_nav_steps: list[dict] | None = None,
+        parent_context: dict[str, str] | None = None,
+    ) -> list:
+        return await self._get_variant_resolver()._extract_subtask_variants(
+            analysis,
+            snapshot,
+            parent_nav_steps=parent_nav_steps,
+            parent_context=parent_context,
         )
 
     def _post_process_analysis(
