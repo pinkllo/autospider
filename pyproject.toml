@@ -183,7 +183,6 @@ check_untyped_defs = false
 [tool.deptry]
 extend_exclude = [
     "tests/",
-    "refactor/",
     "scripts/",
     "src/autospider/prompts/",
     "src/autospider/legacy/",

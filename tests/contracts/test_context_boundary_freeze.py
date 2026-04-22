@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 CONTEXTS_ROOT = SRC_ROOT / "autospider" / "contexts"
 INTERFACE_ROOT = SRC_ROOT / "autospider" / "interface"
-BOUNDARY_MAP_PATH = REPO_ROOT / "refactor" / "_generated" / "context-boundaries-phase1.json"
+BOUNDARY_MAP_PATH = REPO_ROOT / "tests" / "contracts" / "fixtures" / "context-boundaries-phase1.json"
 IMPORT_LINTER_PATH = REPO_ROOT / ".importlinter"
 
 
