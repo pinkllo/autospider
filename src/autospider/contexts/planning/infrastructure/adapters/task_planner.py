@@ -8,14 +8,14 @@ from autospider.platform.config.runtime import config
 from autospider.platform.llm.client_factory import build_runtime_json_llm
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection import NavigationHandler
-from autospider.contexts.planning.domain import PlannerIntent
+from autospider.contexts.planning.domain import PlannerIntent, TaskPlan
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
     PlannerAnalysisSupportMixin,
     ResolvedPlannerVariant,
     RuntimeSubtaskPlanResult,
 )
 from autospider.contexts.planning.infrastructure.adapters.entry_planning import (
-    PlannerEntryPlanningMixin,
+    PlannerEntryPlanner,
 )
 from autospider.contexts.planning.infrastructure.adapters.page_runtime import (
     PlannerPageRuntimeMixin,
@@ -62,7 +62,6 @@ def _build_planner_navigation_replayer(
 
 
 class TaskPlanner(
-    PlannerEntryPlanningMixin,
     PlannerPageRuntimeMixin,
     PlannerAnalysisSupportMixin,
     PlannerCategorySemanticsMixin,
@@ -126,6 +125,7 @@ class TaskPlanner(
                 output_dir=output_dir,
             )
         )
+        self._entry_planner = PlannerEntryPlanner(self)
         self.planner_status = "success"
         self.terminal_reason = ""
 
@@ -140,6 +140,9 @@ class TaskPlanner(
             max_tokens=config.llm.max_tokens,
             use_main_model=use_main_model,
         )
+
+    async def plan(self) -> TaskPlan:
+        return await self._entry_planner.plan()
 
     def render_plan_knowledge(self, plan) -> str:
         return self._plan_records.render_plan_knowledge(plan)
