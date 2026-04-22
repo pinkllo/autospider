@@ -27,7 +27,7 @@ from autospider.contexts.planning.infrastructure.adapters.variant_resolution imp
     PlannerVariantResolverMixin,
 )
 from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
-    PlannerAnalysisPostProcessMixin,
+    PlannerAnalysisPostProcessor,
 )
 from autospider.contexts.planning.domain.page_state import PlannerPageState
 from autospider.contexts.planning.domain.services import (
@@ -64,7 +64,6 @@ def _build_planner_navigation_replayer(
 class TaskPlanner(
     PlannerPageRuntimeMixin,
     PlannerCategorySemanticsMixin,
-    PlannerAnalysisPostProcessMixin,
     PlannerSubtaskBuilderMixin,
     PlannerVariantResolverMixin,
 ):
@@ -124,6 +123,7 @@ class TaskPlanner(
                 output_dir=output_dir,
             )
         )
+        self._analysis_post_processor = PlannerAnalysisPostProcessor(self)
         self._site_analyzer = PlannerSiteAnalyzer(self)
         self._entry_planner = PlannerEntryPlanner(self)
         self.planner_status = "success"
@@ -151,6 +151,13 @@ class TaskPlanner(
             self._site_analyzer = analyzer
         return analyzer
 
+    def _get_analysis_post_processor(self) -> PlannerAnalysisPostProcessor:
+        processor = getattr(self, "_analysis_post_processor", None)
+        if processor is None:
+            processor = PlannerAnalysisPostProcessor(self)
+            self._analysis_post_processor = processor
+        return processor
+
     def _append_observation_note(self, result: dict, note: str) -> dict:
         return self._get_site_analyzer()._append_observation_note(result, note)
 
@@ -173,6 +180,25 @@ class TaskPlanner(
             snapshot,
             node_context=node_context,
             nav_steps=nav_steps,
+        )
+
+    def _post_process_analysis(
+        self,
+        result: dict,
+        snapshot: object,
+        *,
+        node_context: dict[str, str] | None = None,
+    ) -> dict:
+        return self._get_analysis_post_processor()._post_process_analysis(
+            result,
+            snapshot,
+            node_context=node_context,
+        )
+
+    def _looks_like_current_category(self, name: str, analysis: dict) -> bool:
+        return self._get_analysis_post_processor()._looks_like_current_category(
+            name,
+            analysis,
         )
 
     def render_plan_knowledge(self, plan) -> str:

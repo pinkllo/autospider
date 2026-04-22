@@ -9,7 +9,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.contexts.planning.application.use_cases.analyze_plan_result import (
-    PlannerAnalysisPostProcessMixin,
+    PlannerAnalysisPostProcessor,
 )
 from autospider.contexts.planning.domain.services import (
     PlannerCategorySemanticsMixin,
@@ -21,7 +21,6 @@ from autospider.contexts.planning.domain import SubTaskMode
 class _PlannerHarness(
     PlannerCategorySemanticsMixin,
     PlannerSubtaskBuilderMixin,
-    PlannerAnalysisPostProcessMixin,
 ):
     def __init__(
         self,
@@ -40,6 +39,7 @@ class _PlannerHarness(
         if grouping_semantics:
             self.grouping_semantics.update(grouping_semantics)
         self._sibling_category_registry: dict[str, set[str]] = {}
+        self._analysis_post_processor = PlannerAnalysisPostProcessor(self)
 
     def _append_observation_note(self, result: dict, note: str) -> dict:
         observations = str(result.get("observations") or "").strip()
@@ -48,6 +48,22 @@ class _PlannerHarness(
 
     def _get_grouping_semantics(self) -> dict:
         return dict(self.grouping_semantics)
+
+    def _post_process_analysis(
+        self,
+        result: dict,
+        snapshot: object,
+        *,
+        node_context: dict[str, str] | None = None,
+    ) -> dict:
+        return self._analysis_post_processor._post_process_analysis(
+            result,
+            snapshot,
+            node_context=node_context,
+        )
+
+    def _looks_like_current_category(self, name: str, analysis: dict) -> bool:
+        return self._analysis_post_processor._looks_like_current_category(name, analysis)
 
 
 def test_postprocess_builds_category_subtasks_from_page_facts_in_auto_mode() -> None:

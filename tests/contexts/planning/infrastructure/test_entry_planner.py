@@ -229,3 +229,45 @@ async def test_task_planner_plan_delegates_to_entry_planner() -> None:
     planner._entry_planner = _StubEntryPlanner()
 
     assert await planner.plan() is expected
+
+
+def test_task_planner_post_process_analysis_delegates_to_processor() -> None:
+    expected = {"status": "ok"}
+    snapshot = object()
+    result = {"page_type": "list_page"}
+    node_context = {"category_name": "公告"}
+
+    class _StubPostProcessor:
+        def _post_process_analysis(
+            self,
+            actual_result: dict,
+            actual_snapshot: object,
+            *,
+            node_context: dict[str, str] | None = None,
+        ) -> dict:
+            assert actual_result is result
+            assert actual_snapshot is snapshot
+            assert node_context == {"category_name": "公告"}
+            return expected
+
+    planner = TaskPlanner.__new__(TaskPlanner)
+    planner._analysis_post_processor = _StubPostProcessor()
+
+    assert (
+        planner._post_process_analysis(result, snapshot, node_context=node_context) is expected
+    )
+
+
+def test_task_planner_looks_like_current_category_delegates_to_processor() -> None:
+    analysis = {"current_selected_category": "公告"}
+
+    class _StubPostProcessor:
+        def _looks_like_current_category(self, name: str, actual_analysis: dict) -> bool:
+            assert name == "公告"
+            assert actual_analysis is analysis
+            return True
+
+    planner = TaskPlanner.__new__(TaskPlanner)
+    planner._analysis_post_processor = _StubPostProcessor()
+
+    assert planner._looks_like_current_category("公告", analysis) is True
