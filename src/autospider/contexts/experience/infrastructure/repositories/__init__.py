@@ -1,6 +1,3 @@
-from autospider.contexts.experience.infrastructure.repositories.merging import (
-    merge_skill_documents,
-)
 from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
     SkillDocumentParseError,
     domain_to_dirname,
@@ -16,6 +13,7 @@ from autospider.contexts.experience.infrastructure.repositories.skill_query_serv
 )
 from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
     SkillRepository,
+    merge_skill_documents,
 )
 from autospider.contexts.experience.domain.policies import (
     extract_domain,

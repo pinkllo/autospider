@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from autospider.contexts.experience.domain.model import SkillMetadata
-from autospider.contexts.experience.infrastructure.repositories.merging import (
-    merge_skill_documents,
-)
+from autospider.contexts.experience.domain.model import SkillDocument, SkillMetadata
+from autospider.contexts.experience.domain.services import SkillDocumentService
 from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
     parse_skill_document,
     render_skill_document,
@@ -19,6 +17,11 @@ from autospider.contexts.experience.infrastructure.repositories.skill_query_serv
 )
 
 _DEFAULT_SKILLS_DIR = "skills"
+
+
+def merge_skill_documents(existing: SkillDocument, incoming: SkillDocument) -> SkillDocument:
+    service = SkillDocumentService()
+    return service.merge_skill_documents(existing=existing, incoming=incoming)
 
 
 class SkillRepository:

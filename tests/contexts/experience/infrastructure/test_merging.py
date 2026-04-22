@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from autospider.contexts.experience.domain.model import SkillDocument, SkillRuleData
 from autospider.contexts.experience.domain.services import SkillDocumentService
-from autospider.contexts.experience.infrastructure.repositories import merging
+from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
+    merge_skill_documents,
+)
 
 
 def test_infra_merge_skill_documents_delegates_to_domain_service(monkeypatch) -> None:
@@ -16,7 +18,7 @@ def test_infra_merge_skill_documents_delegates_to_domain_service(monkeypatch) ->
 
     monkeypatch.setattr(SkillDocumentService, "merge_skill_documents", _fake_merge)
 
-    merged = merging.merge_skill_documents(existing, incoming)
+    merged = merge_skill_documents(existing, incoming)
 
     assert called["value"] is True
     assert merged is incoming
