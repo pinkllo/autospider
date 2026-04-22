@@ -1,5 +1,6 @@
 [importlinter]
 root_package = autospider
+include_external_packages = True
 
 # ==================== 契约 1：分层架构 ====================
 [importlinter:contract:layers]
@@ -11,9 +12,6 @@ layers =
     autospider.contexts
     autospider.platform
 ignore_imports =
-    autospider.** -> autospider.platform.shared_kernel
-    autospider.** -> autospider.legacy
-    autospider.** -> autospider.legacy.**
     autospider.contexts.collection.application.use_cases.finalize_run -> autospider.composition.pipeline.aggregator
     autospider.contexts.collection.application.use_cases.finalize_run -> autospider.composition.pipeline.finalization
     autospider.contexts.collection.application.use_cases.navigate -> autospider.composition.graph.recovery
@@ -98,62 +96,8 @@ source_modules =
 forbidden_modules =
     autospider.contexts.experience.infrastructure
 
-# ==================== 契约 4：跨 Context 只允许通过 facade ====================
-[importlinter:contract:collection-to-planning-facade-only]
-name = Collection uses planning via top-level facade only
-type = forbidden
-source_modules =
-    autospider.contexts.collection
-forbidden_modules =
-    autospider.contexts.planning.application
-    autospider.contexts.planning.domain
-    autospider.contexts.planning.infrastructure
-
-[importlinter:contract:collection-to-experience-facade-only]
-name = Collection uses experience via top-level facade only
-type = forbidden
-source_modules =
-    autospider.contexts.collection
-forbidden_modules =
-    autospider.contexts.experience.application
-    autospider.contexts.experience.domain
-    autospider.contexts.experience.infrastructure
-
-[importlinter:contract:planning-domain-to-collection-facade-only]
-name = Planning domain uses collection via top-level facade only
-type = forbidden
-source_modules =
-    autospider.contexts.planning.domain
-forbidden_modules =
-    autospider.contexts.collection.application
-    autospider.contexts.collection.domain
-    autospider.contexts.collection.infrastructure
-
-[importlinter:contract:planning-application-to-chat-facade-only]
-name = Planning application uses chat via top-level facade only
-type = forbidden
-source_modules =
-    autospider.contexts.planning.application
-forbidden_modules =
-    autospider.contexts.chat.application
-    autospider.contexts.chat.domain
-    autospider.contexts.chat.infrastructure
-
-[importlinter:contract:planning-infrastructure-to-experience-facade-only]
-name = Planning infrastructure uses experience via top-level facade only
-type = forbidden
-source_modules =
-    autospider.contexts.planning.infrastructure
-forbidden_modules =
-    autospider.contexts.experience.application
-    autospider.contexts.experience.domain
-    autospider.contexts.experience.infrastructure
-
-# ==================== 契约 5：Interface 不直接依赖 Contexts ====================
-[importlinter:contract:interface-via-composition]
-name = Interface must not directly import contexts
-type = forbidden
-source_modules =
-    autospider.interface
-forbidden_modules =
-    autospider.contexts
+# ==================== Direct-only 边界说明 ====================
+# 跨 context 的 facade-only 约束，以及 interface 不直接 import contexts，
+# 由 tests/contracts/test_context_boundary_freeze.py 的 AST 合同测试冻结。
+# import-linter 的 forbidden 合同会把经 facade 的传递依赖也判为违规，
+# 不适合表达这种“只限制直接导入”的边界。

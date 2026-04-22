@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 CONTEXTS_ROOT = SRC_ROOT / "autospider" / "contexts"
+INTERFACE_ROOT = SRC_ROOT / "autospider" / "interface"
 BOUNDARY_MAP_PATH = REPO_ROOT / "refactor" / "_generated" / "context-boundaries-phase1.json"
 IMPORT_LINTER_PATH = REPO_ROOT / ".importlinter"
 
@@ -105,6 +106,18 @@ def _collect_wrapper_inventory() -> list[dict[str, str]]:
     return sorted(wrappers, key=lambda item: item["module"])
 
 
+def _collect_interface_context_imports() -> list[dict[str, str]]:
+    edges: list[dict[str, str]] = []
+    for path in INTERFACE_ROOT.rglob("*.py"):
+        source = _module_name(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            for target in _targets_for_node(source, node):
+                if target.startswith("autospider.contexts"):
+                    edges.append({"source": source, "target": target})
+    return sorted(edges, key=lambda item: (item["source"], item["target"]))
+
+
 def _wrapper_target(source_module: str, tree: ast.Module) -> str:
     for node in tree.body:
         if not isinstance(node, ast.ImportFrom):
@@ -155,3 +168,7 @@ def test_context_boundary_inventory_matches_boundary_map() -> None:
 def test_importlinter_ignores_match_composition_backedges() -> None:
     boundary_map = _load_boundary_map()
     assert _load_importlinter_composition_ignores() == boundary_map["composition_backedges"]
+
+
+def test_interface_modules_do_not_directly_import_contexts() -> None:
+    assert _collect_interface_context_imports() == []
