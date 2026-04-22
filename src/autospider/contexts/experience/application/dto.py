@@ -87,7 +87,7 @@ class SedimentSkillInput(BaseModel):
     description: str
     list_url: str
     task_description: str
-    fields: list[SkillFieldRuleDTO] = Field(default_factory=list)
+    fields: list[SkillFieldRule] = Field(default_factory=list)
     status: str = "draft"
     success_count: int = 0
     total_count: int = 0
@@ -103,8 +103,8 @@ class SedimentSkillResultDTO(BaseModel):
 
 
 class MergeSkillsInput(BaseModel):
-    existing_document: SkillDocumentDTO
-    incoming_document: SkillDocumentDTO
+    existing_document: SkillDocument
+    incoming_document: SkillDocument
 
 
 class MergeSkillsResultDTO(BaseModel):
@@ -112,7 +112,7 @@ class MergeSkillsResultDTO(BaseModel):
 
 
 class UpdateSkillStatsInput(BaseModel):
-    document: SkillDocumentDTO
+    document: SkillDocument
     status: str
     success_rate: float
     success_rate_text: str = ""
@@ -140,23 +140,6 @@ def to_skill_document_dto(document: SkillDocument) -> SkillDocumentDTO:
     )
 
 
-def to_domain_skill_document(dto: SkillDocumentDTO) -> SkillDocument:
-    return SkillDocument(
-        frontmatter=dict(dto.frontmatter),
-        title=dto.title,
-        rules=to_domain_skill_rule_data(dto.rules),
-        insights_markdown=dto.insights_markdown,
-    )
-
-
-def to_domain_field_map(fields: list[SkillFieldRuleDTO]) -> dict[str, SkillFieldRule]:
-    mapped: dict[str, SkillFieldRule] = {}
-    for field in fields:
-        domain_field = to_domain_skill_field_rule(field)
-        mapped[domain_field.name] = domain_field
-    return mapped
-
-
 def to_skill_rule_data_dto(rules: SkillRuleData) -> SkillRuleDataDTO:
     return SkillRuleDataDTO(
         domain=rules.domain,
@@ -175,27 +158,6 @@ def to_skill_rule_data_dto(rules: SkillRuleData) -> SkillRuleDataDTO:
         subtask_names=list(rules.subtask_names),
         fields=to_skill_field_rule_dtos(rules.fields),
         variants=[to_skill_variant_rule_dto(variant) for variant in rules.variants],
-    )
-
-
-def to_domain_skill_rule_data(dto: SkillRuleDataDTO) -> SkillRuleData:
-    return SkillRuleData(
-        domain=dto.domain,
-        name=dto.name,
-        description=dto.description,
-        list_url=dto.list_url,
-        task_description=dto.task_description,
-        status=dto.status,
-        success_rate=dto.success_rate,
-        success_rate_text=dto.success_rate_text,
-        detail_xpath=dto.detail_xpath,
-        pagination_xpath=dto.pagination_xpath,
-        jump_input_selector=dto.jump_input_selector,
-        jump_button_selector=dto.jump_button_selector,
-        nav_steps=tuple(dto.nav_steps),
-        subtask_names=tuple(dto.subtask_names),
-        fields=to_domain_field_map(dto.fields),
-        variants=tuple(to_domain_skill_variant_rule(variant) for variant in dto.variants),
     )
 
 
@@ -218,21 +180,6 @@ def to_skill_field_rule_dto(field: SkillFieldRule) -> SkillFieldRuleDTO:
     )
 
 
-def to_domain_skill_field_rule(dto: SkillFieldRuleDTO) -> SkillFieldRule:
-    return SkillFieldRule(
-        name=dto.name,
-        description=dto.description,
-        data_type=dto.data_type,
-        extraction_source=dto.extraction_source,
-        fixed_value=dto.fixed_value,
-        primary_xpath=dto.primary_xpath,
-        fallback_xpaths=tuple(dto.fallback_xpaths),
-        validated=dto.validated,
-        confidence=dto.confidence,
-        replace_primary=dto.replace_primary,
-    )
-
-
 def to_skill_variant_rule_dto(variant: SkillVariantRule) -> SkillVariantRuleDTO:
     return SkillVariantRuleDTO(
         label=variant.label,
@@ -248,22 +195,4 @@ def to_skill_variant_rule_dto(variant: SkillVariantRule) -> SkillVariantRuleDTO:
         jump_button_selector=variant.jump_button_selector,
         nav_steps=list(variant.nav_steps),
         fields=to_skill_field_rule_dtos(variant.fields),
-    )
-
-
-def to_domain_skill_variant_rule(dto: SkillVariantRuleDTO) -> SkillVariantRule:
-    return SkillVariantRule(
-        label=dto.label,
-        page_state_signature=dto.page_state_signature,
-        anchor_url=dto.anchor_url,
-        task_description=dto.task_description,
-        context=dict(dto.context),
-        success_rate=dto.success_rate,
-        success_rate_text=dto.success_rate_text,
-        detail_xpath=dto.detail_xpath,
-        pagination_xpath=dto.pagination_xpath,
-        jump_input_selector=dto.jump_input_selector,
-        jump_button_selector=dto.jump_button_selector,
-        nav_steps=tuple(dto.nav_steps),
-        fields=to_domain_field_map(dto.fields),
     )

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.contexts.experience.application.dto import SedimentSkillInput, SkillFieldRuleDTO
+from autospider.contexts.experience.application.dto import SedimentSkillInput
 from autospider.contexts.experience.application.use_cases import SedimentSkill
-from autospider.contexts.experience.domain.model import SkillDocument
+from autospider.contexts.experience.domain.model import SkillDocument, SkillFieldRule
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
 
@@ -52,7 +52,7 @@ async def test_sediment_skill_persists_document_and_returns_success_envelope() -
             list_url="https://example.com/list",
             task_description="抓取商品信息",
             fields=[
-                SkillFieldRuleDTO(
+                SkillFieldRule(
                     name="title",
                     description="标题",
                     primary_xpath="//h1/text()",

@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.contexts.experience.application.dto import (
-    SkillDocumentDTO,
-    SkillFieldRuleDTO,
-    SkillRuleDataDTO,
-    UpdateSkillStatsInput,
-)
+from autospider.contexts.experience.application.dto import UpdateSkillStatsInput
 from autospider.contexts.experience.application.use_cases import UpdateSkillStats
+from autospider.contexts.experience.domain.model import SkillDocument, SkillFieldRule, SkillRuleData
 from autospider.contexts.experience.domain.services import SkillDocumentService
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
@@ -82,11 +78,11 @@ async def test_update_skill_stats_does_not_swallow_runtime_error() -> None:
     clear_run_context()
 
 
-def _build_document() -> SkillDocumentDTO:
-    return SkillDocumentDTO(
+def _build_document() -> SkillDocument:
+    return SkillDocument(
         frontmatter={"name": "example.com 站点采集", "description": "示例技能"},
         title="# example.com 采集指南",
-        rules=SkillRuleDataDTO(
+        rules=SkillRuleData(
             domain="example.com",
             name="example.com 站点采集",
             description="示例技能",
@@ -95,12 +91,12 @@ def _build_document() -> SkillDocumentDTO:
             status="draft",
             success_rate=0.2,
             success_rate_text="20%",
-            fields=[
-                SkillFieldRuleDTO(
+            fields={
+                "title": SkillFieldRule(
                     name="title",
                     description="标题",
                     primary_xpath="//h1/text()",
                 )
-            ],
+            },
         ),
     )

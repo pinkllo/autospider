@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from autospider.contexts.experience.application.dto import (
     SedimentSkillInput,
     SedimentSkillResultDTO,
-    SkillFieldRuleDTO,
 )
 from autospider.contexts.experience.application.skill_promotion import (
     SkillPromotionContext,
@@ -17,6 +16,7 @@ from autospider.contexts.experience.application.skill_promotion import (
     SkillSedimenter,
 )
 from autospider.contexts.experience.application.use_cases.sediment_skill import SedimentSkill
+from autospider.contexts.experience.domain.model import SkillFieldRule
 from autospider.platform.shared_kernel.result import ResultEnvelope
 
 _PIPELINE_SUMMARY_FILENAME = "pipeline_summary.json"
@@ -72,7 +72,7 @@ class ExperienceHandlers:
             description=payload.description,
             list_url=payload.list_url,
             task_description=payload.task_description,
-            fields=[_to_field_dto(item) for item in payload.fields],
+            fields=[_to_field_rule(item) for item in payload.fields],
             status=payload.status,
             success_count=payload.success_count,
             total_count=payload.total_count,
@@ -93,8 +93,8 @@ class CollectionFinalizedHandler:
         return self._sedimenter.sediment_from_pipeline_result(_to_sedimentation_payload(summary))
 
 
-def _to_field_dto(payload: SedimentSkillFieldPayload) -> SkillFieldRuleDTO:
-    return SkillFieldRuleDTO(
+def _to_field_rule(payload: SedimentSkillFieldPayload) -> SkillFieldRule:
+    return SkillFieldRule(
         name=payload.name,
         description=payload.description,
         data_type=payload.data_type,

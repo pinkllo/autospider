@@ -3,7 +3,6 @@ from __future__ import annotations
 from autospider.contexts.experience.application.dto import (
     MergeSkillsInput,
     MergeSkillsResultDTO,
-    to_domain_skill_document,
     to_skill_document_dto,
 )
 from autospider.contexts.experience.domain.services import SkillDocumentService
@@ -18,9 +17,10 @@ class MergeSkills:
     async def run(self, command: MergeSkillsInput) -> ResultEnvelope[MergeSkillsResultDTO]:
         trace_id = _require_trace_id()
         try:
-            existing = to_domain_skill_document(command.existing_document)
-            incoming = to_domain_skill_document(command.incoming_document)
-            merged = self._service.merge_skill_documents(existing=existing, incoming=incoming)
+            merged = self._service.merge_skill_documents(
+                existing=command.existing_document,
+                incoming=command.incoming_document,
+            )
         except ValueError as exc:
             return _failed(trace_id, code="experience.merge_failed", message=str(exc))
         data = MergeSkillsResultDTO(merged_document=to_skill_document_dto(merged))

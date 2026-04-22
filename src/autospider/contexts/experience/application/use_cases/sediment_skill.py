@@ -3,7 +3,6 @@ from __future__ import annotations
 from autospider.contexts.experience.application.dto import (
     SedimentSkillInput,
     SedimentSkillResultDTO,
-    to_domain_field_map,
     to_skill_document_dto,
 )
 from autospider.contexts.experience.domain.ports import SkillRepository
@@ -30,7 +29,7 @@ class SedimentSkill:
                 description=command.description,
                 list_url=command.list_url,
                 task_description=command.task_description,
-                fields=to_domain_field_map(command.fields),
+                fields={field.name: field for field in command.fields},
                 status=command.status,
                 success_count=command.success_count,
                 total_count=command.total_count,

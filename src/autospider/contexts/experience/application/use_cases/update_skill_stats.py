@@ -3,7 +3,6 @@ from __future__ import annotations
 from autospider.contexts.experience.application.dto import (
     UpdateSkillStatsInput,
     UpdateSkillStatsResultDTO,
-    to_domain_skill_document,
     to_skill_document_dto,
 )
 from autospider.contexts.experience.domain.services import SkillDocumentService
@@ -20,9 +19,8 @@ class UpdateSkillStats:
     ) -> ResultEnvelope[UpdateSkillStatsResultDTO]:
         trace_id = _require_trace_id()
         try:
-            document = to_domain_skill_document(command.document)
             updated = self._service.update_skill_stats(
-                document=document,
+                document=command.document,
                 status=command.status,
                 success_rate=command.success_rate,
                 success_rate_text=command.success_rate_text,

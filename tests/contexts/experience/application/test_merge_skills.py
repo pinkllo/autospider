@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.contexts.experience.application.dto import (
-    MergeSkillsInput,
-    SkillDocumentDTO,
-    SkillFieldRuleDTO,
-    SkillRuleDataDTO,
-)
+from autospider.contexts.experience.application.dto import MergeSkillsInput
 from autospider.contexts.experience.application.use_cases import MergeSkills
+from autospider.contexts.experience.domain.model import SkillDocument, SkillFieldRule, SkillRuleData
 from autospider.contexts.experience.domain.services import SkillDocumentService
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 
@@ -124,19 +120,19 @@ def _build_document(
     fallback_xpaths: list[str],
     validated: bool,
     confidence: float,
-) -> SkillDocumentDTO:
-    return SkillDocumentDTO(
+) -> SkillDocument:
+    return SkillDocument(
         frontmatter={"name": "example.com 站点采集", "description": "示例技能"},
         title="# example.com 采集指南",
-        rules=SkillRuleDataDTO(
+        rules=SkillRuleData(
             domain="example.com",
             name="example.com 站点采集",
             description="示例技能",
             list_url="https://example.com/list",
             task_description="抓取商品信息",
             status=status,
-            fields=[
-                SkillFieldRuleDTO(
+            fields={
+                "title": SkillFieldRule(
                     name="title",
                     description="标题",
                     primary_xpath=primary_xpath,
@@ -144,6 +140,6 @@ def _build_document(
                     validated=validated,
                     confidence=confidence,
                 )
-            ],
+            },
         ),
     )
