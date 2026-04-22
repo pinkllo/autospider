@@ -45,26 +45,26 @@ class PlannerVariantResolver(PlannerVariantNavigationMixin):
         return self._planner._looks_like_current_category(name, analysis)
 
     def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
-        return self._planner._build_page_state_signature(current_url, nav_steps)
+        return self._planner._page_state_runtime.build_page_state_signature(current_url, nav_steps)
 
     def _build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
-        return self._planner._build_nav_click_step(snapshot, mark_id)
+        return self._planner._page_state_runtime.build_nav_click_step(snapshot, mark_id)
 
     async def _get_dom_signature(self) -> str:
-        return await self._planner._get_dom_signature()
+        return await self._planner._page_state_runtime.get_dom_signature()
 
     async def _get_element_interaction_state(self, xpath: str) -> dict[str, str]:
-        return await self._planner._get_element_interaction_state(xpath)
+        return await self._planner._page_state_runtime.get_element_interaction_state(xpath)
 
     def _did_interaction_state_activate(
         self,
         before: dict | None,
         after: dict | None,
     ) -> bool:
-        return self._planner._did_interaction_state_activate(before, after)
+        return self._planner._page_state_runtime.did_interaction_state_activate(before, after)
 
     async def _restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
-        return await self._planner._restore_page_state(target_url, nav_steps)
+        return await self._planner._page_state_runtime.restore_page_state(target_url, nav_steps)
 
     def _sanitize_context(self, context: dict[str, str] | None) -> dict[str, str]:
         return self._planner._sanitize_context(context)

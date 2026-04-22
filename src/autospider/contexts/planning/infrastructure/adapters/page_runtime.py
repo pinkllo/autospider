@@ -16,14 +16,18 @@ _PLANNER_READY_TIMEOUT_MS = 5000
 _PLANNER_READY_FALLBACK_WAIT_MS = 1500
 
 
-class PlannerPageRuntimeMixin:
-    def _build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
+class PlannerPageStateRuntime:
+    def __init__(self, *, page, page_state) -> None:
+        self.page = page
+        self._page_state = page_state
+
+    def build_page_state_signature(self, current_url: str, nav_steps: list[dict] | None) -> str:
         return self._page_state.build_page_state_signature(current_url, nav_steps)
 
-    async def _restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
+    async def restore_page_state(self, target_url: str, nav_steps: list[dict] | None) -> bool:
         return await self._page_state.restore_page_state(target_url, nav_steps)
 
-    async def _enter_child_state(
+    async def enter_child_state(
         self,
         current_url: str,
         child_url: str,
@@ -37,6 +41,41 @@ class PlannerPageRuntimeMixin:
             current_nav_steps,
         )
 
+    def build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
+        return self._page_state.build_nav_click_step(snapshot, mark_id)
+
+    async def get_dom_signature(self) -> str:
+        return await self._page_state.get_dom_signature()
+
+    async def get_element_interaction_state(self, xpath: str) -> dict[str, str]:
+        return await self._page_state.get_element_interaction_state(xpath)
+
+    def did_interaction_state_activate(self, before: dict | None, after: dict | None) -> bool:
+        return self._page_state.did_interaction_state_activate(before, after)
+
+    async def restore_original_page(self, original_url: str) -> None:
+        await self._page_state.restore_original_page(original_url)
+
+    async def wait_for_planner_page_ready(self) -> None:
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=_PLANNER_READY_TIMEOUT_MS)
+        except Exception:
+            pass
+        await self.page.wait_for_timeout(_PLANNER_READY_FALLBACK_WAIT_MS)
+
+
+class PlannerPageRuntime:
+    def __init__(self, planner) -> None:
+        self._planner = planner
+
+    @property
+    def page(self):
+        return self._planner.page
+
+    @property
+    def site_url(self) -> str:
+        return self._planner.site_url
+
     async def plan_runtime_subtasks(
         self,
         *,
@@ -47,8 +86,11 @@ class PlannerPageRuntimeMixin:
             parent_subtask.anchor_url or parent_subtask.list_url or self.site_url
         ).strip()
         current_nav_steps = list(parent_subtask.nav_steps or [])
-        current_context = self._sanitize_context(parent_subtask.context)
-        restored = await self._restore_page_state(current_url, current_nav_steps)
+        current_context = self._planner._sanitize_context(parent_subtask.context)
+        restored = await self._planner._page_state_runtime.restore_page_state(
+            current_url,
+            current_nav_steps,
+        )
         if not restored:
             raise RuntimeError("runtime_subtask_restore_failed")
 
@@ -56,7 +98,7 @@ class PlannerPageRuntimeMixin:
         _, screenshot_base64 = await capture_screenshot_with_marks(self.page)
         await clear_overlay(self.page)
 
-        analysis = await self._analyze_site_structure(
+        analysis = await self._planner._analyze_site_structure(
             screenshot_base64,
             snapshot,
             node_context=current_context,
@@ -90,8 +132,8 @@ class PlannerPageRuntimeMixin:
     ) -> tuple[str, Any]:
         collect_desc = str(analysis.get("task_description") or "").strip()
         if not collect_desc:
-            collect_desc = self._build_collect_task_description(current_context)
-        collect_brief = self._build_collect_execution_brief(
+            collect_desc = self._planner._build_collect_task_description(current_context)
+        collect_brief = self._planner._build_collect_execution_brief(
             current_context,
             task_description=collect_desc,
             parent_execution_brief=parent_subtask.execution_brief,
@@ -123,13 +165,13 @@ class PlannerPageRuntimeMixin:
         collect_brief: Any,
         max_children: int | None,
     ) -> RuntimeSubtaskPlanResult:
-        child_variants = await self._extract_subtask_variants(
+        child_variants = await self._planner._extract_subtask_variants(
             analysis,
             snapshot,
             parent_nav_steps=current_nav_steps,
             parent_context=current_context,
         )
-        children = self._build_subtasks_from_variants(
+        children = self._planner._build_subtasks_from_variants(
             child_variants,
             analysis=analysis,
             depth=int(parent_subtask.depth or 0),
@@ -148,29 +190,3 @@ class PlannerPageRuntimeMixin:
             collect_task_description=collect_desc,
             collect_execution_brief=collect_brief,
         )
-
-    def _build_nav_click_step(self, snapshot: object, mark_id: int) -> dict | None:
-        return self._page_state.build_nav_click_step(snapshot, mark_id)
-
-    async def _get_dom_signature(self) -> str:
-        return await self._page_state.get_dom_signature()
-
-    async def _get_element_interaction_state(self, xpath: str) -> dict[str, str]:
-        return await self._page_state.get_element_interaction_state(xpath)
-
-    def _did_interaction_state_activate(
-        self,
-        before: dict[str, Any] | None,
-        after: dict[str, Any] | None,
-    ) -> bool:
-        return self._page_state.did_interaction_state_activate(before, after)
-
-    async def _restore_original_page(self, original_url: str) -> None:
-        await self._page_state.restore_original_page(original_url)
-
-    async def _wait_for_planner_page_ready(self) -> None:
-        try:
-            await self.page.wait_for_load_state("networkidle", timeout=_PLANNER_READY_TIMEOUT_MS)
-        except Exception:
-            pass
-        await self.page.wait_for_timeout(_PLANNER_READY_FALLBACK_WAIT_MS)

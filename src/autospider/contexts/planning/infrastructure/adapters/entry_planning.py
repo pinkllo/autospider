@@ -21,6 +21,16 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class PlannerEntryPageStateRuntime(Protocol):
+    async def wait_for_planner_page_ready(self) -> None: ...
+
+    def build_page_state_signature(
+        self,
+        current_url: str,
+        nav_steps: list[dict] | None,
+    ) -> str: ...
+
+
 class PlannerEntryPlanningRuntime(Protocol):
     page: "Page"
     site_url: str
@@ -28,8 +38,7 @@ class PlannerEntryPlanningRuntime(Protocol):
     planner_status: str
     terminal_reason: str
     _plan_records: "PlannerPlanRecordBook"
-
-    async def _wait_for_planner_page_ready(self) -> None: ...
+    _page_state_runtime: PlannerEntryPageStateRuntime
 
     async def _analyze_site_structure(
         self,
@@ -39,12 +48,6 @@ class PlannerEntryPlanningRuntime(Protocol):
         node_context: dict[str, str] | None = None,
         nav_steps: list[dict] | None = None,
     ) -> dict | None: ...
-
-    def _build_page_state_signature(
-        self,
-        current_url: str,
-        nav_steps: list[dict] | None,
-    ) -> str: ...
 
     def _resolve_plan_node_type_for_state(
         self,
@@ -87,7 +90,7 @@ class PlannerEntryPlanner:
         page = self._planner.page
         logger.info("[Planner] 开始首层任务规划: %s", self._planner.site_url)
         await page.goto(self._planner.site_url, wait_until="domcontentloaded", timeout=30000)
-        await self._planner._wait_for_planner_page_ready()
+        await self._planner._page_state_runtime.wait_for_planner_page_ready()
         logger.info("[Planner] 页面已加载: %s", page.url)
 
         subtasks = await self._plan_entry_subtasks()
@@ -159,7 +162,10 @@ class PlannerEntryPlanner:
         page_type = str(analysis.get("page_type", "category")).strip().lower()
         node_name = str(analysis.get("name", "")).strip() or "入口页面"
         observations = str(analysis.get("observations", "")).strip()
-        state_signature = self._planner._build_page_state_signature(current_url, current_nav_steps)
+        state_signature = self._planner._page_state_runtime.build_page_state_signature(
+            current_url,
+            current_nav_steps,
+        )
         node_type = self._planner._resolve_plan_node_type_for_state(page_type, current_nav_steps)
         entry_index, node_id = self._planner._plan_records.register_entry_page(
             current_url=current_url,
@@ -203,7 +209,10 @@ class PlannerEntryPlanner:
             name=str(analysis.get("name", "")).strip() or "入口页面",
             list_url=current_url,
             anchor_url=current_url,
-            page_state_signature=self._planner._build_page_state_signature(current_url, []),
+            page_state_signature=self._planner._page_state_runtime.build_page_state_signature(
+                current_url,
+                [],
+            ),
             task_description=collect_desc,
             nav_steps=[],
             depth=0,

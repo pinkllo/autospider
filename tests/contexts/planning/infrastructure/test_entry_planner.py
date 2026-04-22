@@ -93,9 +93,21 @@ class _FakePlanner:
         self.terminal_reason = ""
         self._plan_records = _FakePlanRecords()
         self.wait_ready_calls = 0
+        self._page_state_runtime = self._FakePageStateRuntime(self)
 
-    async def _wait_for_planner_page_ready(self) -> None:
-        self.wait_ready_calls += 1
+    class _FakePageStateRuntime:
+        def __init__(self, planner: "_FakePlanner") -> None:
+            self._planner = planner
+
+        async def wait_for_planner_page_ready(self) -> None:
+            self._planner.wait_ready_calls += 1
+
+        def build_page_state_signature(
+            self,
+            current_url: str,
+            nav_steps: list[dict] | None,
+        ) -> str:
+            return f"{current_url}::{len(list(nav_steps or []))}"
 
     async def _analyze_site_structure(
         self,
@@ -115,13 +127,6 @@ class _FakePlanner:
             "observations": "入口页面已经是列表",
             "task_description": "直接采集公告列表",
         }
-
-    def _build_page_state_signature(
-        self,
-        current_url: str,
-        nav_steps: list[dict] | None,
-    ) -> str:
-        return f"{current_url}::{len(list(nav_steps or []))}"
 
     def _resolve_plan_node_type_for_state(
         self,

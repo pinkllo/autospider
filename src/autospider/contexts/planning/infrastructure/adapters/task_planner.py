@@ -8,7 +8,7 @@ from autospider.platform.config.runtime import config
 from autospider.platform.llm.client_factory import build_runtime_json_llm
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection import NavigationHandler
-from autospider.contexts.planning.domain import PlannerIntent, TaskPlan
+from autospider.contexts.planning.domain import PlannerIntent, SubTask, TaskPlan
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
     PlannerSiteAnalyzer,
     ResolvedPlannerVariant,
@@ -18,7 +18,8 @@ from autospider.contexts.planning.infrastructure.adapters.entry_planning import 
     PlannerEntryPlanner,
 )
 from autospider.contexts.planning.infrastructure.adapters.page_runtime import (
-    PlannerPageRuntimeMixin,
+    PlannerPageRuntime,
+    PlannerPageStateRuntime,
 )
 from autospider.contexts.planning.infrastructure.adapters.plan_records import (
     PlannerPlanRecordBook,
@@ -59,7 +60,6 @@ def _build_planner_navigation_replayer(
 
 
 class TaskPlanner(
-    PlannerPageRuntimeMixin,
     PlannerCategorySemanticsMixin,
 ):
     """任务规划器：负责将用户的采集请求转化为具体的执行计划。
@@ -111,6 +111,10 @@ class TaskPlanner(
             page,
             navigation_replayer_factory=_build_planner_navigation_replayer,
         )
+        self._page_state_runtime = PlannerPageStateRuntime(
+            page=page,
+            page_state=self._page_state,
+        )
         self._plan_records = PlannerPlanRecordBook(
             artifacts=ArtifactPlanRepository(
                 site_url=site_url,
@@ -121,6 +125,7 @@ class TaskPlanner(
         self._analysis_post_processor = PlannerAnalysisPostProcessor(self)
         self._site_analyzer = PlannerSiteAnalyzer(self)
         self._entry_planner = PlannerEntryPlanner(self)
+        self._page_runtime = PlannerPageRuntime(self)
         self._subtask_builder = PlannerSubtaskBuilder(self)
         self._variant_resolver = PlannerVariantResolver(self)
         self.planner_status = "success"
@@ -168,6 +173,24 @@ class TaskPlanner(
             resolver = PlannerVariantResolver(self)
             self._variant_resolver = resolver
         return resolver
+
+    def _get_page_runtime(self) -> PlannerPageRuntime:
+        runtime = getattr(self, "_page_runtime", None)
+        if runtime is None:
+            runtime = PlannerPageRuntime(self)
+            self._page_runtime = runtime
+        return runtime
+
+    async def plan_runtime_subtasks(
+        self,
+        *,
+        parent_subtask: SubTask,
+        max_children: int | None = None,
+    ) -> RuntimeSubtaskPlanResult:
+        return await self._get_page_runtime().plan_runtime_subtasks(
+            parent_subtask=parent_subtask,
+            max_children=max_children,
+        )
 
     def _append_observation_note(self, result: dict, note: str) -> dict:
         return self._get_site_analyzer()._append_observation_note(result, note)
