@@ -5,9 +5,12 @@ from autospider.contexts.experience.application.dto import (
     UpdateSkillStatsResultDTO,
     to_skill_document_dto,
 )
+from autospider.contexts.experience.application.use_cases._result_support import (
+    failed_result,
+    require_trace_id,
+)
 from autospider.contexts.experience.domain.services import SkillDocumentService
-from autospider.platform.shared_kernel.result import ErrorInfo, ResultEnvelope
-from autospider.platform.shared_kernel.trace import get_trace_id
+from autospider.platform.shared_kernel.result import ResultEnvelope
 
 
 class UpdateSkillStats:
@@ -17,7 +20,7 @@ class UpdateSkillStats:
     async def run(
         self, command: UpdateSkillStatsInput
     ) -> ResultEnvelope[UpdateSkillStatsResultDTO]:
-        trace_id = _require_trace_id()
+        trace_id = require_trace_id()
         try:
             updated = self._service.update_skill_stats(
                 document=command.document,
@@ -26,23 +29,10 @@ class UpdateSkillStats:
                 success_rate_text=command.success_rate_text,
             )
         except ValueError as exc:
-            return _failed(trace_id, code="experience.update_stats_failed", message=str(exc))
+            return failed_result(
+                trace_id,
+                code="experience.update_stats_failed",
+                message=str(exc),
+            )
         data = UpdateSkillStatsResultDTO(updated_document=to_skill_document_dto(updated))
         return ResultEnvelope.success(data=data, trace_id=trace_id)
-
-
-def _require_trace_id() -> str:
-    trace_id = get_trace_id()
-    if not trace_id:
-        raise RuntimeError("trace_id is not set")
-    return trace_id
-
-
-def _failed(
-    trace_id: str,
-    *,
-    code: str,
-    message: str,
-) -> ResultEnvelope[UpdateSkillStatsResultDTO]:
-    error = ErrorInfo(kind="domain", code=code, message=message)
-    return ResultEnvelope.failed(trace_id=trace_id, errors=[error])
