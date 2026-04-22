@@ -21,10 +21,10 @@ class PlannerEntryPlanningMixin:
         logger.info("[Planner] 页面已加载: %s", self.page.url)
 
         subtasks = await self._plan_entry_subtasks()
-        plan = self._build_plan(subtasks)
-        plan = self._save_plan(plan)
-        self._write_knowledge_doc(plan)
-        self._sediment_draft_skill(plan)
+        plan = self._plan_records.build_plan(subtasks)
+        plan = self._plan_records.save_plan(plan)
+        self._plan_records.write_knowledge_doc(plan)
+        self._plan_records.sediment_draft_skill(plan)
 
         logger.info("[Planner] 首层规划完成，发现 %d 个一级任务", len(plan.subtasks))
         return plan
@@ -88,36 +88,18 @@ class PlannerEntryPlanningMixin:
         page_type = str(analysis.get("page_type", "category")).strip().lower()
         node_name = str(analysis.get("name", "")).strip() or "入口页面"
         observations = str(analysis.get("observations", "")).strip()
-        node_id = self._next_node_id()
         state_signature = self._build_page_state_signature(current_url, current_nav_steps)
         node_type = self._resolve_plan_node_type_for_state(page_type, current_nav_steps)
-
-        entry_index = len(self._knowledge_entries)
-        self._knowledge_entries.append(
-            {
-                "node_id": node_id,
-                "parent_node_id": None,
-                "depth": 0,
-                "url": current_url,
-                "anchor_url": current_url,
-                "page_state_signature": state_signature,
-                "variant_label": None,
-                "page_type": page_type,
-                "name": node_name,
-                "observations": observations,
-                "children_count": 0,
-                "is_leaf": False,
-                "task_description": str(
-                    analysis.get("task_description", self.user_request) or self.user_request
-                ),
-                "context": {},
-                "nav_steps": [],
-                "subtask_id": None,
-                "executable": False,
-                "node_type": node_type.value,
-            }
+        entry_index, node_id = self._plan_records.register_entry_page(
+            current_url=current_url,
+            page_type=page_type,
+            node_name=node_name,
+            observations=observations,
+            task_description=str(analysis.get("task_description", self.user_request) or self.user_request),
+            page_state_signature=state_signature,
+            node_type=node_type,
         )
-        self._append_journal(
+        self._plan_records.append_journal(
             node_id=node_id,
             phase="planning",
             action="analyze_page",
@@ -156,10 +138,8 @@ class PlannerEntryPlanningMixin:
             mode=SubTaskMode.COLLECT,
             execution_brief=collect_brief,
         )
-        self._knowledge_entries[entry_index]["is_leaf"] = True
-        self._knowledge_entries[entry_index]["executable"] = True
-        self._knowledge_entries[entry_index]["subtask_id"] = subtask.id
-        self._append_journal(
+        self._plan_records.mark_entry_collectable(entry_index=entry_index, subtask_id=subtask.id)
+        self._plan_records.append_journal(
             node_id=node_id,
             phase="planning",
             action="register_leaf_subtask",
@@ -221,8 +201,11 @@ class PlannerEntryPlanningMixin:
                 current_url=current_url,
             )
 
-        self._knowledge_entries[entry_index]["children_count"] = len(subtasks)
-        self._append_journal(
+        self._plan_records.mark_entry_children(
+            entry_index=entry_index,
+            children_count=len(subtasks),
+        )
+        self._plan_records.append_journal(
             node_id=node_id,
             phase="planning",
             action="expand_category",
@@ -231,7 +214,7 @@ class PlannerEntryPlanningMixin:
             metadata={"children_count": str(len(subtasks))},
         )
         for subtask in subtasks:
-            self._record_planned_subtask_node(
+            self._plan_records.record_planned_subtask_node(
                 subtask=subtask,
                 parent_node_id=node_id,
                 reason="入口页面拆分出的一级任务",
@@ -249,7 +232,7 @@ class PlannerEntryPlanningMixin:
     ) -> list[SubTask]:
         self.planner_status = "no_subtasks"
         self.terminal_reason = "planner_no_subtasks"
-        self._record_planning_dead_end(
+        self._plan_records.record_planning_dead_end(
             entry_index=entry_index,
             node_id=node_id,
             reason=reason,

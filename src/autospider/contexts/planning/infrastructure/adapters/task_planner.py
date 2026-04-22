@@ -21,7 +21,7 @@ from autospider.contexts.planning.infrastructure.adapters.page_runtime import (
     PlannerPageRuntimeMixin,
 )
 from autospider.contexts.planning.infrastructure.adapters.plan_records import (
-    PlannerPlanRecordsMixin,
+    PlannerPlanRecordBook,
 )
 from autospider.contexts.planning.infrastructure.adapters.variant_resolution import (
     PlannerVariantResolverMixin,
@@ -64,7 +64,6 @@ def _build_planner_navigation_replayer(
 class TaskPlanner(
     PlannerEntryPlanningMixin,
     PlannerPageRuntimeMixin,
-    PlannerPlanRecordsMixin,
     PlannerAnalysisSupportMixin,
     PlannerCategorySemanticsMixin,
     PlannerAnalysisPostProcessMixin,
@@ -115,17 +114,17 @@ class TaskPlanner(
             if isinstance(planner_intent, PlannerIntent)
             else PlannerIntent.from_payload(planner_intent)
         )
-        self._knowledge_entries: list[dict] = []  # 规划发现过程中收集的知识条目
-        self._journal_entries: list[dict] = []
         self._sibling_category_registry: dict[str, set[str]] = {}
         self._page_state = PlannerPageState(
             page,
             navigation_replayer_factory=_build_planner_navigation_replayer,
         )
-        self._artifacts = ArtifactPlanRepository(
-            site_url=site_url,
-            user_request=user_request,
-            output_dir=output_dir,
+        self._plan_records = PlannerPlanRecordBook(
+            artifacts=ArtifactPlanRepository(
+                site_url=site_url,
+                user_request=user_request,
+                output_dir=output_dir,
+            )
         )
         self.planner_status = "success"
         self.terminal_reason = ""
@@ -141,3 +140,6 @@ class TaskPlanner(
             max_tokens=config.llm.max_tokens,
             use_main_model=use_main_model,
         )
+
+    def render_plan_knowledge(self, plan) -> str:
+        return self._plan_records.render_plan_knowledge(plan)

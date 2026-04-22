@@ -10,10 +10,63 @@ from autospider.contexts.planning.domain import (
     SubTask,
     SubTaskMode,
 )
+from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
+    ArtifactPlanRepository,
+)
 
 
-class PlannerPlanRecordsMixin:
-    def _record_planning_dead_end(
+class PlannerPlanRecordBook:
+    def __init__(self, *, artifacts: ArtifactPlanRepository) -> None:
+        self._artifacts = artifacts
+        self._knowledge_entries: list[dict[str, Any]] = []
+        self._journal_entries: list[dict[str, Any]] = []
+
+    def register_entry_page(
+        self,
+        *,
+        current_url: str,
+        page_type: str,
+        node_name: str,
+        observations: str,
+        task_description: str,
+        page_state_signature: str,
+        node_type: PlanNodeType,
+    ) -> tuple[int, str]:
+        node_id = self.next_node_id()
+        entry_index = len(self._knowledge_entries)
+        self._knowledge_entries.append(
+            {
+                "node_id": node_id,
+                "parent_node_id": None,
+                "depth": 0,
+                "url": current_url,
+                "anchor_url": current_url,
+                "page_state_signature": page_state_signature,
+                "variant_label": None,
+                "page_type": page_type,
+                "name": node_name,
+                "observations": observations,
+                "children_count": 0,
+                "is_leaf": False,
+                "task_description": task_description,
+                "context": {},
+                "nav_steps": [],
+                "subtask_id": None,
+                "executable": False,
+                "node_type": node_type.value,
+            }
+        )
+        return entry_index, node_id
+
+    def mark_entry_collectable(self, *, entry_index: int, subtask_id: str) -> None:
+        self._knowledge_entries[entry_index]["is_leaf"] = True
+        self._knowledge_entries[entry_index]["executable"] = True
+        self._knowledge_entries[entry_index]["subtask_id"] = subtask_id
+
+    def mark_entry_children(self, *, entry_index: int, children_count: int) -> None:
+        self._knowledge_entries[entry_index]["children_count"] = children_count
+
+    def record_planning_dead_end(
         self,
         *,
         entry_index: int,
@@ -25,7 +78,7 @@ class PlannerPlanRecordsMixin:
         self._knowledge_entries[entry_index]["children_count"] = 0
         self._knowledge_entries[entry_index]["is_leaf"] = False
         self._knowledge_entries[entry_index]["executable"] = False
-        self._append_journal(
+        self.append_journal(
             node_id=node_id,
             phase="planning",
             action="planning_dead_end",
@@ -34,14 +87,14 @@ class PlannerPlanRecordsMixin:
             metadata=dict(metadata or {}),
         )
 
-    def _record_planned_subtask_node(
+    def record_planned_subtask_node(
         self,
         *,
         subtask: SubTask,
         parent_node_id: str | None,
         reason: str,
     ) -> None:
-        node_id = self._next_node_id()
+        node_id = self.next_node_id()
         self._knowledge_entries.append(
             {
                 "node_id": node_id,
@@ -61,10 +114,10 @@ class PlannerPlanRecordsMixin:
                 "nav_steps": list(subtask.nav_steps or []),
                 "subtask_id": subtask.id,
                 "executable": True,
-                "node_type": self._resolve_subtask_node_type(subtask),
+                "node_type": self._resolve_subtask_node_type(subtask).value,
             }
         )
-        self._append_journal(
+        self.append_journal(
             node_id=node_id,
             phase="planning",
             action="create_subtask",
@@ -77,51 +130,79 @@ class PlannerPlanRecordsMixin:
             },
         )
 
-    def _resolve_subtask_node_type(self, subtask: SubTask) -> str:
-        if subtask.mode != SubTaskMode.COLLECT:
-            return PlanNodeType.CATEGORY.value
-        if list(subtask.nav_steps or []):
-            return PlanNodeType.STATEFUL_LIST.value
-        return PlanNodeType.LEAF.value
-
-    def _build_plan(self, subtasks: list[SubTask]):
+    def build_plan(self, subtasks: list[SubTask]):
         return self._artifacts.build_plan(
             subtasks,
             nodes=self._build_plan_nodes(),
             journal=self._build_plan_journal(),
         )
 
-    def _build_plan_id(self) -> str:
+    def build_plan_id(self) -> str:
         return self._artifacts._build_plan_id()
 
-    def _load_saved_plan(self):
+    def load_saved_plan(self):
         return self._artifacts._load_saved_plan()
 
-    def _create_empty_plan(self):
+    def create_empty_plan(self):
         return self._artifacts.create_empty_plan()
 
-    def _save_plan(self, plan):
+    def save_plan(self, plan):
         return self._artifacts.save_plan(plan)
 
-    def _write_knowledge_doc(self, plan) -> None:
+    def write_knowledge_doc(self, plan) -> None:
         self._artifacts.write_knowledge_doc(plan)
 
     def render_plan_knowledge(self, plan) -> str:
         return self._artifacts.build_knowledge_doc(plan)
 
-    def _sediment_draft_skill(self, plan) -> None:
+    def sediment_draft_skill(self, plan) -> None:
         self._artifacts.sediment_draft_skill(plan)
+
+    def append_journal(
+        self,
+        *,
+        node_id: str | None,
+        phase: str,
+        action: str,
+        reason: str,
+        evidence: str = "",
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        self._journal_entries.append(
+            {
+                "entry_id": self.next_journal_id(),
+                "node_id": node_id,
+                "phase": phase,
+                "action": action,
+                "reason": reason,
+                "evidence": evidence,
+                "metadata": dict(metadata or {}),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+
+    def next_node_id(self) -> str:
+        return f"node_{len(self._knowledge_entries) + 1:03d}"
+
+    def next_journal_id(self) -> str:
+        return f"journal_{len(self._journal_entries) + 1:04d}"
+
+    def _resolve_subtask_node_type(self, subtask: SubTask) -> PlanNodeType:
+        if subtask.mode != SubTaskMode.COLLECT:
+            return PlanNodeType.CATEGORY
+        if list(subtask.nav_steps or []):
+            return PlanNodeType.STATEFUL_LIST
+        return PlanNodeType.LEAF
 
     def _build_plan_nodes(self) -> list[PlanNode]:
         nodes: list[PlanNode] = []
         for raw in self._knowledge_entries:
-            node_type = self._resolve_plan_node_type(raw)
             nodes.append(
                 PlanNode(
                     node_id=str(raw.get("node_id") or ""),
                     parent_node_id=str(raw.get("parent_node_id") or "") or None,
                     name=str(raw.get("name") or ""),
-                    node_type=node_type,
+                    node_type=self._resolve_plan_node_type(raw),
                     url=str(raw.get("url") or ""),
                     anchor_url=str(raw.get("anchor_url") or "") or None,
                     page_state_signature=str(raw.get("page_state_signature") or "") or None,
@@ -169,32 +250,3 @@ class PlannerPlanRecordsMixin:
                 )
             )
         return entries
-
-    def _append_journal(
-        self,
-        *,
-        node_id: str | None,
-        phase: str,
-        action: str,
-        reason: str,
-        evidence: str = "",
-        metadata: dict[str, str] | None = None,
-    ) -> None:
-        self._journal_entries.append(
-            {
-                "entry_id": self._next_journal_id(),
-                "node_id": node_id,
-                "phase": phase,
-                "action": action,
-                "reason": reason,
-                "evidence": evidence,
-                "metadata": dict(metadata or {}),
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-            }
-        )
-
-    def _next_node_id(self) -> str:
-        return f"node_{len(self._knowledge_entries) + 1:03d}"
-
-    def _next_journal_id(self) -> str:
-        return f"journal_{len(self._journal_entries) + 1:04d}"
