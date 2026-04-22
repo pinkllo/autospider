@@ -4,9 +4,9 @@ from pathlib import Path
 
 from autospider.contexts.experience.domain.model import SkillMetadata
 from autospider.contexts.experience.domain.policies import normalize_host
-from autospider.contexts.experience.infrastructure.repositories.parsing import parse_skill_document
-from autospider.contexts.experience.infrastructure.repositories.pathing import (
+from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
     domain_to_dirname,
+    parse_skill_document,
     skill_document_path,
 )
 

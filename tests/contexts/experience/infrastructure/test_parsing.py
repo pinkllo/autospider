@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from autospider.contexts.experience.infrastructure.repositories.parsing import (
+from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
     SkillDocumentParseError,
     parse_skill_document,
 )

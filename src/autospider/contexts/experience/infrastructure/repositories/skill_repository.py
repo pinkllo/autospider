@@ -6,14 +6,10 @@ from autospider.contexts.experience.domain.model import SkillMetadata
 from autospider.contexts.experience.infrastructure.repositories.merging import (
     merge_skill_documents,
 )
-from autospider.contexts.experience.infrastructure.repositories.parsing import (
+from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
     parse_skill_document,
-)
-from autospider.contexts.experience.infrastructure.repositories.pathing import (
-    skill_document_path,
-)
-from autospider.contexts.experience.infrastructure.repositories.rendering import (
     render_skill_document,
+    skill_document_path,
 )
 from autospider.contexts.experience.infrastructure.repositories.skill_index_repository import (
     SkillIndexRepository,
