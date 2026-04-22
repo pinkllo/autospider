@@ -34,10 +34,11 @@ try {
 
     $importLinterCommand = Get-Command lint-imports -ErrorAction SilentlyContinue
     $importLinterConfig = Join-Path $RepoRoot ".importlinter"
-    if ($importLinterCommand -and (Test-Path $importLinterConfig)) {
+    if (Test-Path $importLinterConfig) {
+        if (-not $importLinterCommand) {
+            throw "lint-imports command is required when .importlinter exists. Install dev dependencies first."
+        }
         lint-imports
-    } else {
-        Write-Host "lint-imports skipped: command missing or .importlinter not found."
     }
 } finally {
     Pop-Location

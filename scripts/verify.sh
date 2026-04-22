@@ -18,8 +18,10 @@ mypy src/autospider
 run_pytest_with_timeout -m smoke -q
 run_pytest_with_timeout tests/contracts -q
 
-if command -v lint-imports >/dev/null 2>&1 && [ -f ".importlinter" ]; then
+if [ -f ".importlinter" ]; then
+  if ! command -v lint-imports >/dev/null 2>&1; then
+    printf '%s\n' "lint-imports command is required when .importlinter exists. Install dev dependencies first."
+    exit 1
+  fi
   lint-imports
-else
-  printf '%s\n' "lint-imports skipped: command missing or .importlinter not found."
 fi
