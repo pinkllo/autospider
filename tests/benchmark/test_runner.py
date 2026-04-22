@@ -89,10 +89,10 @@ def test_runner_raises_when_result_file_missing() -> None:
         runner.run_scenario("test_run")
 
 
-def test_runner_default_executor_uses_cli_entrypoint(
+def test_runner_default_executor_uses_benchmark_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default executor delegates to the repository CLI graph entrypoint."""
+    """Default executor delegates to the repository benchmark runtime entrypoint."""
     from tests.benchmark import runner as runner_module
     from tests.benchmark.runner import BenchmarkRunner
 
@@ -108,18 +108,22 @@ def test_runner_default_executor_uses_cli_entrypoint(
     _write_jsonl(ground_truth_dir / "test_run.jsonl", [{"name": "A"}])
     _write_jsonl(output_dir / "merged_results.jsonl", [{"name": "A"}])
 
-    def fake_invoke_graph(
-        entry_mode: str,
-        cli_args: dict[str, object],
-        *,
-        thread_id: str = "",
+    def fake_execute_benchmark_graph(
+        request: str,
+        cli_overrides: dict[str, object],
     ) -> dict[str, object]:
-        captured["entry_mode"] = entry_mode
-        captured["cli_args"] = dict(cli_args)
-        captured["thread_id"] = thread_id
+        captured["request"] = request
+        captured["cli_overrides"] = dict(cli_overrides)
+        current_output = Path(str(cli_overrides["output_dir"]))
+        current_output.mkdir(parents=True, exist_ok=True)
+        _write_jsonl(current_output / "merged_results.jsonl", [{"name": "A"}])
         return {"status": "completed", "total_graph_steps": 7}
 
-    monkeypatch.setattr(runner_module, "_load_cli_invoke_graph", lambda: fake_invoke_graph)
+    monkeypatch.setattr(
+        runner_module,
+        "_load_benchmark_executor",
+        lambda: fake_execute_benchmark_graph,
+    )
     runner = BenchmarkRunner(
         scenarios_dir=scenarios_dir,
         ground_truth_dir=ground_truth_dir,
@@ -130,10 +134,49 @@ def test_runner_default_executor_uses_cli_entrypoint(
 
     assert result.execution_summary["graph_status"] == "completed"
     assert result.evaluation_result.graph_status == "completed"
-    assert captured["entry_mode"] == "chat_pipeline"
-    assert captured["thread_id"] == ""
-    assert captured["cli_args"]["request"] == "采集 http://localhost:9999/test/"
-    assert captured["cli_args"]["output_dir"] == output_dir.as_posix()
+    assert captured["request"] == "采集 http://localhost:9999/test/"
+    assert captured["cli_overrides"]["output_dir"] == output_dir.as_posix()
+
+
+def test_runner_archives_existing_output_dir_before_real_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.benchmark import runner as runner_module
+    from tests.benchmark.runner import BenchmarkRunner
+
+    temp_dir = _make_temp_dir("runner_archive_output")
+    trash_dir = temp_dir / "trash"
+    scenarios_dir = temp_dir / "scenarios"
+    ground_truth_dir = temp_dir / "ground_truth"
+    output_dir = temp_dir / "output"
+    scenarios_dir.mkdir()
+    ground_truth_dir.mkdir()
+    output_dir.mkdir()
+    _write_scenario_yaml(scenarios_dir / "test_run.yaml", output_dir)
+    _write_jsonl(ground_truth_dir / "test_run.jsonl", [{"name": "A"}])
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+
+    def executor(_request: str, cli_overrides: dict[str, object]) -> dict[str, object]:
+        current_output = Path(str(cli_overrides["output_dir"]))
+        current_output.mkdir(parents=True, exist_ok=True)
+        _write_jsonl(current_output / "merged_results.jsonl", [{"name": "A"}])
+        return {"graph_status": "completed", "total_graph_steps": 1}
+
+    monkeypatch.setattr(runner_module, "_benchmark_trash_dir", lambda: trash_dir)
+    runner = BenchmarkRunner(
+        scenarios_dir=scenarios_dir,
+        ground_truth_dir=ground_truth_dir,
+        base_url="http://localhost:9999",
+        executor=executor,
+        clean_output_dir=True,
+    )
+
+    result = runner.run_scenario("test_run")
+
+    archived_outputs = list((trash_dir / "test_run").iterdir())
+    assert result.actual_file == output_dir / "merged_results.jsonl"
+    assert len(archived_outputs) == 1
+    assert (archived_outputs[0] / "stale.txt").read_text(encoding="utf-8") == "stale"
 
 
 def _write_scenario_yaml(

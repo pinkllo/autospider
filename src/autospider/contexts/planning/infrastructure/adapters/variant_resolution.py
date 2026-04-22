@@ -280,6 +280,17 @@ class PlannerVariantResolver(PlannerVariantNavigationMixin):
                         "[Planner] [%s] 策略3：识别为当前已选分类，直接复用当前页面状态",
                         name,
                     )
+                elif self._should_reuse_default_same_page_variant(
+                    index=idx,
+                    analysis=analysis,
+                    parent_nav_steps=parent_nav_steps,
+                ):
+                    resolved_url = original_url
+                    variant_nav_steps = list(parent_nav_steps or [])
+                    logger.info(
+                        "[Planner] [%s] 策略3：当前选中分类缺失，按首个默认分类复用当前页面状态",
+                        name,
+                    )
 
             if not resolved_url:
                 logger.warning(
@@ -311,3 +322,18 @@ class PlannerVariantResolver(PlannerVariantNavigationMixin):
             )
 
         return variants
+
+    def _should_reuse_default_same_page_variant(
+        self,
+        *,
+        index: int,
+        analysis: dict,
+        parent_nav_steps: list[dict] | None,
+    ) -> bool:
+        if index != 0 or list(parent_nav_steps or []):
+            return False
+        if str(analysis.get("page_type") or "").strip().lower() != "category":
+            return False
+        if not bool(analysis.get("supports_same_page_variant_switch")):
+            return False
+        return not str(analysis.get("current_selected_category") or "").strip()

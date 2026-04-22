@@ -11,6 +11,16 @@ from ._rendering import console
 from ._runtime import cli_runtime
 
 _SERVICE = None
+_EFFICIENCY_KEYS = (
+    "total_graph_steps",
+    "graph_steps_by_node",
+    "llm_calls",
+    "calls_with_token_usage",
+    "token_usage_available",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+)
 
 
 def _benchmark_reports_dir() -> Path:
@@ -84,33 +94,60 @@ def _run_benchmark_and_write_reports(selected_scenarios: list[str]) -> tuple[Pat
 
     paths = _benchmark_paths()
     _benchmark_reports_dir().mkdir(parents=True, exist_ok=True)
+    report_name = _benchmark_service().report_stem()
     server = MockSiteServer(root_dir=paths.mock_site, port=0)
     server.start()
     try:
         runner = _build_benchmark_runner(f"http://127.0.0.1:{server.port}")
-        results = {
-            scenario_id: runner.run_scenario(scenario_id) for scenario_id in selected_scenarios
-        }
+        results: dict[str, Any] = {}
+        json_path = Path()
+        markdown_path = Path()
+        for scenario_id in selected_scenarios:
+            try:
+                results[scenario_id] = runner.run_scenario(scenario_id)
+            except Exception as exc:
+                json_path, markdown_path = _write_benchmark_reports(
+                    results,
+                    report_name=report_name,
+                    progress=_build_progress_payload(
+                        selected_scenarios=selected_scenarios,
+                        completed_scenarios=list(results),
+                        status="failed",
+                        failed_scenario=scenario_id,
+                        failure_message=str(exc),
+                    ),
+                )
+                raise
+            json_path, markdown_path = _write_benchmark_reports(
+                results,
+                report_name=report_name,
+                progress=_build_progress_payload(
+                    selected_scenarios=selected_scenarios,
+                    completed_scenarios=list(results),
+                    status="completed" if len(results) == len(selected_scenarios) else "running",
+                ),
+            )
     finally:
         server.stop()
-    return _write_benchmark_reports(results)
+    return json_path, markdown_path
 
 
-def _write_benchmark_reports(results: dict[str, Any]) -> tuple[Path, Path]:
+def _write_benchmark_reports(
+    results: dict[str, Any],
+    *,
+    report_name: str | None = None,
+    progress: dict[str, Any] | None = None,
+) -> tuple[Path, Path]:
     reporter = _load_benchmark_reporter()
     reports_dir = _benchmark_reports_dir()
-    report_name = _benchmark_service().report_stem()
+    report_name = report_name or _benchmark_service().report_stem()
     json_path = reports_dir / f"{report_name}.json"
     markdown_path = reports_dir / f"{report_name}.md"
     scenario_results = {
         scenario_id: result.evaluation_result for scenario_id, result in results.items()
     }
     efficiency = {
-        scenario_id: {
-            key: value
-            for key, value in result.execution_summary.items()
-            if key == "total_graph_steps"
-        }
+        scenario_id: _build_efficiency_payload(result.execution_summary)
         for scenario_id, result in results.items()
     }
     reporter.generate_json_report(
@@ -118,6 +155,7 @@ def _write_benchmark_reports(results: dict[str, Any]) -> tuple[Path, Path]:
         output_path=json_path,
         git_commit=_benchmark_git_commit(),
         efficiency_data=efficiency,
+        progress_data=progress,
     )
     compare_results = None
     try:
@@ -127,9 +165,41 @@ def _write_benchmark_reports(results: dict[str, Any]) -> tuple[Path, Path]:
     reporter.generate_markdown_report(
         scenario_results,
         output_path=markdown_path,
+        efficiency_data=efficiency,
         compare_results=compare_results,
+        progress_data=progress,
     )
     return json_path, markdown_path
+
+
+def _build_progress_payload(
+    *,
+    selected_scenarios: list[str],
+    completed_scenarios: list[str],
+    status: str,
+    failed_scenario: str = "",
+    failure_message: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": status,
+        "selected_scenarios": list(selected_scenarios),
+        "completed_scenarios": list(completed_scenarios),
+        "completed_count": len(completed_scenarios),
+        "total_count": len(selected_scenarios),
+    }
+    if failed_scenario:
+        payload["failed_scenario"] = failed_scenario
+    if failure_message:
+        payload["failure_message"] = failure_message
+    return payload
+
+
+def _build_efficiency_payload(execution_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: execution_summary[key]
+        for key in _EFFICIENCY_KEYS
+        if key in execution_summary
+    }
 
 
 def benchmark_command(

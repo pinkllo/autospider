@@ -295,3 +295,132 @@ def test_benchmark_command_accepts_multiple_scenarios(
 
     assert captured == ["products", "categories"]
 
+
+def test_run_benchmark_and_write_reports_persists_each_completed_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli = _fresh_import_cli()
+    benchmark_module = inspect.getmodule(cli._run_benchmark_and_write_reports)
+    assert benchmark_module is not None
+
+    calls: list[tuple[list[str], str]] = []
+
+    class _FakeServer:
+        def __init__(self, *args, **kwargs) -> None:
+            self.port = 18080
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeRunner:
+        def run_scenario(self, scenario_id: str):
+            return types.SimpleNamespace(
+                evaluation_result=types.SimpleNamespace(),
+                execution_summary={},
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "_benchmark_paths",
+        lambda: types.SimpleNamespace(mock_site=Path(".")),
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_benchmark_reports_dir",
+        lambda: Path(".tmp") / "benchmark_cli_reports",
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_build_benchmark_runner",
+        lambda _base_url: _FakeRunner(),
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_write_benchmark_reports",
+        lambda results, **kwargs: calls.append(
+            (list(results.keys()), str((kwargs.get("progress") or {}).get("status") or ""))
+        )
+        or (Path("latest.json"), Path("latest.md")),
+    )
+    import tests.benchmark.mock_site.server as mock_server_module
+
+    monkeypatch.setattr(mock_server_module, "MockSiteServer", _FakeServer)
+
+    cli._run_benchmark_and_write_reports(["products", "categories"])
+
+    assert calls == [
+        (["products"], "running"),
+        (["products", "categories"], "completed"),
+    ]
+
+
+def test_run_benchmark_and_write_reports_writes_failure_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli = _fresh_import_cli()
+    benchmark_module = inspect.getmodule(cli._run_benchmark_and_write_reports)
+    assert benchmark_module is not None
+
+    calls: list[tuple[list[str], str, str]] = []
+
+    class _FakeServer:
+        def __init__(self, *args, **kwargs) -> None:
+            self.port = 18080
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeRunner:
+        def run_scenario(self, scenario_id: str):
+            if scenario_id == "products":
+                return types.SimpleNamespace(
+                    evaluation_result=types.SimpleNamespace(),
+                    execution_summary={},
+                )
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "_benchmark_paths",
+        lambda: types.SimpleNamespace(mock_site=Path(".")),
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_benchmark_reports_dir",
+        lambda: Path(".tmp") / "benchmark_cli_reports",
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_build_benchmark_runner",
+        lambda _base_url: _FakeRunner(),
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "_write_benchmark_reports",
+        lambda results, **kwargs: calls.append(
+            (
+                list(results.keys()),
+                str((kwargs.get("progress") or {}).get("status") or ""),
+                str((kwargs.get("progress") or {}).get("failed_scenario") or ""),
+            )
+        )
+        or (Path("latest.json"), Path("latest.md")),
+    )
+    import tests.benchmark.mock_site.server as mock_server_module
+
+    monkeypatch.setattr(mock_server_module, "MockSiteServer", _FakeServer)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        cli._run_benchmark_and_write_reports(["products", "categories"])
+
+    assert calls == [
+        (["products"], "running", ""),
+        (["products"], "failed", "categories"),
+    ]
+

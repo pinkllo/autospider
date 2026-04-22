@@ -111,3 +111,110 @@ def test_append_llm_trace_resolves_relative_paths_from_repo_root(
     finally:
         repo_target.unlink(missing_ok=True)
         cwd_target.unlink(missing_ok=True)
+
+
+def test_append_llm_trace_includes_run_and_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_tmp_dir: Path,
+) -> None:
+    from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
+
+    trace_path = repo_tmp_dir / "llm-trace-context.jsonl"
+    monkeypatch.setenv("LLM_TRACE_ENABLED", "true")
+    monkeypatch.setenv("LLM_TRACE_FILE", str(trace_path))
+    trace_logger = _reload_trace_module()
+
+    set_run_context(run_id="run-123", trace_id="trace-456")
+    try:
+        trace_logger.append_llm_trace(
+            "collector",
+            {"model": "gpt-test", "input": "ping", "output": "pong", "response_summary": "ok"},
+        )
+    finally:
+        clear_run_context()
+
+    record = _read_jsonl(trace_path)[0]
+    assert record["run_id"] == "run-123"
+    assert record["trace_id"] == "trace-456"
+
+
+def test_summarize_llm_payload_includes_token_usage() -> None:
+    from autospider.platform.llm.protocol import summarize_llm_payload
+
+    class _FakePayload:
+        usage_metadata = {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
+        response_metadata = {"token_usage": {"prompt_tokens": 11, "completion_tokens": 7}}
+        content = "ok"
+
+    summary = summarize_llm_payload(_FakePayload())
+
+    assert summary["token_usage"] == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+    }
+
+
+def test_collect_trace_stats_aggregates_token_usage_by_run_id(repo_tmp_dir: Path) -> None:
+    from autospider.platform.llm.trace_stats import collect_trace_stats
+
+    trace_path = repo_tmp_dir / "llm-trace-stats.jsonl"
+    trace_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "run-a",
+                        "trace_id": "run-a",
+                        "response_summary": {
+                            "token_usage": {
+                                "prompt_tokens": 10,
+                                "completion_tokens": 5,
+                                "total_tokens": 15,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "run_id": "run-a",
+                        "trace_id": "run-a",
+                        "response_summary": {
+                            "token_usage": {
+                                "prompt_tokens": 20,
+                                "completion_tokens": 8,
+                                "total_tokens": 28,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "run_id": "run-b",
+                        "trace_id": "run-b",
+                        "response_summary": {
+                            "token_usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 1,
+                                "total_tokens": 2,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stats = collect_trace_stats(run_id="run-a", trace_file=str(trace_path))
+
+    assert stats.llm_calls == 2
+    assert stats.calls_with_token_usage == 2
+    assert stats.prompt_tokens == 30
+    assert stats.completion_tokens == 13
+    assert stats.total_tokens == 43
+    assert stats.token_usage_available is True

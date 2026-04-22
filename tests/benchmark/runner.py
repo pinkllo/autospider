@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
+from shutil import move
 from typing import Any, Callable
+from uuid import uuid4
 
 from .evaluator import EvaluationParams, ScenarioResult, evaluate_scenario
 from .scenarios.schema import ScenarioConfig, list_scenarios, load_scenario
@@ -33,11 +36,13 @@ class BenchmarkRunner:
         ground_truth_dir: Path,
         base_url: str,
         executor: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+        clean_output_dir: bool | None = None,
     ) -> None:
         self._scenarios_dir = scenarios_dir
         self._ground_truth_dir = ground_truth_dir
         self._base_url = base_url
         self._executor = executor or self._invoke_autospider
+        self._clean_output_dir = (executor is None) if clean_output_dir is None else clean_output_dir
 
     def list_scenarios(self) -> list[str]:
         """List available benchmark scenarios."""
@@ -47,6 +52,8 @@ class BenchmarkRunner:
         """Run one scenario via the injected executor and evaluate its output."""
         scenario = load_scenario(scenario_id, self._scenarios_dir)
         resolved_task = scenario.resolve_for_base_url(self._base_url)
+        if self._clean_output_dir:
+            self._prepare_output_dir(scenario.scenario.id, resolved_task.cli_overrides)
         execution_summary = self._executor(resolved_task.request, resolved_task.cli_overrides)
         actual_file = self._find_result_file(resolved_task.cli_overrides)
         ground_truth_file = self._resolve_ground_truth_file(scenario)
@@ -70,16 +77,22 @@ class BenchmarkRunner:
         }
 
     def _invoke_autospider(self, request: str, cli_overrides: dict[str, Any]) -> dict[str, Any]:
-        invoke_graph = _load_cli_invoke_graph()
-        cli_args = {"request": request, **dict(cli_overrides)}
-        result = dict(invoke_graph("chat_pipeline", cli_args, thread_id=""))
+        executor = _load_benchmark_executor()
+        result = dict(executor(request, dict(cli_overrides)))
         return _normalize_execution_summary(result)
 
+    def _prepare_output_dir(self, scenario_id: str, cli_overrides: dict[str, Any]) -> None:
+        output_dir = _resolve_output_dir(cli_overrides)
+        if output_dir is None:
+            return
+        _archive_existing_output(output_dir, scenario_id=scenario_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     def _find_result_file(self, cli_overrides: dict[str, Any]) -> Path:
-        output_dir = cli_overrides.get("output_dir")
-        if not output_dir:
+        output_dir = _resolve_output_dir(cli_overrides)
+        if output_dir is None:
             raise KeyError("Scenario task.cli_overrides.output_dir is required.")
-        result_file = Path(str(output_dir)) / RESULT_FILE_NAME
+        result_file = output_dir / RESULT_FILE_NAME
         if not result_file.exists():
             raise FileNotFoundError(f"Benchmark result file not found: {result_file}")
         return result_file
@@ -102,12 +115,12 @@ def _build_evaluation_params(scenario: ScenarioConfig) -> EvaluationParams:
     )
 
 
-def _load_cli_invoke_graph() -> Callable[[str, dict[str, Any]], dict[str, Any]]:
-    cli_module = import_module("autospider.interface.cli")
-    invoke_graph = getattr(cli_module, "_invoke_graph", None)
-    if not callable(invoke_graph):
-        raise RuntimeError("autospider.interface.cli._invoke_graph is unavailable.")
-    return invoke_graph
+def _load_benchmark_executor() -> Callable[[str, dict[str, Any]], dict[str, Any]]:
+    runtime_module = import_module("autospider.composition.use_cases.benchmark_runtime")
+    executor = getattr(runtime_module, "execute_benchmark_graph", None)
+    if not callable(executor):
+        raise RuntimeError("autospider.composition.use_cases.benchmark_runtime is unavailable.")
+    return executor
 
 
 def _normalize_execution_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -116,3 +129,27 @@ def _normalize_execution_summary(summary: dict[str, Any]) -> dict[str, Any]:
     if "graph_status" not in normalized and status is not None:
         normalized["graph_status"] = status
     return normalized
+
+
+def _resolve_output_dir(cli_overrides: dict[str, Any]) -> Path | None:
+    output_dir = str(cli_overrides.get("output_dir") or "").strip()
+    if not output_dir:
+        return None
+    return Path(output_dir)
+
+
+def _archive_existing_output(output_dir: Path, *, scenario_id: str) -> None:
+    if not output_dir.exists():
+        return
+    archive_target = _benchmark_trash_dir() / scenario_id / _archive_name(output_dir.name)
+    archive_target.parent.mkdir(parents=True, exist_ok=True)
+    move(str(output_dir), str(archive_target))
+
+
+def _benchmark_trash_dir() -> Path:
+    return Path(".task_trash") / "benchmark"
+
+
+def _archive_name(output_name: str) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{timestamp}-{uuid4().hex[:8]}-{output_name}"

@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .contracts import validate_protocol_message_payload
+from .token_usage import extract_token_usage
 from autospider.platform.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -112,6 +113,10 @@ def _infer_action_from_args(args: dict[str, Any]) -> str:
         return "scroll"
     if args.get("url"):
         return "navigate"
+    if args.get("purpose") and any(
+        args.get(key) is not None for key in ("items", "input", "button", "found")
+    ):
+        return "select"
     if args.get("target_text"):
         return "click"
     return ""
@@ -424,10 +429,14 @@ def _summarize_response_shape(value: Any, *, depth: int = 0, max_depth: int = 5)
 
 def summarize_llm_payload(payload: Any) -> dict[str, Any]:
     """返回响应对象结构摘要，供 trace 调试使用。"""
-    return {
+    summary = {
         "payload_type": type(payload).__name__ if payload is not None else "NoneType",
         "shape": _summarize_response_shape(payload),
     }
+    token_usage = extract_token_usage(payload)
+    if token_usage is not None:
+        summary["token_usage"] = token_usage
+    return summary
 
 
 def extract_response_text_from_llm_payload(payload: Any) -> str:

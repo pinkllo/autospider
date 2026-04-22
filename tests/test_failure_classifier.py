@@ -92,6 +92,10 @@ def test_parse_protocol_message_diagnostics_returns_validation_errors() -> None:
         ({"args": {"url": "https://example.com"}}, "navigate"),
         ({"args": {"target_text": "详情"}}, "click"),
         ({"args": {"text": "hello", "target_text": "搜索框"}}, "type"),
+        (
+            {"args": {"purpose": "pagination_next", "found": False, "items": []}},
+            "select",
+        ),
     ],
 )
 def test_parse_protocol_message_normalizes_action_aliases_and_inference(

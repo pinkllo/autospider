@@ -10,6 +10,7 @@ from typing import Any
 
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
+from autospider.platform.shared_kernel.trace import get_run_id, get_trace_id
 from autospider.platform.shared_kernel.utils.paths import resolve_repo_path
 
 logger = get_logger(__name__)
@@ -49,6 +50,8 @@ def _build_trace_record(component: str, payload: dict[str, Any], max_chars: int)
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "component": component,
+        "run_id": get_run_id(),
+        "trace_id": get_trace_id(),
         "model": sanitized.pop("model", None),
         "input": input_payload,
         "output": output_payload,

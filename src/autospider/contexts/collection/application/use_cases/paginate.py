@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_CONTINUATION_PURPOSES = frozenset(
+    {"pagination_next", "next_page", "pagination_continue", "load_more"}
+)
+
 
 def _pagination_rule_selectors() -> list[str]:
     """规则兜底只保留语义较强的分页选择器，避免误点泛化按钮。"""
@@ -58,7 +62,30 @@ def _pagination_rule_selectors() -> list[str]:
         '[class*="pagination"] a[title*="next" i]',
         '[class*="pagination"] a:has-text("下一页")',
         '[class*="pagination"] button:has-text("下一页")',
+        'button:has-text("加载更多")',
+        'a:has-text("加载更多")',
+        'button:has-text("查看更多")',
+        'a:has-text("查看更多")',
+        'button:has-text("更多结果")',
+        'a:has-text("更多结果")',
+        'button:has-text("Load More")',
+        'a:has-text("Load More")',
+        'button:has-text("load more")',
+        'a:has-text("load more")',
+        'button:has-text("Show More")',
+        'a:has-text("Show More")',
+        '.load-more-btn:not([disabled])',
+        'button[class*="load-more"]:not([disabled])',
+        'button[class*="load_more"]:not([disabled])',
+        'a[class*="load-more"]',
+        'a[class*="load_more"]',
+        'button[aria-label*="load more" i]:not([disabled])',
+        'button[title*="load more" i]:not([disabled])',
     ]
+
+
+def _is_continuation_purpose(purpose: str) -> bool:
+    return str(purpose or "").strip().lower() in _CONTINUATION_PURPOSES
 
 
 class PaginationHandler:
@@ -387,7 +414,7 @@ class PaginationHandler:
             if (
                 data
                 and data.get("action") == "select"
-                and purpose in {"pagination_next", "next_page"}
+                and _is_continuation_purpose(purpose)
                 and found
                 and (mark_id_raw is not None or target_text)
             ):
@@ -572,7 +599,7 @@ class PaginationHandler:
             if (
                 data
                 and data.get("action") == "select"
-                and purpose in {"pagination_next", "next_page"}
+                and _is_continuation_purpose(purpose)
                 and found
                 and (mark_id_raw is not None or target_text)
             ):

@@ -76,43 +76,44 @@ ask_llm_decision_user_message: |
 # 分页按钮识别
 pagination_llm_system_prompt: |
   # 身份
-  你是分页控件识别专家，负责在页面中找到"下一页"按钮。
+  你是分页/继续加载控件识别专家，负责在页面中找到可以继续暴露更多列表项的控件。
 
   # 执行步骤
 
   ## 步骤 1：分析页面构成
-  观察截图底部区域，识别分页相关元素：
+  观察截图底部区域，识别继续翻页或继续加载相关元素：
   - 页码数字列表
   - 箭头符号（> › »）
   - 文本按钮（下一页、Next）
+  - 文本按钮（Load More、加载更多、查看更多）
   - 禁用状态的灰显按钮
 
   ## 步骤 2：分析页面与任务的关系
-  - 是否存在可点击的"下一页"按钮？
+  - 是否存在可点击的"下一页"或"继续加载更多"控件？
   - 按钮是否处于禁用状态？
-  - 多个候选时，优先选择：文本为"下一页"或"Next" > 箭头符号 > 分页区域最右侧
+  - 多个候选时，优先选择：文本为"下一页"/"Next"/"Load More"/"加载更多" > 箭头符号 > 分页区域最右侧
 
   ## 步骤 3：决策
   找到 → 返回按钮信息；未找到或无法确认 → found=false
 
   # 输出格式
-  - 找到：{"purpose": "pagination_next", "found": true, "items": [{"text": "下一页/Next/>", "mark_id": int(可选)}]}
-  - 未找到：{"purpose": "pagination_next", "found": false, "items": []}
+  - 找到：{"action": "select", "args": {"purpose": "pagination_next", "found": true, "items": [{"text": "下一页/Next/Load More/>", "mark_id": int(可选)}]}}
+  - 未找到：{"action": "select", "args": {"purpose": "pagination_next", "found": false, "items": []}}
 
   # 禁止项
-  - 禁止将"当前页码""最后一页""跳转""更多""加载更多"误判为"下一页"
+  - 禁止将"当前页码""最后一页""跳转""更多菜单""查看更多详情""下载按钮"误判为继续加载控件
   - 禁止在无法确认时猜测
   - skills 仅作先验线索，以当前截图为准
 
 pagination_llm_user_message: |
-  请仔细观察截图，找到"下一页"分页按钮，并返回其文本（text）。
+  请仔细观察截图，找到可以继续暴露更多列表项的控件，并返回其文本（text）。
 
   ## 已选中的站点 skills
   {{selected_skills_context}}
 
   注意：
-  - 关注页面底部的分页区域
-  - 寻找"下一页"、"Next"、">" 等文本或符号
+  - 关注页面底部或列表尾部区域
+  - 寻找"下一页"、"Next"、">"、"Load More"、"加载更多"、"查看更多"等文本或符号
   - 确保按钮不是禁用状态（未灰显）
   - 如能确认元素编号可额外返回 mark_id；无法确认时可省略 mark_id
 

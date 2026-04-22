@@ -167,6 +167,13 @@ class TaskPlanner(
             self._subtask_builder = builder
         return builder
 
+    def _get_sibling_category_registry(self) -> dict[str, set[str]]:
+        registry = getattr(self, "_sibling_category_registry", None)
+        if registry is None:
+            registry = {}
+            self._sibling_category_registry = registry
+        return registry
+
     def _get_variant_resolver(self) -> PlannerVariantResolver:
         resolver = getattr(self, "_variant_resolver", None)
         if resolver is None:

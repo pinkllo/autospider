@@ -23,6 +23,7 @@ def test_benchmark_scenario_entrypoint(
     benchmark_runner: object,
 ) -> None:
     """Each benchmark scenario has a single parameterized pytest entrypoint."""
+    from autospider.composition.use_cases.benchmark_runtime import BenchmarkRuntimeUnavailable
     from tests.benchmark.runner import ScenarioRunResult
     from tests.benchmark.scenarios.schema import load_scenario
 
@@ -36,6 +37,8 @@ def test_benchmark_scenario_entrypoint(
     try:
         result = runner.run_scenario(scenario_id)
     except ImportError as exc:
+        pytest.skip(f"benchmark runtime unavailable: {exc}")
+    except BenchmarkRuntimeUnavailable as exc:
         pytest.skip(f"benchmark runtime unavailable: {exc}")
 
     assert isinstance(result, ScenarioRunResult)

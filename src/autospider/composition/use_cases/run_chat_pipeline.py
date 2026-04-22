@@ -18,13 +18,16 @@ class RunChatPipeline:
         *,
         cli_args: dict[str, Any],
         thread_id: str = "",
+        request_id: str = "",
     ) -> GraphResult:
         graph_input = GraphInput(
             entry_mode="chat_pipeline",
             cli_args=dict(cli_args),
+            request_id=request_id,
             thread_id=thread_id or GraphInput.model_fields["thread_id"].default_factory(),
         )
         return await self._runner_factory().invoke(graph_input)
+
 
 
 def _build_graph_runner() -> GraphRunnerProtocol:

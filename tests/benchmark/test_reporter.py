@@ -32,6 +32,29 @@ def test_generate_json_report_preserves_missing_sections() -> None:
     assert "stability" not in report["scenarios"]["products"]
 
 
+def test_generate_json_report_includes_progress_when_provided() -> None:
+    from tests.benchmark.reporter import generate_json_report
+
+    output_path = _make_temp_dir("report_json_progress") / "report.json"
+    generate_json_report(
+        {"products": _scenario_result(passed=True)},
+        output_path=output_path,
+        git_commit="abc1234",
+        progress_data={
+            "status": "running",
+            "completed_count": 1,
+            "total_count": 3,
+            "completed_scenarios": ["products"],
+            "selected_scenarios": ["products", "categories", "nested"],
+        },
+    )
+
+    report = json.loads(output_path.read_text("utf-8"))
+
+    assert report["progress"]["status"] == "running"
+    assert report["progress"]["completed_count"] == 1
+
+
 def test_generate_markdown_report() -> None:
     """Markdown output includes scenario details and compare content."""
     from tests.benchmark.reporter import generate_markdown_report
@@ -40,6 +63,17 @@ def test_generate_markdown_report() -> None:
     generate_markdown_report(
         {"products": _scenario_result(passed=False)},
         output_path=output_path,
+        efficiency_data={
+            "products": {
+                "total_graph_steps": 23,
+                "graph_steps_by_node": {"route_entry": 1, "aggregate_node": 1},
+                "llm_calls": 4,
+                "token_usage_available": True,
+                "prompt_tokens": 120,
+                "completion_tokens": 80,
+                "total_tokens": 200,
+            }
+        },
         compare_results={
             "products": {
                 "status": {"before": "fail", "after": "pass"},
@@ -54,7 +88,32 @@ def test_generate_markdown_report() -> None:
     assert "record_f1" in content
     assert "graph_status" in content
     assert "failure_reasons" in content
+    assert "total_graph_steps" in content
+    assert "total_tokens" in content
     assert "Compare" in content
+
+
+def test_generate_markdown_report_includes_progress_section() -> None:
+    from tests.benchmark.reporter import generate_markdown_report
+
+    output_path = _make_temp_dir("report_markdown_progress") / "report.md"
+    generate_markdown_report(
+        {"products": _scenario_result(passed=True)},
+        output_path=output_path,
+        progress_data={
+            "status": "failed",
+            "completed_count": 1,
+            "total_count": 4,
+            "failed_scenario": "variants",
+            "failure_message": "rate limit",
+        },
+    )
+
+    content = output_path.read_text("utf-8")
+
+    assert "run_status: failed" in content
+    assert "completed: 1/4" in content
+    assert "failed_scenario: variants" in content
 
 
 def test_compare_reports() -> None:

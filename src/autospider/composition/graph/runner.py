@@ -13,6 +13,7 @@ from autospider.platform.shared_kernel.trace import clear_run_context, set_run_c
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
 from .state_access import result_state, select_artifacts, select_error, select_summary
+from .stream_stats import GraphStreamStats, collect_stream_execution
 from .workflow_access import coerce_workflow_state
 from .types import GraphError, GraphInput, GraphResult
 
@@ -124,6 +125,7 @@ class GraphRunner:
         thread_id: str,
         expected_entry_mode: str | None = None,
         snapshot: Any | None = None,
+        stream_stats: GraphStreamStats | None = None,
     ) -> GraphResult:
         snapshot_values = dict(getattr(snapshot, "values", {}) or {})
         snapshot_config = dict(getattr(snapshot, "config", {}) or {})
@@ -154,6 +156,8 @@ class GraphRunner:
 
         selected_result_state = result_state(final_state) or result_state(snapshot_values)
         summary = select_summary(final_state, snapshot_values=snapshot_values)
+        if stream_stats is not None:
+            summary.update(stream_stats.to_payload())
         if thread_id:
             summary.setdefault("thread_id", thread_id)
 
@@ -199,14 +203,17 @@ class GraphRunner:
         try:
             cached_graph = await self._get_compiled_graph()
             if cached_graph is not None:
-                final_state = await cached_graph.ainvoke(
+                invoke_config = self._invoke_config(thread_id)
+                final_state, stream_stats = await collect_stream_execution(
+                    cached_graph,
                     graph_input,
-                    config=self._invoke_config(thread_id),
+                    config=invoke_config,
                 )
                 return self._build_result(
                     final_state=dict(final_state or {}),
                     thread_id=thread_id,
                     expected_entry_mode=expected_entry_mode,
+                    stream_stats=stream_stats,
                 )
 
             async with graph_checkpointer_session() as checkpointer:
@@ -214,13 +221,18 @@ class GraphRunner:
                     raise RuntimeError("Graph checkpointer 未启用")
                 graph = build_main_graph(checkpointer=checkpointer)
                 invoke_config = self._invoke_config(thread_id)
-                final_state = await graph.ainvoke(graph_input, config=invoke_config)
+                final_state, stream_stats = await collect_stream_execution(
+                    graph,
+                    graph_input,
+                    config=invoke_config,
+                )
                 snapshot = await graph.aget_state(invoke_config)
                 return self._build_result(
                     final_state=dict(final_state or {}),
                     thread_id=thread_id,
                     expected_entry_mode=expected_entry_mode,
                     snapshot=snapshot,
+                    stream_stats=stream_stats,
                 )
         finally:
             clear_run_context()
@@ -314,12 +326,17 @@ class GraphRunner:
             )
             set_run_context(run_id=thread_id, trace_id=resolved_trace_id)
             try:
-                final_state = await graph.ainvoke(graph_input, config=invoke_config)
+                final_state, stream_stats = await collect_stream_execution(
+                    graph,
+                    graph_input,
+                    config=invoke_config,
+                )
                 resumed_snapshot = await graph.aget_state(invoke_config)
                 return self._build_result(
                     final_state=dict(final_state or {}),
                     thread_id=thread_id,
                     snapshot=resumed_snapshot,
+                    stream_stats=stream_stats,
                 )
             finally:
                 clear_run_context()
