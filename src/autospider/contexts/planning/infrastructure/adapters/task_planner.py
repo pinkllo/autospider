@@ -30,10 +30,8 @@ from autospider.contexts.planning.application.use_cases.analyze_plan_result impo
     PlannerAnalysisPostProcessor,
 )
 from autospider.contexts.planning.domain.page_state import PlannerPageState
-from autospider.contexts.planning.domain.services import (
-    PlannerCategorySemanticsMixin,
-    PlannerSubtaskBuilderMixin,
-)
+from autospider.contexts.planning.domain.services import PlannerCategorySemanticsMixin
+from autospider.contexts.planning.domain.subtask_builder import PlannerSubtaskBuilder
 from autospider.contexts.planning.infrastructure.repositories.artifact_store import (
     ArtifactPlanRepository,
 )
@@ -64,7 +62,6 @@ def _build_planner_navigation_replayer(
 class TaskPlanner(
     PlannerPageRuntimeMixin,
     PlannerCategorySemanticsMixin,
-    PlannerSubtaskBuilderMixin,
     PlannerVariantResolverMixin,
 ):
     """任务规划器：负责将用户的采集请求转化为具体的执行计划。
@@ -126,6 +123,7 @@ class TaskPlanner(
         self._analysis_post_processor = PlannerAnalysisPostProcessor(self)
         self._site_analyzer = PlannerSiteAnalyzer(self)
         self._entry_planner = PlannerEntryPlanner(self)
+        self._subtask_builder = PlannerSubtaskBuilder(self)
         self.planner_status = "success"
         self.terminal_reason = ""
 
@@ -157,6 +155,13 @@ class TaskPlanner(
             processor = PlannerAnalysisPostProcessor(self)
             self._analysis_post_processor = processor
         return processor
+
+    def _get_subtask_builder(self) -> PlannerSubtaskBuilder:
+        builder = getattr(self, "_subtask_builder", None)
+        if builder is None:
+            builder = PlannerSubtaskBuilder(self)
+            self._subtask_builder = builder
+        return builder
 
     def _append_observation_note(self, result: dict, note: str) -> dict:
         return self._get_site_analyzer()._append_observation_note(result, note)
@@ -199,6 +204,57 @@ class TaskPlanner(
         return self._get_analysis_post_processor()._looks_like_current_category(
             name,
             analysis,
+        )
+
+    def _resolve_plan_node_type_for_state(
+        self,
+        page_type: str,
+        nav_steps: list[dict] | None,
+    ):
+        return self._get_subtask_builder()._resolve_plan_node_type_for_state(
+            page_type,
+            nav_steps,
+        )
+
+    def _build_variant_label(self, context: dict[str, str] | None) -> str | None:
+        return self._get_subtask_builder()._build_variant_label(context)
+
+    def _build_subtasks_from_variants(
+        self,
+        variants: list,
+        *,
+        analysis: dict,
+        depth: int,
+        mode,
+        parent_id: str | None = None,
+        parent_execution_brief=None,
+    ) -> list:
+        return self._get_subtask_builder()._build_subtasks_from_variants(
+            variants,
+            analysis=analysis,
+            depth=depth,
+            mode=mode,
+            parent_id=parent_id,
+            parent_execution_brief=parent_execution_brief,
+        )
+
+    def _build_expand_task_description(self, context: dict[str, str] | None) -> str:
+        return self._get_subtask_builder()._build_expand_task_description(context)
+
+    def _build_collect_task_description(self, context: dict[str, str] | None) -> str:
+        return self._get_subtask_builder()._build_collect_task_description(context)
+
+    def _build_collect_execution_brief(
+        self,
+        context: dict[str, str] | None,
+        *,
+        task_description: str,
+        parent_execution_brief=None,
+    ):
+        return self._get_subtask_builder()._build_collect_execution_brief(
+            context,
+            task_description=task_description,
+            parent_execution_brief=parent_execution_brief,
         )
 
     def render_plan_knowledge(self, plan) -> str:
