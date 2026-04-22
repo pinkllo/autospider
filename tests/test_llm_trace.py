@@ -4,7 +4,6 @@ import importlib
 import json
 import shutil
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -34,7 +33,10 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
 
 @pytest.fixture()
 def repo_tmp_dir() -> Path:
-    path = Path(tempfile.mkdtemp(prefix="trace-tests-"))
+    base_dir = REPO_ROOT / "artifacts" / "test_tmp"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    path = base_dir / f"trace-tests-{uuid4().hex[:8]}"
+    path.mkdir(parents=True, exist_ok=True)
     try:
         yield path
     finally:
