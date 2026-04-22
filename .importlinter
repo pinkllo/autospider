@@ -19,9 +19,6 @@ ignore_imports =
     autospider.contexts.collection.application.use_cases.navigate -> autospider.composition.graph.recovery
     autospider.contexts.collection.application.use_cases.run_subtask -> autospider.composition.pipeline.worker
     autospider.contexts.planning.application.handlers -> autospider.composition.pipeline.types
-    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.graph.controls
-    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.graph.world_model
-    autospider.contexts.planning.application.use_cases.control_payloads -> autospider.composition.pipeline.runtime_controls
 
 # ==================== 契约 2：Domain 层纯净 ====================
 [importlinter:contract:domain-pure-planning]

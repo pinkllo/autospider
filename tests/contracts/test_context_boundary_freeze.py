@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import configparser
 import json
 from pathlib import Path
 
@@ -8,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 CONTEXTS_ROOT = SRC_ROOT / "autospider" / "contexts"
 BOUNDARY_MAP_PATH = REPO_ROOT / "refactor" / "_generated" / "context-boundaries-phase1.json"
+IMPORT_LINTER_PATH = REPO_ROOT / ".importlinter"
 
 
 def _load_boundary_map() -> dict[str, object]:
@@ -115,6 +117,24 @@ def _wrapper_target(source_module: str, tree: ast.Module) -> str:
     return ""
 
 
+def _load_importlinter_composition_ignores() -> list[dict[str, str]]:
+    parser = configparser.ConfigParser()
+    parser.read(IMPORT_LINTER_PATH, encoding="utf-8")
+    raw_value = parser["importlinter:contract:layers"]["ignore_imports"]
+    edges: list[dict[str, str]] = []
+    for raw_line in raw_value.splitlines():
+        line = raw_line.strip()
+        if not line or "->" not in line:
+            continue
+        source, target = (part.strip() for part in line.split("->", maxsplit=1))
+        if not source.startswith("autospider.contexts."):
+            continue
+        if not target.startswith("autospider.composition."):
+            continue
+        edges.append({"source": source, "target": target})
+    return sorted(edges, key=lambda item: (item["source"], item["target"]))
+
+
 def test_context_public_exports_match_boundary_map() -> None:
     boundary_map = _load_boundary_map()
     expected = boundary_map["public_exports"]
@@ -130,3 +150,8 @@ def test_context_boundary_inventory_matches_boundary_map() -> None:
     assert edges["facade_imports"] == boundary_map["facade_imports"]
     assert edges["temporary_internal_imports"] == boundary_map["temporary_internal_imports"]
     assert edges["composition_backedges"] == boundary_map["composition_backedges"]
+
+
+def test_importlinter_ignores_match_composition_backedges() -> None:
+    boundary_map = _load_boundary_map()
+    assert _load_importlinter_composition_ignores() == boundary_map["composition_backedges"]
