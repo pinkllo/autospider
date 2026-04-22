@@ -73,10 +73,7 @@ def build_collection_explore_dependencies(
     from autospider.contexts.collection.infrastructure.repositories.config_repository import (
         ConfigPersistence,
     )
-    from autospider.contexts.experience.application.use_cases.skill_runtime import SkillRuntime
-    from autospider.contexts.experience.infrastructure.repositories.skill_repository import (
-        SkillRepository,
-    )
+    from autospider.contexts.experience import SkillRepository, SkillRuntime
 
     resolved_skill_runtime = skill_runtime or SkillRuntime(SkillRepository())
     config_persistence = ConfigPersistence(output_dir)

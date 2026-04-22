@@ -122,11 +122,11 @@ def test_build_collection_explore_dependencies_shares_config_persistence(
         _FakeConfigPersistence,
     )
     monkeypatch.setattr(
-        "autospider.contexts.experience.application.use_cases.skill_runtime.SkillRuntime",
+        "autospider.contexts.experience.SkillRuntime",
         _FakeSkillRuntime,
     )
     monkeypatch.setattr(
-        "autospider.contexts.experience.infrastructure.repositories.skill_repository.SkillRepository",
+        "autospider.contexts.experience.SkillRepository",
         _FakeSkillRepository,
     )
 

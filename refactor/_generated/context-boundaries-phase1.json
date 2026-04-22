@@ -105,6 +105,10 @@
   "compatibility_wrappers": [],
   "facade_imports": [
     {
+      "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
+      "target": "autospider.contexts.experience"
+    },
+    {
       "source": "autospider.contexts.collection.application.use_cases.extract_fields_batch",
       "target": "autospider.contexts.experience"
     },
@@ -137,16 +141,7 @@
       "target": "autospider.contexts.experience"
     }
   ],
-  "temporary_internal_imports": [
-    {
-      "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
-      "target": "autospider.contexts.experience.application.use_cases.skill_runtime"
-    },
-    {
-      "source": "autospider.contexts.collection.application.use_cases.explore_dependencies",
-      "target": "autospider.contexts.experience.infrastructure.repositories.skill_repository"
-    }
-  ],
+  "temporary_internal_imports": [],
   "composition_backedges": [
     {
       "source": "autospider.contexts.collection.application.use_cases.finalize_run",
