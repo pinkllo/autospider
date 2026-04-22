@@ -10,7 +10,7 @@ from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection import NavigationHandler
 from autospider.contexts.planning.domain import PlannerIntent, TaskPlan
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
-    PlannerAnalysisSupportMixin,
+    PlannerSiteAnalyzer,
     ResolvedPlannerVariant,
     RuntimeSubtaskPlanResult,
 )
@@ -63,7 +63,6 @@ def _build_planner_navigation_replayer(
 
 class TaskPlanner(
     PlannerPageRuntimeMixin,
-    PlannerAnalysisSupportMixin,
     PlannerCategorySemanticsMixin,
     PlannerAnalysisPostProcessMixin,
     PlannerSubtaskBuilderMixin,
@@ -125,6 +124,7 @@ class TaskPlanner(
                 output_dir=output_dir,
             )
         )
+        self._site_analyzer = PlannerSiteAnalyzer(self)
         self._entry_planner = PlannerEntryPlanner(self)
         self.planner_status = "success"
         self.terminal_reason = ""
@@ -143,6 +143,37 @@ class TaskPlanner(
 
     async def plan(self) -> TaskPlan:
         return await self._entry_planner.plan()
+
+    def _get_site_analyzer(self) -> PlannerSiteAnalyzer:
+        analyzer = getattr(self, "_site_analyzer", None)
+        if analyzer is None:
+            analyzer = PlannerSiteAnalyzer(self)
+            self._site_analyzer = analyzer
+        return analyzer
+
+    def _append_observation_note(self, result: dict, note: str) -> dict:
+        return self._get_site_analyzer()._append_observation_note(result, note)
+
+    def _get_grouping_semantics(self) -> dict[str, Any]:
+        return self._get_site_analyzer()._get_grouping_semantics()
+
+    def _format_prior_failures(self, *, limit: int = 5) -> str:
+        return self._get_site_analyzer()._format_prior_failures(limit=limit)
+
+    async def _analyze_site_structure(
+        self,
+        screenshot_base64: str,
+        snapshot: object,
+        *,
+        node_context: dict[str, str] | None = None,
+        nav_steps: list[dict] | None = None,
+    ) -> dict | None:
+        return await self._get_site_analyzer()._analyze_site_structure(
+            screenshot_base64,
+            snapshot,
+            node_context=node_context,
+            nav_steps=nav_steps,
+        )
 
     def render_plan_knowledge(self, plan) -> str:
         return self._plan_records.render_plan_knowledge(plan)

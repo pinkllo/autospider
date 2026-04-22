@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -18,6 +18,11 @@ from autospider.platform.llm.protocol import (
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.contexts.planning.domain import ExecutionBrief, SubTask
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+
+    from autospider.contexts.planning.domain import PlannerIntent
 
 logger = get_logger(__name__)
 PROMPT_TEMPLATE_PATH = get_prompt_path("planner.yaml")
@@ -43,14 +48,42 @@ class RuntimeSubtaskPlanResult:
     collect_execution_brief: ExecutionBrief = field(default_factory=ExecutionBrief)
 
 
-class PlannerAnalysisSupportMixin:
+class PlannerAnalysisRuntime(Protocol):
+    page: "Page"
+    llm: Any
+    site_url: str
+    user_request: str
+    planner_intent: "PlannerIntent"
+    selected_skills_context: str
+    selected_skills: list[dict]
+    prior_failures: list[dict[str, Any]]
+
+    def _format_context_path(self, context: dict[str, str] | None) -> str: ...
+
+    def _format_recent_actions(self, nav_steps: list[dict] | None) -> str: ...
+
+    def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str: ...
+
+    def _post_process_analysis(
+        self,
+        result: dict,
+        snapshot: object,
+        *,
+        node_context: dict[str, str] | None = None,
+    ) -> dict: ...
+
+
+class PlannerSiteAnalyzer:
+    def __init__(self, planner: PlannerAnalysisRuntime) -> None:
+        self._planner = planner
+
     def _append_observation_note(self, result: dict, note: str) -> dict:
         observations = str(result.get("observations") or "").strip()
         result["observations"] = f"{observations}\n{note}".strip() if observations else note
         return result
 
     def _get_grouping_semantics(self) -> dict[str, Any]:
-        return self.planner_intent.model_dump(mode="python")
+        return self._planner.planner_intent.model_dump(mode="python")
 
     def _format_grouping_semantics(self) -> str:
         grouping = self._get_grouping_semantics()
@@ -66,10 +99,14 @@ class PlannerAnalysisSupportMixin:
         )
 
     def _format_prior_failures(self, *, limit: int = 5) -> str:
-        if not self.prior_failures:
+        if not self._planner.prior_failures:
             return "（无）"
-        total = len(self.prior_failures)
-        recent = self.prior_failures[-limit:] if total > limit else list(self.prior_failures)
+        total = len(self._planner.prior_failures)
+        recent = (
+            self._planner.prior_failures[-limit:]
+            if total > limit
+            else list(self._planner.prior_failures)
+        )
         lines = [self._format_failure_line(record) for record in recent]
         if total > limit:
             lines.append(f"- ...（共 {total} 条失败证据，仅展示最近 {limit} 条）")
@@ -116,7 +153,7 @@ class PlannerAnalysisSupportMixin:
 
     async def _fetch_accessibility_text(self) -> str:
         try:
-            return await get_accessibility_text(self.page)
+            return await get_accessibility_text(self._planner.page)
         except Exception:
             logger.debug("[Planner] 获取 accessibility text 失败，跳过")
             return ""
@@ -133,14 +170,14 @@ class PlannerAnalysisSupportMixin:
             PROMPT_TEMPLATE_PATH,
             section="analyze_site_user_message",
             variables={
-                "user_request": self.user_request,
-                "current_url": self.page.url,
-                "current_category_path": self._format_context_path(node_context),
-                "recent_actions": self._format_recent_actions(nav_steps),
-                "candidate_elements": self._build_planner_candidates(snapshot),
+                "user_request": self._planner.user_request,
+                "current_url": self._planner.page.url,
+                "current_category_path": self._planner._format_context_path(node_context),
+                "recent_actions": self._planner._format_recent_actions(nav_steps),
+                "candidate_elements": self._planner._build_planner_candidates(snapshot),
                 "grouping_semantics": self._format_grouping_semantics(),
                 "page_accessibility_text": accessibility_text or "无",
-                "selected_skills_context": self.selected_skills_context
+                "selected_skills_context": self._planner.selected_skills_context
                 or "当前未选择任何站点 skills。",
                 "prior_failure_evidence": self._format_prior_failures(),
             },
@@ -184,7 +221,7 @@ class PlannerAnalysisSupportMixin:
         )
         try:
             logger.info("[Planner] 调用 LLM 进行多模态视觉分析...")
-            response = await ainvoke_with_stream(self.llm, messages)
+            response = await ainvoke_with_stream(self._planner.llm, messages)
             response_text = extract_response_text_from_llm_payload(response)
             response_summary = summarize_llm_payload(response)
             result = parse_json_dict_from_llm(response_text)
@@ -216,14 +253,14 @@ class PlannerAnalysisSupportMixin:
         return {
             "system_prompt": system_prompt,
             "user_message": user_message,
-            "current_url": self.page.url,
-            "site_url": self.site_url,
-            "user_request": self.user_request,
+            "current_url": self._planner.page.url,
+            "site_url": self._planner.site_url,
+            "user_request": self._planner.user_request,
             "node_context": dict(node_context or {}),
             "nav_steps": list(nav_steps or []),
             "candidate_count": len(getattr(snapshot, "marks", []) or []),
             "grouping_semantics": self._get_grouping_semantics(),
-            "selected_skills": list(self.selected_skills or []),
+            "selected_skills": list(self._planner.selected_skills or []),
         }
 
     def _append_analysis_trace(
@@ -246,8 +283,8 @@ class PlannerAnalysisSupportMixin:
 
     def _resolve_planner_model_name(self) -> str | None:
         return (
-            getattr(self.llm, "model_name", None)
-            or getattr(self.llm, "model", None)
+            getattr(self._planner.llm, "model_name", None)
+            or getattr(self._planner.llm, "model", None)
             or config.llm.planner_model
             or config.llm.model
         )
@@ -260,7 +297,11 @@ class PlannerAnalysisSupportMixin:
         node_context: dict[str, str] | None,
     ) -> dict | None:
         if result:
-            resolved = self._post_process_analysis(result, snapshot, node_context=node_context)
+            resolved = self._planner._post_process_analysis(
+                result,
+                snapshot,
+                node_context=node_context,
+            )
             subtask_count = len(resolved.get("subtasks", []))
             logger.info("[Planner] LLM 识别到 %d 个候选分类", subtask_count)
             return resolved
