@@ -45,22 +45,22 @@ class CliRuntime:
         return GraphInput, GraphRunner
 
     def build_field_definition(self, payload: dict[str, Any]):
-        from autospider.contexts.collection.domain.fields import build_field_definitions
+        from autospider.composition.pipeline.helpers import build_field_definitions
 
         return build_field_definitions([payload])[0]
 
     def build_field_definitions(self, payloads: list[dict[str, Any]]):
-        from autospider.contexts.collection.domain.fields import build_field_definitions
+        from autospider.composition.pipeline.helpers import build_field_definitions
 
         return build_field_definitions(item for item in payloads if isinstance(item, dict))
 
     def create_field_definition(self, **payload: Any):
-        from autospider.contexts.collection.domain.fields import FieldDefinition
+        from autospider.composition.pipeline.helpers import create_field_definition
 
-        return FieldDefinition(**payload)
+        return create_field_definition(**payload)
 
     def serialize_field_definitions_payload(self, fields: list[Any]) -> list[dict[str, Any]]:
-        from autospider.contexts.collection.domain.fields import serialize_field_definitions
+        from autospider.composition.pipeline.helpers import serialize_field_definitions
 
         return serialize_field_definitions(fields)
 

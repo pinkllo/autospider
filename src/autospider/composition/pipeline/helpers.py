@@ -8,21 +8,27 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from autospider.platform.config.runtime import config, normalize_pipeline_mode
-from autospider.platform.shared_kernel.grouping_semantics import (
-    build_normalized_strategy_payload,
-    has_semantic_signature_inputs,
-    normalize_field_names,
+from autospider.contexts.collection.domain.fields import (
+    FieldDefinition,
+)
+from autospider.contexts.collection.domain.fields import (
+    build_field_definitions as build_domain_field_definitions,
+)
+from autospider.contexts.collection.domain.fields import (
+    serialize_field_definitions as serialize_domain_field_definitions,
 )
 from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
     coerce_collection_config,
 )
+from autospider.platform.config.runtime import config, normalize_pipeline_mode
 from autospider.platform.persistence.files.idempotent_io import write_json_idempotent
-from autospider.contexts.collection.domain.fields import (
-    FieldDefinition,
-    build_field_definitions as build_domain_field_definitions,
+from autospider.platform.shared_kernel.grouping_semantics import (
+    build_normalized_strategy_payload,
+    has_semantic_signature_inputs,
+    normalize_field_names,
 )
+
 from .runtime_controls import resolve_concurrency_settings
 from .types import ExecutionContext, ExecutionRequest, InfraConfig, PipelineMode, TaskIdentity
 
@@ -33,6 +39,14 @@ def _resolve_pipeline_mode(raw_mode: object) -> PipelineMode:
 
 def build_field_definitions(raw_fields: list[Mapping[str, Any]]) -> list[FieldDefinition]:
     return build_domain_field_definitions(raw_fields)
+
+
+def create_field_definition(**payload: Any) -> FieldDefinition:
+    return FieldDefinition(**payload)
+
+
+def serialize_field_definitions(fields: list[FieldDefinition]) -> list[dict[str, Any]]:
+    return serialize_domain_field_definitions(fields)
 
 
 def build_artifact(label: str, path: str | Path) -> dict[str, str]:
