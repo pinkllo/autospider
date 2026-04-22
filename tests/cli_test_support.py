@@ -16,6 +16,7 @@ _PURGE_PREFIXES = (
     "autospider.interface.cli._runtime_support",
     "autospider.interface.cli._legacy_runtime",
     "autospider.composition.graph",
+    "autospider.platform.observability.logger",
     "autospider.platform.persistence.sql.orm.engine",
     "autospider.contexts.collection.domain.fields",
     "typer",
@@ -25,6 +26,10 @@ _PURGE_PREFIXES = (
 
 
 def purge_modules() -> None:
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
     for module_name in list(sys.modules):
         if module_name.startswith(_PURGE_PREFIXES):
             sys.modules.pop(module_name, None)
@@ -93,7 +98,9 @@ def install_cli_stubs() -> None:
     click_core.ParameterSource = ParameterSource
 
     rich_module = types.ModuleType("rich")
+    rich_module.__path__ = []  # type: ignore[attr-defined]
     rich_console = types.ModuleType("rich.console")
+    rich_containers = types.ModuleType("rich.containers")
     rich_logging = types.ModuleType("rich.logging")
     rich_panel = types.ModuleType("rich.panel")
     rich_table = types.ModuleType("rich.table")
@@ -123,13 +130,21 @@ def install_cli_stubs() -> None:
         def __init__(self, *args, **kwargs) -> None:
             self.rows: list[tuple[Any, ...]] = []
 
+        @classmethod
+        def grid(cls, *args, **kwargs):
+            return cls(*args, **kwargs)
+
         def add_column(self, *args, **kwargs) -> None:
             return None
 
         def add_row(self, *args, **kwargs) -> None:
             self.rows.append(args)
 
+    class Renderables(list):
+        pass
+
     rich_console.Console = Console
+    rich_containers.Renderables = Renderables
     rich_logging.RichHandler = RichHandler
     rich_panel.Panel = Panel
     rich_table.Table = Table
@@ -139,6 +154,7 @@ def install_cli_stubs() -> None:
     sys.modules["click.core"] = click_core
     sys.modules["rich"] = rich_module
     sys.modules["rich.console"] = rich_console
+    sys.modules["rich.containers"] = rich_containers
     sys.modules["rich.logging"] = rich_logging
     sys.modules["rich.panel"] = rich_panel
     sys.modules["rich.table"] = rich_table

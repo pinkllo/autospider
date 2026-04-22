@@ -12,8 +12,8 @@ from autospider.platform.config.runtime import config
 from autospider.platform.shared_kernel.trace import clear_run_context, set_run_context
 from .checkpoint import graph_checkpoint_enabled, graph_checkpointer_session
 from .main_graph import build_main_graph
+from .state_access import result_state, select_artifacts, select_error, select_summary
 from .workflow_access import coerce_workflow_state
-from .state_access import select_artifacts, select_error, select_result_state, select_summary
 from .types import GraphError, GraphInput, GraphResult
 
 
@@ -152,7 +152,7 @@ class GraphRunner:
         elif status not in {"success", "partial_success", "failed", "no_data"}:
             status = "failed" if error else "success"
 
-        result_state = select_result_state(final_state) or select_result_state(snapshot_values)
+        selected_result_state = result_state(final_state) or result_state(snapshot_values)
         summary = select_summary(final_state, snapshot_values=snapshot_values)
         if thread_id:
             summary.setdefault("thread_id", thread_id)
@@ -175,7 +175,7 @@ class GraphRunner:
             artifacts=select_artifacts(final_state, snapshot_values=snapshot_values),
             error=error,
             data=dict(
-                result_state.get("data")
+                selected_result_state.get("data")
                 or final_state.get("result_context")
                 or snapshot_values.get("result_context")
                 or {}
@@ -233,9 +233,6 @@ class GraphRunner:
                 "thread_id": graph_input.thread_id,
                 "request_id": graph_input.request_id,
             },
-            "entry_mode": graph_input.entry_mode,
-            "thread_id": graph_input.thread_id,
-            "request_id": graph_input.request_id,
             "invoked_at": graph_input.invoked_at,
             "cli_args": dict(graph_input.cli_args),
             "conversation": {

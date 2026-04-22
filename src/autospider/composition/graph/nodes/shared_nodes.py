@@ -8,8 +8,8 @@ from ..state_access import (
     dispatch_state,
     get_error_state,
     get_result_artifacts,
-    get_result_state,
     get_result_summary,
+    result_state,
 )
 from ..workflow_access import coerce_workflow_state
 
@@ -33,14 +33,14 @@ def build_artifact_index(state: dict[str, Any]) -> dict[str, Any]:
     artifacts = get_result_artifacts(state)
     artifacts.extend(list(state.get("node_artifacts") or []))
     deduped = _dedupe_artifacts(artifacts)
-    result = get_result_state(state)
+    result = result_state(state)
     result["artifacts"] = deduped
     return {"artifacts": deduped, "result": result}
 
 
 def build_summary(state: dict[str, Any]) -> dict[str, Any]:
     """构建统一摘要。"""
-    result = get_result_state(state)
+    result = result_state(state)
     summary = get_result_summary(state)
     dispatch = dispatch_state(state)
     if dispatch and not summary:
@@ -77,7 +77,7 @@ def finalize_result(state: dict[str, Any]) -> dict[str, Any]:
     error = get_error_state(state)
     error_code = str(error.get("code") or "")
     error_message = str(error.get("message") or "")
-    result = get_result_state(state)
+    result = result_state(state)
     status = str(result.get("status") or "").strip().lower()
     if error_code:
         status = "failed"

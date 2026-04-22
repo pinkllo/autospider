@@ -24,23 +24,6 @@ def _merge_mappings(*values: Any) -> dict[str, Any]:
     return merged
 
 
-def _looks_like_dispatch_summary(value: Any) -> bool:
-    if not isinstance(value, Mapping):
-        return False
-    dispatch_keys = {
-        "total",
-        "completed",
-        "no_data",
-        "expanded",
-        "business_failure",
-        "system_failure",
-        "failed",
-        "skipped",
-        "total_collected",
-    }
-    return any(key in value for key in dispatch_keys)
-
-
 def _enrich_request_params_from_workflow(
     params: dict[str, Any],
     *,
@@ -144,26 +127,6 @@ def subtask_results(state: Mapping[str, Any] | None) -> list[Any]:
     return _as_list(execution.get("subtask_results"))
 
 
-def get_conversation_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    return conversation_state(state)
-
-
-def get_planning_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    return planning_state(state)
-
-
-def get_dispatch_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    return dispatch_state(state)
-
-
-def get_result_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    return result_state(state)
-
-
-def select_result_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    return result_state(state)
-
-
 def get_result_summary(state: Mapping[str, Any] | None) -> dict[str, Any]:
     graph_state = _as_dict(state)
     result = result_state(graph_state)
@@ -265,6 +228,13 @@ def get_stage_status(
 ) -> str:
     graph_state = _as_dict(state)
     control = _as_dict(graph_state.get("control"))
+    if stage is not None:
+        return str(
+            _stage_status_from_state(graph_state, stage)
+            or control.get("stage_status")
+            or graph_state.get("node_status")
+            or ""
+        )
     return str(
         control.get("stage_status")
         or planning_state(graph_state).get("status")

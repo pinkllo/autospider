@@ -17,6 +17,7 @@ from autospider.platform.persistence.sql.orm.repositories import (
     TaskRunReadRepository,
     TaskRunWriteRepository,
 )
+from autospider.composition.pipeline import finalization, run_store_async
 from autospider.composition.pipeline import runner
 
 
@@ -26,6 +27,13 @@ def test_runner_persistence_helpers_are_async() -> None:
     assert inspect.iscoroutinefunction(runner._commit_persisted_item)
     assert inspect.iscoroutinefunction(runner._fail_persisted_item)
     assert inspect.iscoroutinefunction(runner._ack_persisted_item)
+
+
+def test_runner_shared_helpers_point_to_single_sources() -> None:
+    assert runner._classify_pipeline_result is finalization.classify_pipeline_result
+    assert runner._prepare_pipeline_output is finalization.prepare_pipeline_output
+    assert runner._persist_run_snapshot is run_store_async._persist_run_snapshot
+    assert runner._claim_persisted_item is run_store_async._claim_persisted_item
 
 
 class _InterventionExtractor:

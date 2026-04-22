@@ -7,25 +7,9 @@ from typing import Any
 
 from .workflow_state import WorkflowState
 
-DISPATCH_SUMMARY_KEYS = {
-    "total",
-    "completed",
-    "no_data",
-    "expanded",
-    "business_failure",
-    "system_failure",
-    "failed",
-    "skipped",
-    "total_collected",
-}
-
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
 
 
 def _as_mapping_list(value: Any) -> list[dict[str, Any]]:
@@ -52,20 +36,6 @@ def _legacy_request_params(state: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _merge_mappings(*values: Any) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
-    for value in values:
-        if isinstance(value, Mapping):
-            merged.update(dict(value))
-    return merged
-
-
-def _looks_like_dispatch_summary(value: Any) -> bool:
-    if not isinstance(value, Mapping):
-        return False
-    return any(key in value for key in DISPATCH_SUMMARY_KEYS)
-
-
 def _fallback_error_state(state: dict[str, Any]) -> dict[str, str]:
     root_error = _as_dict(state.get("error"))
     if root_error.get("code"):
@@ -79,15 +49,6 @@ def _fallback_error_state(state: dict[str, Any]) -> dict[str, str]:
     if not code and not message:
         return {}
     return {"code": code, "message": message}
-
-
-def _legacy_final_error(state: dict[str, Any]) -> dict[str, str]:
-    result = _as_dict(state.get("result"))
-    return (
-        _normalize_error(result.get("final_error"))
-        or _normalize_error(result.get("error"))
-        or _fallback_error_state(state)
-    )
 
 
 def _meta_state(state: dict[str, Any]) -> dict[str, Any]:

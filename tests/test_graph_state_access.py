@@ -21,6 +21,7 @@ from autospider.composition.graph.state_access import (
     collection_config,
     dispatch_summary,
     get_error_state,
+    get_stage_status,
     request_params,
     select_summary,
     subtask_results,
@@ -173,9 +174,19 @@ def test_get_stage_status_reads_workflow_control_stage_status() -> None:
         "dispatch": {"status": "fatal"},
     }
 
-    from autospider.composition.graph.state_access import get_stage_status
-
     assert get_stage_status(state) == "ok"
+
+
+def test_get_stage_status_prefers_requested_stage_over_other_stage_failures() -> None:
+    state = {
+        "control": {"stage_status": "ok"},
+        "planning": {"status": "ok"},
+        "dispatch": {"status": "fatal"},
+        "result": {"status": "ok"},
+    }
+
+    assert get_stage_status(state, stage="planning") == "ok"
+    assert get_stage_status(state, stage="dispatch") == "fatal"
 
 
 def test_request_params_reads_planner_runtime_payload_from_world_namespace() -> None:

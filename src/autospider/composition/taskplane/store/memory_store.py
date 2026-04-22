@@ -20,6 +20,9 @@ class MemoryStore:
         self._tickets: dict[str, TaskTicket] = {}
         self._results: dict[str, TaskResult] = {}
 
+    async def aclose(self) -> None:
+        return None
+
     async def save_envelope(self, envelope: PlanEnvelope) -> None:
         self._envelopes[envelope.envelope_id] = envelope.model_copy(deep=True)
 

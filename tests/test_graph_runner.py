@@ -38,7 +38,12 @@ async def test_graph_runner_invoke_does_not_seed_empty_world_request_params(
     await runner.invoke(GraphInput(entry_mode="chat_pipeline", cli_args={"request": "采集公告"}))
 
     initial_state = dict(captured["graph_input"] or {})
+    meta = dict(initial_state.get("meta") or {})
     world = dict(initial_state.get("world") or {})
 
+    assert meta["entry_mode"] == "chat_pipeline"
+    assert "entry_mode" not in initial_state
+    assert "thread_id" not in initial_state
+    assert "request_id" not in initial_state
     assert "request_params" not in world
 

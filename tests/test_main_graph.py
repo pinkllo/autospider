@@ -14,6 +14,7 @@ from autospider.contexts.planning.domain import TaskPlan
 from autospider.contexts.planning.domain.runtime import SubTaskRuntimeState
 from autospider.composition.graph.main_graph import build_main_graph, resolve_feedback_route
 from autospider.composition.graph._multi_dispatch import build_multi_dispatch_subgraph
+from autospider.composition.graph.routes import resolve_node_outcome
 
 
 def _runtime_result(
@@ -41,6 +42,17 @@ def test_resolve_feedback_route_maps_replan_to_plan_strategy_node() -> None:
 def test_resolve_feedback_route_rejects_unknown_strategy() -> None:
     with pytest.raises(ValueError, match="unknown_feedback_route"):
         resolve_feedback_route({"control": {"active_strategy": {"name": "unexpected"}}})
+
+
+def test_resolve_node_outcome_uses_requested_stage_status() -> None:
+    state = {
+        "control": {"stage_status": "ok"},
+        "planning": {"status": "ok"},
+        "dispatch": {"status": "fatal"},
+    }
+
+    assert resolve_node_outcome(state, stage="planning") == "ok"
+    assert resolve_node_outcome(state, stage="dispatch") == "error"
 
 
 def test_build_main_graph_inserts_planning_and_feedback_layers() -> None:

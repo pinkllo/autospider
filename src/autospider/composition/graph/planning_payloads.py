@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from autospider.contexts.planning.domain import PlanJournalEntry, PlanNode, PlanNodeType, TaskPlan
-from autospider.composition.graph.controls import (
+from autospider.composition.graph.control_types import (
     PlanSpec,
     build_default_dispatch_policy,
     build_default_recovery_policy,

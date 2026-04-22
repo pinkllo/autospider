@@ -188,3 +188,14 @@ class TestRelease:
         assert ticket is not None
         assert ticket.status == TicketStatus.QUEUED
 
+
+class TestLifecycle:
+    async def test_aclose_marks_scheduler_closed(self, scheduler: TaskScheduler) -> None:
+        await scheduler.aclose()
+        assert scheduler.is_closed
+
+    async def test_closed_scheduler_rejects_operations(self, scheduler: TaskScheduler) -> None:
+        await scheduler.aclose()
+        with pytest.raises(RuntimeError, match="task_scheduler_closed"):
+            await scheduler.pull(batch_size=1)
+

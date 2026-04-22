@@ -32,12 +32,17 @@ class _FakeProgress:
     running: int = 0
 
 
-class _FakeScheduler:
+class _FakeRuntime:
     def __init__(self, progress: _FakeProgress) -> None:
         self._progress = progress
+        self.envelope_id = "env-1"
+        self.closed = False
 
-    async def get_envelope_progress(self, envelope_id: str) -> _FakeProgress:
+    async def get_progress(self) -> _FakeProgress:
         return self._progress
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 class _FakePlanMutation:
@@ -56,12 +61,18 @@ class _FakePlanMutationService:
 
 def _install_fakes(
     monkeypatch: pytest.MonkeyPatch, plan: TaskPlan, progress: _FakeProgress
-) -> None:
+) -> _FakeRuntime:
     import autospider.composition.graph._multi_dispatch as md
 
-    monkeypatch.setattr(md, "_taskplane_scheduler", lambda state, plan: _FakeScheduler(progress))
-    monkeypatch.setattr(md, "_taskplane_envelope_id", lambda state, plan: "env-1")
+    runtime = _FakeRuntime(progress)
+
+    async def _taskplane_runtime(state, task_plan):  # noqa: ANN001
+        del state, task_plan
+        return runtime
+
+    monkeypatch.setattr(md, "_taskplane_runtime", _taskplane_runtime)
     monkeypatch.setattr(md, "PlanMutationService", lambda: _FakePlanMutationService(plan))
+    return runtime
 
 
 def _base_state(plan: TaskPlan) -> dict:
@@ -95,7 +106,7 @@ def test_merge_dispatch_round_preserves_active_strategy(monkeypatch: pytest.Monk
 
 def test_complete_dispatch_preserves_active_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
     plan = TaskPlan(plan_id="plan-2", site_url="https://example.com", original_request="demo")
-    _install_fakes(monkeypatch, plan, _FakeProgress())
+    runtime = _install_fakes(monkeypatch, plan, _FakeProgress())
 
     result = asyncio.run(complete_dispatch(_base_state(plan)))
 
@@ -103,4 +114,5 @@ def test_complete_dispatch_preserves_active_strategy(monkeypatch: pytest.MonkeyP
     assert active["name"] == "replan"
     assert active["replan_count"] == 2
     assert active["max_replans"] == 3
+    assert runtime.closed is True
 

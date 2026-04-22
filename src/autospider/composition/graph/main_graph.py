@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from .subgraphs import build_multi_dispatch_subgraph
+from ._multi_dispatch import build_multi_dispatch_subgraph
 from .routes import (
     resolve_chat_clarify_route,
     resolve_chat_review_route,

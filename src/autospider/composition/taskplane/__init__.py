@@ -1,4 +1,4 @@
-"""TaskPlane — 通用任务调度控制平面。"""
+"""TaskPlane — composition 内部使用的任务调度 runtime。"""
 
 from .protocol import PlanEnvelope, ResultStatus, TaskResult, TaskTicket, TicketStatus
 from .scheduler import TaskScheduler
@@ -8,24 +8,13 @@ from .subscription import Subscription
 from .types import EnvelopeProgress, ReportReceipt, SubmitReceipt, TaskPlaneConfig
 
 __all__ = [
-    "BatchAwareStrategy",
-    "DispatchStrategy",
-    "DualLayerStore",
     "EnvelopeProgress",
-    "FIFOStrategy",
-    "MemoryStore",
-    "PgColdStore",
     "PlanEnvelope",
-    "PriorityStrategy",
-    "RedisHotStore",
     "ReportReceipt",
     "ResultStatus",
     "SubmitReceipt",
-    "Subscription",
-    "TaskPlaneConfig",
     "TaskResult",
     "TaskScheduler",
-    "TaskStore",
     "TaskTicket",
     "TicketStatus",
 ]

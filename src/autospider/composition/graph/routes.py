@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from autospider.composition.graph._multi_dispatch import route_after_feedback
-from autospider.composition.graph.state_access import get_conversation_state, get_stage_status
+from autospider.composition.graph.state_access import conversation_state, get_stage_status
 from autospider.composition.graph.workflow_access import coerce_workflow_state
 
 
@@ -32,7 +32,7 @@ def resolve_chat_clarify_route(state: dict[str, Any]) -> str:
     if state.get("error"):
         return "error"
 
-    conversation = get_conversation_state(state)
+    conversation = conversation_state(state)
     flow_state = str(conversation.get("flow_state") or "")
     if flow_state == "needs_input":
         return "chat_collect_user_input"
@@ -45,7 +45,7 @@ def resolve_chat_review_route(state: dict[str, Any]) -> str:
     if state.get("error"):
         return "error"
 
-    conversation = get_conversation_state(state)
+    conversation = conversation_state(state)
     review_state = str(conversation.get("review_state") or "")
     if review_state == "approved":
         return "chat_prepare_execution_handoff"

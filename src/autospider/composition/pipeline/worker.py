@@ -23,25 +23,9 @@ from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
 from ..pipeline.types import ExecutionRequest, PipelineMode, PipelineRunResult, SubtaskOutcomeType
 from autospider.contexts.planning.application.handlers import RuntimeExpansionService
 from .runtime_controls import resolve_concurrency_settings
+from .worker_fields import prepare_subtask_fields
 
 logger = get_logger(__name__)
-
-_CATEGORY_FIELD_ALIASES = {
-    "category",
-    "categoryname",
-    "projectcategory",
-    "分类",
-    "所属分类",
-    "分类名称",
-    "分类类别",
-}
-_CATEGORY_FIELD_MARKERS = (
-    "所属分类",
-    "分类名称",
-    "分类类别",
-    "categoryname",
-    "projectcategory",
-)
 
 
 def _resolve_runtime_replan_max_children(raw_value: object | None) -> int:
@@ -126,104 +110,7 @@ class SubTaskWorker:
         self.runtime_expansion_service = service_cls()
 
     def _prepare_fields(self) -> list[FieldDefinition]:
-        """将字段定义字典转换为 FieldDefinition 列表。"""
-        fields: list[FieldDefinition] = []
-        source = self.subtask.fields if self.subtask.fields else self.raw_fields
-
-        for f in source:
-            if not isinstance(f, dict):
-                continue
-            try:
-                extraction_source = f.get("extraction_source")
-                fixed_value = f.get("fixed_value")
-                if self._is_context_like_field(f):
-                    subtask_context_value = self._resolve_explicit_context_value(f)
-                    if subtask_context_value:
-                        extraction_source = "subtask_context"
-                        fixed_value = subtask_context_value
-
-                fields.append(
-                    FieldDefinition(
-                        name=f.get("name", ""),
-                        description=f.get("description", ""),
-                        required=f.get("required", True),
-                        data_type=f.get("data_type", "text"),
-                        example=f.get("example"),
-                        extraction_source=extraction_source,
-                        fixed_value=fixed_value,
-                    )
-                )
-            except Exception:
-                continue
-
-        return fields
-
-    def _is_context_like_field(self, field: dict) -> bool:
-        name = self._normalize_field_lookup_key(field.get("name"))
-        desc = self._normalize_field_lookup_key(field.get("description"))
-        if name in _CATEGORY_FIELD_ALIASES:
-            return True
-        return any(marker in desc for marker in _CATEGORY_FIELD_MARKERS)
-
-    def _resolve_explicit_context_value(self, field: dict | None = None) -> str:
-        fixed_field_value = self._resolve_fixed_field_value(field)
-        if fixed_field_value:
-            return fixed_field_value
-        scope_value = self._resolve_scope_value()
-        if scope_value:
-            return scope_value
-        return self._resolve_context_value()
-
-    def _resolve_fixed_field_value(self, field: dict | None = None) -> str:
-        fixed_fields = dict(getattr(self.subtask, "fixed_fields", {}) or {})
-        if not fixed_fields:
-            return ""
-        for lookup in self._build_field_lookup_keys(field):
-            for key, value in fixed_fields.items():
-                if self._normalize_field_lookup_key(key) != lookup:
-                    continue
-                resolved = str(value or "").strip()
-                if resolved:
-                    return resolved
-        for key in ("category_name", "category", "所属分类", "分类"):
-            resolved = str(fixed_fields.get(key) or "").strip()
-            if resolved:
-                return resolved
-        return ""
-
-    def _build_field_lookup_keys(self, field: dict | None) -> list[str]:
-        if not isinstance(field, dict):
-            return []
-        keys: list[str] = []
-        for raw in (field.get("name"), field.get("description")):
-            normalized = self._normalize_field_lookup_key(raw)
-            if normalized:
-                keys.append(normalized)
-        return keys
-
-    def _normalize_field_lookup_key(self, value: object | None) -> str:
-        normalized = "".join(str(value or "").strip().lower().split())
-        return normalized.replace("_", "")
-
-    def _resolve_scope_value(self) -> str:
-        scope = dict(getattr(self.subtask, "scope", {}) or {})
-        label = str(scope.get("label") or scope.get("name") or "").strip()
-        if label:
-            return label
-        path = scope.get("path")
-        if isinstance(path, (list, tuple)):
-            segments = [str(item or "").strip() for item in path if str(item or "").strip()]
-            if segments:
-                return " > ".join(segments)
-        return ""
-
-    def _resolve_context_value(self) -> str:
-        context = dict(getattr(self.subtask, "context", {}) or {})
-        for key in ("category_name", "category", "所属分类", "分类"):
-            value = str(context.get(key) or "").strip()
-            if value:
-                return value
-        return ""
+        return prepare_subtask_fields(self.subtask, self.raw_fields)
 
     def _resolved_concurrency(self):
         return resolve_concurrency_settings(
