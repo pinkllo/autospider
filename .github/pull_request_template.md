@@ -11,12 +11,12 @@
 - [ ] 以上都没有
 
 ## 验证
-- [ ] `scripts/verify.ps1` 本地绿
+- [ ] `ruff check src tests` / `mypy src/autospider` / `lint-imports` 本地绿
 - [ ] `pytest tests/contracts -q` 快照无破坏（或已更新并说明原因）
 - [ ] CI 绿
 
 ## ADR
-若涉及架构决策变更，请附上对应 `refactor/adr/NNNN-*.md` 的链接。
+若涉及架构决策变更，请附上对应设计说明或决策记录链接。
 
 ## 回滚方案
 <!-- 如何回滚本 PR -->

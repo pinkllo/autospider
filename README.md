@@ -2,7 +2,7 @@
 
 A pure-vision browser agent built on **LangGraph** and **Set-of-Mark (SoM)** prompting. Organised as a lightweight-DDD modular monolith with four Bounded Contexts, Redis as both queue and store, and a single `output/runs/<run_id>/` artifact layout.
 
-> Status: `refactor-phase-4` (physical legacy removal) executed; `refactor-phase-5` (guardrails + verification/docs cutover) is still being tightened.
+> Status: contexts refactor landed on the current bounded-context layout; architecture guardrails are enforced by repository config and contract tests.
 
 ---
 
@@ -24,15 +24,6 @@ autospider.interface   →   autospider.composition   →   autospider.contexts.
   - `observability/` — structured logging bound to `trace_id` / `run_id`
   - `persistence/` — Redis (primary) + SQL (Alembic-managed)
   - `messaging/` — ports + Redis Streams / in-memory implementations
-
-Key architecture decisions are recorded under [`refactor/adr/`](refactor/adr/):
-
-- [`0001-adopt-light-ddd.md`](refactor/adr/0001-adopt-light-ddd.md)
-- [`0002-redis-as-queue-and-store.md`](refactor/adr/0002-redis-as-queue-and-store.md)
-- [`0003-run-artifact-layout.md`](refactor/adr/0003-run-artifact-layout.md)
-- [`0004-import-linter-contracts.md`](refactor/adr/0004-import-linter-contracts.md)
-
----
 
 ## Quick Start
 
@@ -62,9 +53,6 @@ mypy src/autospider
 # layered architecture contracts
 lint-imports
 
-# preferred local verification entrypoint
-scripts/verify.ps1
-
 # pre-commit hooks
 pre-commit run --all-files
 
@@ -73,11 +61,6 @@ pytest -m smoke -q
 pytest tests/contracts -q
 pytest tests/contexts tests/platform tests/composition tests/interface -q
 ```
-
-`scripts/_gate_file_size.py` blocks new `.py` files beyond 500 lines (tests and prompts exempt).
-If `.importlinter` exists but `lint-imports` is missing, `scripts/verify.ps1` / `scripts/verify.sh` now fail fast instead of silently skipping architecture checks.
-
----
 
 ## Testing Layout
 
@@ -95,5 +78,3 @@ If `.importlinter` exists but `lint-imports` is missing, `scripts/verify.ps1` / 
 ## Further Reading
 
 - [`AGENTS.md`](AGENTS.md) — repository guidelines for contributors and agents.
-- [`refactor/`](refactor/) — archived refactor plan (phase 0–5) and ADRs.
-- [`refactor/05-guardrails.md`](refactor/05-guardrails.md) — `ruff` / `mypy` / `import-linter` / `pre-commit` / CI configuration reference.
