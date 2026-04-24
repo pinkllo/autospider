@@ -139,6 +139,60 @@ def test_execution_request_accepts_build_decision_context_payload_directly() -> 
     ]
 
 
+def test_subtask_worker_initial_collection_config_is_mapping_for_execution_request() -> None:
+    subtask = SubTask(
+        id="subtask_001",
+        name="采购公告",
+        list_url="https://example.com/list",
+        anchor_url="https://example.com/root",
+        page_state_signature="sig-list",
+        variant_label="采购公告",
+        task_description="采集详情链接",
+        mode=SubTaskMode.COLLECT,
+        execution_brief=ExecutionBrief(objective="collect urls"),
+        plan_node_id="node_001",
+    )
+    worker = SubTaskWorker(
+        subtask=subtask,
+        fields=[],
+        output_dir="output",
+        world_snapshot={
+            "world_model": {
+                "page_models": {
+                    "node_001": {
+                        "page_id": "node_001",
+                        "metadata": {
+                            "list_page_profile": {
+                                "profile-1": {
+                                    "profile_key": "profile-1",
+                                    "anchor_url": "https://example.com/root",
+                                    "page_state_signature": "sig-list",
+                                    "variant_label": "采购公告",
+                                    "task_description": "采集详情链接",
+                                    "common_detail_xpath": "//a[@class='detail']",
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    )
+
+    request = ExecutionRequest(
+        list_url=subtask.list_url,
+        task_description=subtask.task_description,
+        request=subtask.task_description,
+        fields=[],
+        execution_brief=subtask.execution_brief.model_dump(mode="python"),
+        output_dir="output",
+        initial_collection_config=worker._resolve_initial_collection_config(subtask),
+    )
+
+    assert request.initial_collection_config["profile_key"] == "profile-1"
+    assert request.initial_collection_config["common_detail_xpath"] == "//a[@class='detail']"
+
+
 def test_runtime_context_prefers_workflow_payloads_over_legacy_compat_fields() -> None:
     world_model = build_initial_world_model(
         request_params={"list_url": "https://example.com/articles", "target_url_count": 8}

@@ -17,7 +17,7 @@ from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.domain.fields import FieldDefinition
 from autospider.contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
-from ..graph.world_model import resolve_list_profile_candidates_from_world
+from ..graph.world_model import resolve_list_profile_from_world
 from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
@@ -160,8 +160,8 @@ class SubTaskWorker:
             world["world_model"] = world_model
         return world
 
-    def _resolve_initial_collection_config(self, subtask: SubTask) -> list[dict]:
-        return resolve_list_profile_candidates_from_world(
+    def _resolve_initial_collection_config(self, subtask: SubTask) -> dict[str, Any]:
+        return resolve_list_profile_from_world(
             self._build_runtime_world_snapshot(),
             page_id=str(subtask.plan_node_id or ""),
             page_state_signature=str(subtask.page_state_signature or ""),
