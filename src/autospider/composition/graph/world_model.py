@@ -10,7 +10,6 @@ from autospider.platform.shared_kernel.knowledge_contracts import normalize_prof
 from autospider.platform.shared_kernel.knowledge_contracts import (
     DETAIL_FIELD_PROFILES_KEY,
     LIST_PAGE_PROFILE_KEY,
-    build_list_profile_key,
     coerce_detail_field_profile,
     coerce_list_page_profile,
 )
@@ -211,33 +210,15 @@ def resolve_list_profile_candidates_from_world(
         return []
     if "common_detail_xpath" in profiles:
         return [dict(profiles)]
-    key = build_list_profile_key(
-        page_state_signature=page_state_signature,
-        anchor_url=anchor_url,
-        variant_label=variant_label,
-        task_description=task_description,
-    )
-    scored: list[tuple[int, dict[str, Any]]] = []
+    candidates: list[dict[str, Any]] = []
     for raw_candidate in profiles.values():
         if not isinstance(raw_candidate, Mapping):
             continue
         candidate = dict(raw_candidate)
-        score = 0
-        if str(candidate.get("profile_key") or "") == key:
-            score += 8
-        if page_state_signature and str(candidate.get("page_state_signature") or "") == page_state_signature:
-            score += 4
-        if anchor_url and str(candidate.get("anchor_url") or "") == anchor_url:
-            score += 3
-        if variant_label and str(candidate.get("variant_label") or "") == variant_label:
-            score += 2
-        if task_description and str(candidate.get("task_description") or "") == task_description:
-            score += 2
-        if str(candidate.get("common_detail_xpath") or "").strip():
-            score += 1
-        scored.append((score, candidate))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [dict(candidate) for _, candidate in scored]
+        if not str(candidate.get("common_detail_xpath") or "").strip():
+            continue
+        candidates.append(candidate)
+    return [dict(candidate) for candidate in candidates]
 
 
 def merge_detail_field_profiles(

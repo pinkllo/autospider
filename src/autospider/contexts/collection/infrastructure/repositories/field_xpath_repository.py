@@ -60,19 +60,10 @@ class FieldXPathQueryService:
         field: FieldDefinition,
         world_snapshot: dict | None,
     ) -> list[dict]:
+        del url
         world_model = dict(dict(world_snapshot or {}).get("world_model") or {})
         page_models = dict(world_model.get("page_models") or {})
-        template_signature = build_detail_template_signature(
-            url=url,
-            page_hint=str(field.description or ""),
-        )
-        field_signature = build_field_semantic_signature(
-            field_name=field.name,
-            description=field.description,
-            data_type=field.data_type,
-            extraction_source=str(field.extraction_source or ""),
-        )
-        candidates: list[tuple[int, dict]] = []
+        candidates: list[dict] = []
         for page in page_models.values():
             metadata = normalize_profile_metadata(dict(page).get("metadata"))
             profiles = list(metadata.get(DETAIL_FIELD_PROFILES_KEY) or [])
@@ -81,20 +72,10 @@ class FieldXPathQueryService:
                     continue
                 if str(profile.get("field_name") or "") != str(field.name or ""):
                     continue
-                score = 0
-                if str(profile.get("detail_template_signature") or "") == template_signature:
-                    score += 4
-                if str(profile.get("field_signature") or "") == field_signature:
-                    score += 4
-                if str(profile.get("extraction_source") or "") == str(field.extraction_source or ""):
-                    score += 2
-                if bool(profile.get("validated", False)):
-                    score += 1
-                if str(profile.get("xpath") or "").strip():
-                    score += 1
-                candidates.append((score, dict(profile)))
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return [candidate for _, candidate in candidates]
+                if not str(profile.get("xpath") or "").strip():
+                    continue
+                candidates.append(dict(profile))
+        return candidates
 
     def build_fields_config(
         self,

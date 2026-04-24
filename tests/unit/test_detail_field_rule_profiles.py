@@ -102,7 +102,7 @@ def test_same_domain_different_template_does_not_reuse_unrelated_profile() -> No
     assert configs[0]["xpath"] == "//div[@class='headline']/text()"
 
 
-def test_same_field_name_prefers_matching_template_signature() -> None:
+def test_same_field_name_uses_first_profile_with_xpath() -> None:
     field = _field()
     service = _FakeFieldXPathQueryService()
     url = "https://example.com/detail/1"
@@ -145,7 +145,43 @@ def test_same_field_name_prefers_matching_template_signature() -> None:
 
     configs = service.build_fields_config(url, [field], world_snapshot=world_snapshot)
 
+    assert configs[0]["xpath"] == "//div[@class='headline']/text()"
+
+
+def test_detail_field_profile_candidates_skip_entries_without_xpath() -> None:
+    field = _field()
+    service = _FakeFieldXPathQueryService()
+    world_snapshot = {
+        "world_model": {
+            "page_models": {
+                "detail": {
+                    "metadata": {
+                        "detail_field_profiles": [
+                            {
+                                "field_name": "title",
+                                "xpath": "",
+                                "validated": True,
+                            },
+                            {
+                                "field_name": "title",
+                                "xpath": "//h1/text()",
+                                "validated": False,
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    configs = service.build_fields_config(
+        "https://example.com/detail/2",
+        [field],
+        world_snapshot=world_snapshot,
+    )
+
     assert configs[0]["xpath"] == "//h1/text()"
+    assert configs[0]["xpath_candidate_pool"] == ["//h1/text()"]
 
 
 def test_world_profile_match_keeps_legacy_fallback_path_available() -> None:

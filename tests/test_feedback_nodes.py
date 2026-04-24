@@ -18,6 +18,9 @@ from autospider.composition.graph.nodes.feedback_nodes import (
 from autospider.composition.graph.nodes.planning_nodes import plan_strategy_node
 from autospider.composition.graph.state import GraphState
 from autospider.composition.graph._multi_dispatch import route_after_feedback
+from autospider.composition.graph.world_model import (
+    resolve_list_profile_candidates_from_world,
+)
 
 
 def _system_failure_result(*, error: str, terminal_reason: str = "") -> SubTaskRuntimeState:
@@ -289,3 +292,43 @@ def test_update_world_model_node_skips_failed_detail_field_evidence() -> None:
 
     assert metadata.get("detail_field_profiles") == []
 
+
+
+def test_resolve_list_profile_candidates_from_world_keeps_only_xpath_candidates() -> None:
+    world_snapshot = {
+        "world_model": {
+            "page_models": {
+                "node_001": {
+                    "page_id": "node_001",
+                    "metadata": {
+                        "list_page_profile": {
+                            "candidate-no-xpath": {
+                                "profile_key": "candidate-no-xpath",
+                                "task_description": "完全匹配但没 xpath",
+                                "page_state_signature": "sig-hit",
+                                "common_detail_xpath": "",
+                            },
+                            "candidate-with-xpath": {
+                                "profile_key": "candidate-with-xpath",
+                                "task_description": "不相干描述",
+                                "page_state_signature": "sig-other",
+                                "common_detail_xpath": "//a[@class='detail']",
+                            },
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    candidates = resolve_list_profile_candidates_from_world(
+        world_snapshot,
+        page_id="node_001",
+        page_state_signature="sig-hit",
+        anchor_url="https://example.com/root",
+        variant_label="采购公告",
+        task_description="采集详情链接",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["profile_key"] == "candidate-with-xpath"
