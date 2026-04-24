@@ -1,76 +1,39 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from autospider.contexts.planning.infrastructure.adapters.analysis_types import (
+    ResolvedPlannerVariant,
+    RuntimeSubtaskPlanResult,
+)
+from autospider.contexts.planning.infrastructure.adapters.analysis_world_model import (
+    format_known_page_model,
+    resolve_known_page_model,
+    resolve_world_model_analysis,
+)
 from autospider.platform.browser.accessibility import get_accessibility_text
 from autospider.platform.config.runtime import config
-from autospider.platform.llm.streaming import ainvoke_with_stream
-from autospider.platform.llm.trace_logger import append_llm_trace
-from autospider.platform.observability.logger import get_logger
 from autospider.platform.llm.protocol import (
     extract_response_text_from_llm_payload,
     parse_json_dict_from_llm,
     summarize_llm_payload,
 )
+from autospider.platform.llm.streaming import ainvoke_with_stream
+from autospider.platform.llm.trace_logger import append_llm_trace
+from autospider.platform.observability.logger import get_logger
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
-from autospider.contexts.planning.domain import ExecutionBrief, SubTask
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
-
-    from autospider.contexts.planning.domain import PlannerIntent
+    from autospider.contexts.planning.infrastructure.adapters.analysis_types import (
+        PlannerAnalysisRuntime,
+    )
 
 logger = get_logger(__name__)
 PROMPT_TEMPLATE_PATH = get_prompt_path("planner.yaml")
-
-
-@dataclass
-class ResolvedPlannerVariant:
-    resolved_url: str
-    anchor_url: str
-    nav_steps: list[dict] = field(default_factory=list)
-    page_state_signature: str = ""
-    variant_label: str = ""
-    context: dict[str, str] = field(default_factory=dict)
-    same_page_variant: bool = False
-
-
-@dataclass
-class RuntimeSubtaskPlanResult:
-    page_type: str
-    analysis: dict[str, Any]
-    children: list[SubTask] = field(default_factory=list)
-    collect_task_description: str = ""
-    collect_execution_brief: ExecutionBrief = field(default_factory=ExecutionBrief)
-
-
-class PlannerAnalysisRuntime(Protocol):
-    page: "Page"
-    llm: Any
-    site_url: str
-    user_request: str
-    planner_intent: "PlannerIntent"
-    selected_skills_context: str
-    selected_skills: list[dict]
-    prior_failures: list[dict[str, Any]]
-
-    def _format_context_path(self, context: dict[str, str] | None) -> str: ...
-
-    def _format_recent_actions(self, nav_steps: list[dict] | None) -> str: ...
-
-    def _build_planner_candidates(self, snapshot: object, max_candidates: int = 30) -> str: ...
-
-    def _post_process_analysis(
-        self,
-        result: dict,
-        snapshot: object,
-        *,
-        node_context: dict[str, str] | None = None,
-    ) -> dict: ...
+__all__ = ["PlannerSiteAnalyzer", "ResolvedPlannerVariant", "RuntimeSubtaskPlanResult"]
 
 
 class PlannerSiteAnalyzer:
@@ -135,9 +98,11 @@ class PlannerSiteAnalyzer:
     ) -> dict | None:
         system_prompt = render_template(PROMPT_TEMPLATE_PATH, section="analyze_site_system_prompt")
         accessibility_text = await self._fetch_accessibility_text()
+        known_page_model = resolve_known_page_model(self._planner)
         user_message = self._build_analysis_user_message(
             snapshot=snapshot,
             accessibility_text=accessibility_text,
+            known_page_model=known_page_model,
             node_context=node_context,
             nav_steps=nav_steps,
         )
@@ -147,6 +112,7 @@ class PlannerSiteAnalyzer:
             snapshot=snapshot,
             system_prompt=system_prompt,
             user_message=user_message,
+            known_page_model=known_page_model,
             node_context=node_context,
             nav_steps=nav_steps,
         )
@@ -163,6 +129,7 @@ class PlannerSiteAnalyzer:
         *,
         snapshot: object,
         accessibility_text: str,
+        known_page_model: dict[str, Any],
         node_context: dict[str, str] | None,
         nav_steps: list[dict] | None,
     ) -> str:
@@ -176,6 +143,7 @@ class PlannerSiteAnalyzer:
                 "recent_actions": self._planner._format_recent_actions(nav_steps),
                 "candidate_elements": self._planner._build_planner_candidates(snapshot),
                 "grouping_semantics": self._format_grouping_semantics(),
+                "known_page_model": format_known_page_model(known_page_model),
                 "page_accessibility_text": accessibility_text or "无",
                 "selected_skills_context": self._planner.selected_skills_context
                 or "当前未选择任何站点 skills。",
@@ -209,6 +177,7 @@ class PlannerSiteAnalyzer:
         snapshot: object,
         system_prompt: str,
         user_message: str,
+        known_page_model: dict[str, Any],
         node_context: dict[str, str] | None,
         nav_steps: list[dict] | None,
     ) -> dict | None:
@@ -224,7 +193,10 @@ class PlannerSiteAnalyzer:
             response = await ainvoke_with_stream(self._planner.llm, messages)
             response_text = extract_response_text_from_llm_payload(response)
             response_summary = summarize_llm_payload(response)
-            result = parse_json_dict_from_llm(response_text)
+            result = resolve_world_model_analysis(
+                parse_json_dict_from_llm(response_text),
+                known_page_model,
+            )
             self._append_analysis_trace(
                 input_payload=trace_input,
                 output_payload={"raw_response": response_text, "parsed_payload": result},

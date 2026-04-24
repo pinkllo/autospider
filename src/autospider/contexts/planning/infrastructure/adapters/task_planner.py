@@ -83,6 +83,8 @@ class TaskPlanner(
         selected_skills: list[dict] | None = None,
         planner_intent: PlannerIntent | dict[str, Any] | None = None,
         prior_failures: list[dict[str, Any]] | None = None,
+        decision_context: dict[str, Any] | None = None,
+        world_snapshot: dict[str, Any] | None = None,
     ):
         """初始化任务规划器。
 
@@ -101,6 +103,8 @@ class TaskPlanner(
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.prior_failures = [dict(item) for item in list(prior_failures or [])]
+        self.decision_context = dict(decision_context or {})
+        self.world_snapshot = dict(world_snapshot or {})
         self.planner_intent = (
             planner_intent
             if isinstance(planner_intent, PlannerIntent)

@@ -10,6 +10,9 @@ from autospider.contexts.planning.infrastructure.adapters import (
 from autospider.contexts.planning.infrastructure.adapters.analysis_support import (
     PlannerSiteAnalyzer,
 )
+from autospider.contexts.planning.infrastructure.adapters.analysis_world_model import (
+    resolve_world_model_analysis,
+)
 
 
 class _FakeIntent:
@@ -34,6 +37,8 @@ class _FakeRuntime:
         self.planner_intent = _FakeIntent()
         self.selected_skills_context = ""
         self.selected_skills = [{"name": "notice-skill"}]
+        self.decision_context = {}
+        self.world_snapshot = {}
         self.prior_failures = [
             {
                 "category": "timeout",
@@ -86,6 +91,7 @@ async def test_site_analyzer_analyze_site_structure_post_processes_and_traces(
         assert variables["current_category_path"] == "公告"
         assert variables["recent_actions"] == "- 点击：公告"
         assert variables["candidate_elements"] == "- [1] 公告"
+        assert variables["known_page_model"] == "无"
         assert "subtask=sub_001" in variables["prior_failure_evidence"]
         return "user-message"
 
@@ -162,3 +168,66 @@ async def test_site_analyzer_analyze_site_structure_post_processes_and_traces(
     assert traces[0][1]["model"] == "planner-test-model"
     assert traces[0][1]["input"]["current_url"] == "https://example.com/notices"
     assert traces[0][1]["response_summary"] == {"status": "ok"}
+
+
+def test_resolve_world_model_analysis_reuses_known_page_model() -> None:
+    known_page_model = {
+        "page_id": "node_001",
+        "page_type": "category",
+        "metadata": {
+            "name": "公告入口",
+            "observations": "已有公告分类入口",
+            "analysis": {
+                "page_type": "category",
+                "name": "公告入口",
+                "observations": "已有公告分类入口",
+                "subtasks": [{"name": "采购公告", "link_text": "采购公告"}],
+            },
+        },
+    }
+
+    result = resolve_world_model_analysis(
+        {"world_model_status": "reused", "page_model_update": None},
+        known_page_model,
+    )
+
+    assert result == {
+        "page_type": "category",
+        "name": "公告入口",
+        "observations": "已有公告分类入口",
+        "subtasks": [{"name": "采购公告", "link_text": "采购公告"}],
+        "world_model_status": "reused",
+    }
+
+
+def test_resolve_world_model_analysis_merges_minimal_update() -> None:
+    known_page_model = {
+        "page_id": "node_001",
+        "page_type": "category",
+        "metadata": {
+            "analysis": {
+                "page_type": "category",
+                "name": "公告入口",
+                "observations": "旧描述",
+                "subtasks": [{"name": "采购公告", "link_text": "采购公告"}],
+            }
+        },
+    }
+
+    result = resolve_world_model_analysis(
+        {
+            "world_model_status": "updated",
+            "page_model_update": {
+                "observations": "新增地区筛选栏",
+                "category_candidates": [{"name": "华南", "link_text": "华南"}],
+            },
+        },
+        known_page_model,
+    )
+
+    assert result["page_type"] == "category"
+    assert result["name"] == "公告入口"
+    assert result["observations"] == "新增地区筛选栏"
+    assert result["subtasks"] == [{"name": "采购公告", "link_text": "采购公告"}]
+    assert result["category_candidates"] == [{"name": "华南", "link_text": "华南"}]
+    assert result["world_model_status"] == "updated"

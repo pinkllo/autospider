@@ -9,7 +9,8 @@ analyze_site_system_prompt: |
   # 执行步骤
 
   ## 步骤 1：分析页面构成
-  观察截图主体区域，识别以下元素类型：
+  先对照「World Model 中的已知页面结构」。如果当前截图/页面文本与该描述一致，不要重新输出页面构成分析。
+  只有当 World Model 为空，或当前页面与已知描述存在缺失/过期/冲突时，才观察截图主体区域并识别以下元素类型：
   - 同质记录列表（公告、商品、表格行、卡片流）
   - 分类/频道/栏目导航入口
   - 筛选控件（标签、下拉框、搜索框）
@@ -23,12 +24,39 @@ analyze_site_system_prompt: |
   - 页面可能有多个导航维度（如行业分类、交易环节 tab、子行业筛选等），先逐一识别每个维度，再判断哪个维度与用户的分组语义最吻合
 
   ## 步骤 3：决策
+  - 若当前页面与 World Model 一致，输出 `world_model_status="reused"`，不要重复输出 page_type/name/observations/category_candidates/subtasks
+  - 若当前页面与 World Model 不一致，只在 `page_model_update` 中输出最小增量或修正，不要复述未变化的旧内容
+  - 若 World Model 为空，输出 `world_model_status="fresh"`，并按完整页面分析格式输出
   - `category_candidates` 只放与用户分组语义吻合的那一个维度的候选，不要混入其他维度的元素
   - 如果 `category_discovery_mode=manual` 且有 `requested_categories`，优先匹配指定分类
   - 不确定哪个维度吻合时，有稳定列表就判 `list_page`
 
   # 输出格式
+  复用 World Model 时：
   {
+    "world_model_status": "reused",
+    "page_model_update": null
+  }
+
+  发现不一致时，只输出最小增量：
+  {
+    "world_model_status": "updated",
+    "page_model_update": {
+      "page_type": "list_page 或 category（可选，仅变化时）",
+      "name": "页面语义名称（可选，仅变化时）",
+      "observations": "新增/修正证据短句",
+      "category_candidates": [
+        {"name": "分类名称", "mark_id": 42, "link_text": "页面可见原文"}
+      ],
+      "subtasks": [
+        {"name": "子分类名称", "mark_id": 42, "link_text": "页面可见原文", "task_description": "采集目标描述（可选）"}
+      ]
+    }
+  }
+
+  首次分析或 World Model 为空时：
+  {
+    "world_model_status": "fresh",
     "page_type": "list_page 或 category",
     "name": "页面语义名称",
     "task_description": "采集目标描述（仅 list_page）",
@@ -51,6 +79,8 @@ analyze_site_system_prompt: |
   - 禁止从用户原始措辞反推分类名，拆分依据来自 group_by + 页面事实
   - 禁止在不确定时草率判定 category，不要因为按钮/标签多就判 category
   - `subtasks` 仅 `page_type=category` 时填写，否则返回空数组
+  - `world_model_status=reused` 时禁止输出完整页面分析字段，避免重复消耗输出 token
+  - `world_model_status=updated` 时 page_model_update 必须是最小补丁，禁止照抄 World Model 已有描述
   - skills 仅作先验线索，以当前截图为准
 
 analyze_site_user_message: |
@@ -78,6 +108,9 @@ analyze_site_user_message: |
 
   ## 结构化分组语义
   {{grouping_semantics}}
+
+  ## World Model 中的已知页面结构
+  {{known_page_model}}
 
   ## 已选中的站点 skills
   {{selected_skills_context}}

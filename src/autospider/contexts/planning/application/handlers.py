@@ -81,6 +81,8 @@ class RuntimeExpansionService:
         global_browser_budget: int,
         max_children: int,
         use_main_model: bool,
+        decision_context: dict[str, Any] | None = None,
+        world_snapshot: dict[str, Any] | None = None,
     ) -> RuntimeExpansionResult:
         session = self._browser_session_cls(
             headless=headless,
@@ -98,6 +100,8 @@ class RuntimeExpansionService:
                 user_request=str(subtask.task_description or ""),
                 output_dir=output_dir,
                 use_main_model=use_main_model,
+                decision_context=decision_context,
+                world_snapshot=world_snapshot,
             )
             result = await planner.plan_runtime_subtasks(
                 parent_subtask=subtask,

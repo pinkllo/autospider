@@ -184,6 +184,8 @@ class SubTaskWorker:
             use_main_model=_resolve_runtime_subtasks_use_main_model(
                 self.runtime_subtasks_use_main_model
             ),
+            decision_context=self._resolve_decision_context(self.subtask),
+            world_snapshot=dict(self.world_snapshot or {}),
         )
         journal_entries = self._normalize_runtime_journal_entries(expanded.journal_entries)
         return {
