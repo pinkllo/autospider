@@ -181,6 +181,26 @@ def resolve_list_profile_from_world(
     variant_label: str = "",
     task_description: str = "",
 ) -> dict[str, Any]:
+    candidates = resolve_list_profile_candidates_from_world(
+        world_snapshot,
+        page_id=page_id,
+        page_state_signature=page_state_signature,
+        anchor_url=anchor_url,
+        variant_label=variant_label,
+        task_description=task_description,
+    )
+    return dict(candidates[0]) if candidates else {}
+
+
+def resolve_list_profile_candidates_from_world(
+    world_snapshot: Mapping[str, Any] | None,
+    *,
+    page_id: str = "",
+    page_state_signature: str = "",
+    anchor_url: str = "",
+    variant_label: str = "",
+    task_description: str = "",
+) -> list[dict[str, Any]]:
     world = dict(world_snapshot or {})
     raw_model = dict(world.get("world_model") or {})
     raw_pages = dict(raw_model.get("page_models") or {})
@@ -188,22 +208,36 @@ def resolve_list_profile_from_world(
     metadata = normalize_profile_metadata(page.get("metadata"))
     profiles = metadata.get(LIST_PAGE_PROFILE_KEY)
     if not isinstance(profiles, Mapping):
-        return {}
+        return []
     if "common_detail_xpath" in profiles:
-        return dict(profiles)
+        return [dict(profiles)]
     key = build_list_profile_key(
         page_state_signature=page_state_signature,
         anchor_url=anchor_url,
         variant_label=variant_label,
         task_description=task_description,
     )
-    candidate = profiles.get(key)
-    if isinstance(candidate, Mapping):
-        return dict(candidate)
-    if len(profiles) == 1:
-        only = next(iter(profiles.values()))
-        return dict(only) if isinstance(only, Mapping) else {}
-    return {}
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for raw_candidate in profiles.values():
+        if not isinstance(raw_candidate, Mapping):
+            continue
+        candidate = dict(raw_candidate)
+        score = 0
+        if str(candidate.get("profile_key") or "") == key:
+            score += 8
+        if page_state_signature and str(candidate.get("page_state_signature") or "") == page_state_signature:
+            score += 4
+        if anchor_url and str(candidate.get("anchor_url") or "") == anchor_url:
+            score += 3
+        if variant_label and str(candidate.get("variant_label") or "") == variant_label:
+            score += 2
+        if task_description and str(candidate.get("task_description") or "") == task_description:
+            score += 2
+        if str(candidate.get("common_detail_xpath") or "").strip():
+            score += 1
+        scored.append((score, candidate))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [dict(candidate) for _, candidate in scored]
 
 
 def merge_detail_field_profiles(

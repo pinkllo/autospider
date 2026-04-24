@@ -141,3 +141,91 @@ async def test_page_state_runtime_wait_for_planner_page_ready_preserves_fallback
         ("load_state", {"state": "networkidle", "timeout": 5000}),
         ("timeout", 1500),
     ]
+
+from types import SimpleNamespace
+
+from autospider.contexts.planning.domain.page_state import PlannerPageState
+from autospider.contexts.planning.domain.subtask_builder import PlannerSubtaskBuilder
+
+
+def test_planner_page_state_build_dedup_signature_ignores_tracking_query_and_normalizes_context() -> None:
+    page_state = PlannerPageState(page=object())
+
+    first = page_state.build_dedup_signature(
+        current_url="https://example.com/notices/?utm_source=wx&tab=notice&id=1",
+        context={"category_path": "公告 > 通知公告", "category_name": "通知公告"},
+        variant_label="通知公告",
+    )
+    second = page_state.build_dedup_signature(
+        current_url="https://example.com/notices?tab=notice&id=1&utm_medium=social",
+        context={"category_path": ["公告", "通知公告"], "category_name": " 通知公告 "},
+        variant_label=" 通知公告 ",
+    )
+
+    assert first == second
+
+
+def test_subtask_builder_dedupes_variants_by_semantic_identity_instead_of_page_state_signature() -> None:
+    class _PlannerStub:
+        user_request = "采集通知公告"
+
+        def _format_context_path(self, context: dict[str, str] | None) -> str:
+            path = (context or {}).get("category_path") or ""
+            return str(path).replace("|", " > ")
+
+        def _sanitize_context(self, context: dict[str, str] | None) -> dict[str, str]:
+            return dict(context or {})
+
+        def _extract_category_path(self, context: dict[str, str] | None) -> list[str]:
+            raw = str((context or {}).get("category_path") or "")
+            return [item.strip() for item in raw.split(">") if item.strip()]
+
+        def _normalize_semantic_label(self, value: str) -> str:
+            return " ".join(str(value or "").strip().lower().split())
+
+        def _build_dedup_signature(
+            self,
+            *,
+            current_url: str,
+            context: dict[str, str] | None = None,
+            variant_label: str = "",
+        ) -> str:
+            return PlannerPageState(page=object()).build_dedup_signature(
+                current_url=current_url,
+                context=context,
+                variant_label=variant_label,
+            )
+
+        def _resolve_grouped_target_count(self):
+            return None
+
+    builder = PlannerSubtaskBuilder(_PlannerStub())
+    variants = [
+        SimpleNamespace(
+            page_state_signature="state-a",
+            resolved_url="https://example.com/notices?tab=notice&utm_source=wx",
+            anchor_url="https://example.com/notices",
+            variant_label="通知公告",
+            nav_steps=[{"action": "click", "target_text": "通知公告"}],
+            context={"category_path": "公告 > 通知公告", "category_name": "通知公告"},
+        ),
+        SimpleNamespace(
+            page_state_signature="state-b",
+            resolved_url="https://example.com/notices/?tab=notice",
+            anchor_url="https://example.com/notices",
+            variant_label=" 通知公告 ",
+            nav_steps=[{"action": "click", "target_text": "通知公告"}, {"action": "wait"}],
+            context={"category_path": "公告 > 通知公告", "category_name": "通知公告"},
+        ),
+    ]
+    analysis = {"subtasks": [{"name": "通知公告"}, {"name": "通知公告-重复"}]}
+
+    subtasks = builder._build_subtasks_from_variants(
+        variants,
+        analysis=analysis,
+        depth=0,
+    )
+
+    assert len(subtasks) == 1
+    assert subtasks[0].page_state_signature == "state-a"
+    assert subtasks[0].variant_label == "通知公告"

@@ -27,6 +27,7 @@ class FieldRule:
     field: FieldDefinition
     xpath: str | None = None
     xpath_fallbacks: tuple[str, ...] = ()
+    xpath_candidate_pool: tuple[str, ...] = ()
     detail_template_signature: str = ""
     field_signature: str = ""
     xpath_validated: bool = False
@@ -64,6 +65,7 @@ class FieldRule:
             field=field,
             xpath=xpath,
             xpath_fallbacks=fallbacks,
+            xpath_candidate_pool=_normalize_xpath_fallbacks(payload.get("xpath_candidate_pool")),
             detail_template_signature=str(payload.get("detail_template_signature") or "").strip(),
             field_signature=str(payload.get("field_signature") or "").strip(),
             xpath_validated=bool(payload.get("xpath_validated", xpath is not None)),
@@ -91,6 +93,7 @@ class FieldRule:
         payload = self.field.to_payload()
         payload["xpath"] = self.xpath
         payload["xpath_fallbacks"] = list(self.xpath_fallbacks)
+        payload["xpath_candidate_pool"] = list(self.xpath_candidate_pool)
         payload["detail_template_signature"] = self.detail_template_signature
         payload["field_signature"] = self.field_signature
         payload["xpath_validated"] = self.xpath_validated

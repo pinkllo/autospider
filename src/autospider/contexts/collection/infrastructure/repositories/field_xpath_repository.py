@@ -54,12 +54,12 @@ class FieldXPathQueryService:
         )
 
     @staticmethod
-    def _resolve_profile_candidate(
+    def _resolve_profile_candidates(
         *,
         url: str,
         field: FieldDefinition,
         world_snapshot: dict | None,
-    ) -> dict:
+    ) -> list[dict]:
         world_model = dict(dict(world_snapshot or {}).get("world_model") or {})
         page_models = dict(world_model.get("page_models") or {})
         template_signature = build_detail_template_signature(
@@ -72,18 +72,29 @@ class FieldXPathQueryService:
             data_type=field.data_type,
             extraction_source=str(field.extraction_source or ""),
         )
+        candidates: list[tuple[int, dict]] = []
         for page in page_models.values():
             metadata = normalize_profile_metadata(dict(page).get("metadata"))
             profiles = list(metadata.get(DETAIL_FIELD_PROFILES_KEY) or [])
             for profile in profiles:
                 if not isinstance(profile, dict):
                     continue
-                if str(profile.get("detail_template_signature") or "") != template_signature:
+                if str(profile.get("field_name") or "") != str(field.name or ""):
                     continue
-                if str(profile.get("field_signature") or "") != field_signature:
-                    continue
-                return dict(profile)
-        return {}
+                score = 0
+                if str(profile.get("detail_template_signature") or "") == template_signature:
+                    score += 4
+                if str(profile.get("field_signature") or "") == field_signature:
+                    score += 4
+                if str(profile.get("extraction_source") or "") == str(field.extraction_source or ""):
+                    score += 2
+                if bool(profile.get("validated", False)):
+                    score += 1
+                if str(profile.get("xpath") or "").strip():
+                    score += 1
+                candidates.append((score, dict(profile)))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [candidate for _, candidate in candidates]
 
     def build_fields_config(
         self,
@@ -101,14 +112,20 @@ class FieldXPathQueryService:
             repo = FieldXPathRepository(session)
             for field in fields:
                 payload = self._field_to_payload(field)
-                profile_candidate = self._resolve_profile_candidate(
+                profile_candidates = self._resolve_profile_candidates(
                     url=url,
                     field=field,
                     world_snapshot=world_snapshot,
                 )
+                profile_candidate = profile_candidates[0] if profile_candidates else {}
                 if profile_candidate:
                     payload["xpath"] = str(profile_candidate.get("xpath") or "").strip() or None
                     payload["xpath_fallbacks"] = list(profile_candidate.get("xpath_fallbacks") or [])
+                    payload["xpath_candidate_pool"] = [
+                        str(item.get("xpath") or "").strip()
+                        for item in profile_candidates
+                        if str(item.get("xpath") or "").strip()
+                    ]
                     payload["xpath_validated"] = bool(profile_candidate.get("validated", True))
                     payload["detail_template_signature"] = str(
                         profile_candidate.get("detail_template_signature") or ""
@@ -119,6 +136,7 @@ class FieldXPathQueryService:
                 xpaths = self._list_active_xpaths(repo=repo, domain=domain, field_name=field.name)
                 payload["xpath"] = xpaths[0] if xpaths else None
                 payload["xpath_fallbacks"] = xpaths[1:] if len(xpaths) > 1 else []
+                payload["xpath_candidate_pool"] = list(xpaths)
                 payload["detail_template_signature"] = build_detail_template_signature(
                     url=url,
                     page_hint=str(field.description or ""),

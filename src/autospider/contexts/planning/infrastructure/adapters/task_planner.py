@@ -192,6 +192,19 @@ class TaskPlanner(
             self._page_runtime = runtime
         return runtime
 
+    def _build_dedup_signature(
+        self,
+        *,
+        current_url: str,
+        context: dict[str, str] | None = None,
+        variant_label: str = "",
+    ) -> str:
+        return self._page_state.build_dedup_signature(
+            current_url=current_url,
+            context=context,
+            variant_label=variant_label,
+        )
+
     async def plan_runtime_subtasks(
         self,
         *,

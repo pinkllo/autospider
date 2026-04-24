@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from typing import Any
 
 from autospider.platform.observability.logger import get_logger
@@ -15,6 +16,20 @@ _ACTIVE_STATE_TOKENS = ("active", "selected", "current", "checked")
 _SAME_PAGE_ROLES = {"tab", "option", "menuitem", "menuitemradio", "treeitem"}
 _SAME_PAGE_TAGS = {"button"}
 _EMPTY_HREF_VALUES = {"", "#", "javascript:void(0)", "javascript:void(0);", "javascript:;"}
+_TRACKING_QUERY_PREFIXES = ("utm_",)
+_TRACKING_QUERY_KEYS = {
+    "spm",
+    "from",
+    "from_source",
+    "fromsite",
+    "source",
+    "sourceid",
+    "session",
+    "sessionid",
+    "sid",
+    "timestamp",
+    "ts",
+}
 
 
 class PlannerPageState:
@@ -106,6 +121,75 @@ class PlannerPageState:
             sort_keys=True,
         )
         return f"{normalized_url}#{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+
+    def build_dedup_signature(
+        self,
+        *,
+        current_url: str,
+        context: dict[str, str] | None = None,
+        variant_label: str = "",
+    ) -> str:
+        normalized_url = self._normalize_dedup_url(current_url)
+        semantic_context = self._normalize_context_identity(context)
+        normalized_label = self._normalize_label(variant_label)
+        payload = {
+            "url": normalized_url,
+            "context": semantic_context,
+            "label": normalized_label,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        return f"{normalized_url}#{digest}" if normalized_url else digest
+
+    def _normalize_dedup_url(self, current_url: str) -> str:
+        raw_url = str(current_url or "").strip()
+        if not raw_url:
+            return ""
+        parts = urlsplit(raw_url)
+        query_items = [
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if not self._is_tracking_query_key(key)
+        ]
+        normalized_query = "&".join(
+            f"{key}={value}" if value else key for key, value in sorted(query_items)
+        )
+        normalized_path = parts.path.rstrip("/") or "/"
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), normalized_path, normalized_query, ""))
+
+    def _is_tracking_query_key(self, key: str) -> bool:
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            return False
+        return normalized in _TRACKING_QUERY_KEYS or any(
+            normalized.startswith(prefix) for prefix in _TRACKING_QUERY_PREFIXES
+        )
+
+    def _normalize_context_identity(self, context: dict[str, str] | None) -> dict[str, str | list[str]]:
+        raw = dict(context or {})
+        category_path = self._split_context_path(raw.get("category_path") or raw.get("path") or "")
+        normalized: dict[str, str | list[str]] = {}
+        if category_path:
+            normalized["category_path"] = category_path
+        category_name = self._normalize_label(raw.get("category_name") or raw.get("name") or "")
+        if category_name:
+            normalized["category_name"] = category_name
+        scope_key = self._normalize_label(raw.get("scope_key") or raw.get("key") or "")
+        if scope_key:
+            normalized["scope_key"] = scope_key
+        return normalized
+
+    def _split_context_path(self, raw_path: Any) -> list[str]:
+        if isinstance(raw_path, (list, tuple)):
+            values = raw_path
+        else:
+            text = str(raw_path or "")
+            values = text.split(">") if text else []
+        normalized = [self._normalize_label(value) for value in values]
+        return [value for value in normalized if value]
+
+    def _normalize_label(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().split())
 
     async def restore_page_state(
         self,

@@ -43,6 +43,15 @@ def _resolve_registry_identity(semantic_signature: str, task_description: str) -
     return str(semantic_signature or task_description or "").strip()
 
 
+def _resolve_runtime_match_identity(matched_registry_id: str, matched_history_semantic_signature: str) -> dict[str, str]:
+    return {
+        "matched_registry_id": str(matched_registry_id or "").strip(),
+        "matched_history_semantic_signature": str(
+            matched_history_semantic_signature or ""
+        ).strip(),
+    }
+
+
 def _normalize_run_semantics(
     *,
     semantic_signature: str,
@@ -269,4 +278,5 @@ __all__ = [
     "_normalize_run_semantics",
     "_require_semantic_signature_for_new_task",
     "_resolve_registry_identity",
+    "_resolve_runtime_match_identity",
 ]

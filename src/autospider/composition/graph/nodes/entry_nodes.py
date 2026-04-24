@@ -826,7 +826,10 @@ async def chat_history_match(state: dict[str, Any]) -> dict[str, Any]:
     if selected:
         selected_strategy = dict(selected.get("strategy_payload") or {})
         task["matched_registry_id"] = selected["registry_id"]
-        task["semantic_signature"] = str(selected.get("semantic_signature") or semantic_signature)
+        task["matched_history_semantic_signature"] = str(
+            selected.get("semantic_signature") or ""
+        )
+        task["semantic_signature"] = semantic_signature
         task["strategy_payload"] = selected_strategy
         if selected_strategy:
             task.update(selected_strategy)

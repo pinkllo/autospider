@@ -45,14 +45,20 @@ class PlannerSubtaskBuilder:
         parent_execution_brief: ExecutionBrief | None = None,
     ) -> list[SubTask]:
         subtasks: list[SubTask] = []
-        seen_signatures: set[str] = set()
+        seen_dedup_signatures: set[str] = set()
         raw_subtasks = list(analysis.get("subtasks") or [])
 
         for idx, variant in enumerate(variants):
             page_state_signature = str(variant.page_state_signature or "").strip()
-            if not page_state_signature or page_state_signature in seen_signatures:
+            variant_label = variant.variant_label or self._build_variant_label(variant.context)
+            dedup_signature = self._planner._build_dedup_signature(
+                current_url=str(variant.resolved_url or ""),
+                context=variant.context,
+                variant_label=str(variant_label or ""),
+            )
+            if not page_state_signature or dedup_signature in seen_dedup_signatures:
                 continue
-            seen_signatures.add(page_state_signature)
+            seen_dedup_signatures.add(dedup_signature)
 
             raw = raw_subtasks[idx] if idx < len(raw_subtasks) else {}
             name = str(raw.get("name") or variant.variant_label or f"分类_{idx + 1}").strip()
@@ -80,8 +86,7 @@ class PlannerSubtaskBuilder:
                     list_url=variant.resolved_url,
                     anchor_url=variant.anchor_url,
                     page_state_signature=page_state_signature,
-                    variant_label=variant.variant_label
-                    or self._build_variant_label(variant.context),
+                    variant_label=variant_label,
                     task_description=task_desc,
                     priority=idx,
                     max_pages=raw.get("estimated_pages"),

@@ -257,8 +257,8 @@ def test_subtask_worker_resolves_initial_collection_config_from_world_snapshot()
 
     resolved = worker._resolve_initial_collection_config(subtask)
 
-    assert resolved["profile_key"] == "profile-1"
-    assert resolved["common_detail_xpath"] == "//a[@class='detail']"
+    assert resolved[0]["profile_key"] == "profile-1"
+    assert resolved[0]["common_detail_xpath"] == "//a[@class='detail']"
 
 
 @pytest.mark.asyncio

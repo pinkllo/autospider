@@ -81,7 +81,7 @@ class URLCollector(BaseCollector):
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         initial_nav_steps: list[dict] | None = None,
-        initial_collection_config: CollectionConfig | dict | None = None,
+        initial_collection_config: CollectionConfig | dict | list[dict] | None = None,
         anchor_url: str = "",
         page_state_signature: str = "",
         variant_label: str = "",
@@ -112,10 +112,25 @@ class URLCollector(BaseCollector):
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.initial_nav_steps = list(initial_nav_steps or [])
-        if isinstance(initial_collection_config, dict) and initial_collection_config:
+        self.initial_collection_config_candidates: list[CollectionConfig] = []
+        if isinstance(initial_collection_config, list):
+            self.initial_collection_config_candidates = [
+                CollectionConfig.from_mapping(item)
+                for item in initial_collection_config
+                if isinstance(item, dict) and item
+            ]
+            self.initial_collection_config = (
+                self.initial_collection_config_candidates[0]
+                if self.initial_collection_config_candidates
+                else None
+            )
+        elif isinstance(initial_collection_config, dict) and initial_collection_config:
             self.initial_collection_config = CollectionConfig.from_mapping(initial_collection_config)
+            self.initial_collection_config_candidates = [self.initial_collection_config]
         else:
             self.initial_collection_config = initial_collection_config or None
+            if self.initial_collection_config:
+                self.initial_collection_config_candidates = [self.initial_collection_config]
         self.decision_context = dict(decision_context or {})
         self.anchor_url = str(anchor_url or "")
         self.page_state_signature = str(page_state_signature or "")
@@ -298,17 +313,25 @@ class URLCollector(BaseCollector):
         self.initial_collection_config = _collection_config_from_loaded_skills(loaded_skills)
 
     async def _try_apply_initial_collection_config(self) -> bool:
-        candidate = self.initial_collection_config
-        if not candidate:
+        candidates = list(self.initial_collection_config_candidates)
+        if not candidates and self.initial_collection_config:
+            candidates = [self.initial_collection_config]
+        if not candidates:
             self._mark_profile_rejected("missing_key")
             return False
+        for candidate in candidates:
+            if await self._try_validate_initial_collection_candidate(candidate):
+                self.initial_collection_config = candidate
+                return True
+        return False
+
+    async def _try_validate_initial_collection_candidate(self, candidate: CollectionConfig) -> bool:
         detail_xpath = str(candidate.common_detail_xpath or "").strip()
         if not detail_xpath:
             self._mark_profile_rejected("missing_common_detail_xpath")
             return False
-        if not self._matches_initial_profile_key(candidate):
-            self._mark_profile_rejected("stale_page_state")
-            return False
+        previous_nav_steps = [dict(step) for step in getattr(self, "nav_steps", [])]
+        previous_detail_xpath = self.common_detail_xpath
         if candidate.nav_steps:
             replay = await self.navigation_handler.replay_nav_steps(candidate.nav_steps)
             replay_succeeded = bool(getattr(replay, "success", replay))
@@ -320,24 +343,24 @@ class URLCollector(BaseCollector):
         self.common_detail_xpath = detail_xpath
         preview_urls = await self._preview_urls_with_xpath()
         if not preview_urls:
-            self.common_detail_xpath = None
+            self.nav_steps = previous_nav_steps
+            self.common_detail_xpath = previous_detail_xpath
             self._mark_profile_rejected("xpath_no_match")
             return False
         self._apply_initial_pagination_config(candidate)
         self.profile_validation_status = PROFILE_STATUS_VALIDATED
         self.profile_reject_reason = ""
-        logger.info("[URLCollector] profile_hit: preview_urls=%s", len(preview_urls))
+        logger.info(
+            "[URLCollector] profile_hit: preview_urls=%s, candidate_profile_key=%s",
+            len(preview_urls),
+            str(candidate.profile_key or ""),
+        )
         return True
 
     def _mark_profile_rejected(self, reason: str) -> None:
         self.profile_validation_status = PROFILE_STATUS_REJECTED
         self.profile_reject_reason = str(reason or "profile_rejected")
         logger.info("[URLCollector] profile_reject: %s", self.profile_reject_reason)
-
-    def _matches_initial_profile_key(self, candidate: CollectionConfig) -> bool:
-        if not candidate.profile_key:
-            return True
-        return candidate.profile_key == self.profile_key
 
     def _apply_initial_pagination_config(self, candidate: CollectionConfig) -> None:
         if not self.pagination_handler:

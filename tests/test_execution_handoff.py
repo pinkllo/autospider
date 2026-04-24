@@ -169,3 +169,34 @@ def test_execution_request_from_params_normalizes_invalid_grouping_inputs() -> N
     assert request.requested_categories == []
     assert request.category_examples == ["交通运输工程"]
 
+
+def test_build_chat_handoff_keeps_runtime_match_identity_separate_from_persistence_identity() -> None:
+    state = {
+        "cli_args": {
+            "output_dir": "output",
+            "request": "把专业按分类各抓 3 条",
+        },
+        "conversation": {
+            "selected_skills": [],
+        },
+    }
+    task = {
+        "intent": "collect",
+        "list_url": "https://example.com/majors",
+        "task_description": "把专业按分类各抓 3 条",
+        "fields": [{"name": "title", "description": "专业名称", "required": True}],
+        "group_by": "category",
+        "per_group_target_count": 3,
+        "matched_registry_id": "registry-semantic-001",
+        "matched_history_semantic_signature": "semantic-sig-history",
+        "semantic_signature": "stale-semantic-signature",
+    }
+
+    expected_semantic_signature = build_semantic_signature(task)
+    review_payload = build_chat_review_payload(state=state, task=task, dispatch_mode="multi")
+    execution_params = build_chat_execution_params(state=state, task=task, dispatch_mode="multi")
+
+    assert review_payload["clarified_task"]["semantic_signature"] == expected_semantic_signature
+    assert review_payload["clarified_task"]["matched_history_semantic_signature"] == "semantic-sig-history"
+    assert execution_params["semantic_signature"] == expected_semantic_signature
+    assert execution_params["matched_history_semantic_signature"] == "semantic-sig-history"

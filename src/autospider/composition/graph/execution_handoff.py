@@ -78,6 +78,9 @@ def build_chat_review_payload(
     clarified_task["semantic_signature"] = semantic_signature
     clarified_task["strategy_payload"] = strategy_payload
     clarified_task["matched_registry_id"] = str(task.get("matched_registry_id") or "")
+    clarified_task["matched_history_semantic_signature"] = str(
+        task.get("matched_history_semantic_signature") or ""
+    )
     base_options = _apply_serial_mode_overrides(
         {
             "max_pages": _coalesce_cli_option(
@@ -143,6 +146,9 @@ def build_chat_execution_params(
             "semantic_signature": semantic_signature,
             "strategy_payload": strategy_payload,
             "matched_registry_id": str(task.get("matched_registry_id") or ""),
+            "matched_history_semantic_signature": str(
+                task.get("matched_history_semantic_signature") or ""
+            ),
             "fields": [_field_to_dict(item) for item in task.get("fields", [])],
             **grouping,
             "max_pages": _coalesce_cli_option(cli_args, "max_pages", task.get("max_pages")),

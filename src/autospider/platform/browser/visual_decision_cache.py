@@ -9,14 +9,25 @@ def _clean_text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _cache_key(*, page_state_signature: str, purpose: str, target_text: str = "") -> str:
+def _normalize_target_text(value: Any) -> str:
+    return " ".join(_clean_text(value).split()).lower()
+
+
+def _exact_cache_key(*, page_state_signature: str, purpose: str, target_text: str = "") -> str:
     return "::".join(
         [
             _clean_text(page_state_signature),
             _clean_text(purpose),
-            " ".join(_clean_text(target_text).split()).lower(),
+            _normalize_target_text(target_text),
         ]
     )
+
+
+def _semantic_cache_key(*, purpose: str, target_text: str = "") -> str:
+    return "::".join([
+        _clean_text(purpose),
+        _normalize_target_text(target_text),
+    ])
 
 
 @dataclass(slots=True)
@@ -46,6 +57,7 @@ class VisualDecisionCacheEntry:
 class VisualDecisionCache:
     def __init__(self, seed: Mapping[str, Any] | None = None) -> None:
         self._items: dict[str, VisualDecisionCacheEntry] = {}
+        self._semantic_items: dict[str, VisualDecisionCacheEntry] = {}
         raw = dict(seed or {})
         for value in list(raw.get("items") or []):
             if not isinstance(value, Mapping):
@@ -60,20 +72,28 @@ class VisualDecisionCache:
                 status=_clean_text(value.get("status")),
                 metadata=dict(value.get("metadata") or {}),
             )
-            self._items[_cache_key(
-                page_state_signature=entry.page_state_signature,
-                purpose=entry.purpose,
-                target_text=entry.target_text,
-            )] = entry
+            self._store(entry)
+
+    def _store(self, entry: VisualDecisionCacheEntry) -> None:
+        exact_key = _exact_cache_key(
+            page_state_signature=entry.page_state_signature,
+            purpose=entry.purpose,
+            target_text=entry.target_text,
+        )
+        self._items[exact_key] = entry
+        semantic_key = _semantic_cache_key(purpose=entry.purpose, target_text=entry.target_text)
+        self._semantic_items[semantic_key] = entry
 
     def get(self, *, page_state_signature: str, purpose: str, target_text: str = "") -> dict[str, Any]:
-        entry = self._items.get(
-            _cache_key(
-                page_state_signature=page_state_signature,
-                purpose=purpose,
-                target_text=target_text,
-            )
+        exact_key = _exact_cache_key(
+            page_state_signature=page_state_signature,
+            purpose=purpose,
+            target_text=target_text,
         )
+        entry = self._items.get(exact_key)
+        if entry is None:
+            semantic_key = _semantic_cache_key(purpose=purpose, target_text=target_text)
+            entry = self._semantic_items.get(semantic_key)
         return entry.to_payload() if entry else {}
 
     def put_success(
@@ -97,11 +117,7 @@ class VisualDecisionCache:
             status="success",
             metadata=dict(metadata or {}),
         )
-        self._items[_cache_key(
-            page_state_signature=entry.page_state_signature,
-            purpose=entry.purpose,
-            target_text=entry.target_text,
-        )] = entry
+        self._store(entry)
 
     def put_reject(
         self,
@@ -111,17 +127,19 @@ class VisualDecisionCache:
         target_text: str = "",
         reason: str = "",
     ) -> None:
-        self.put_success(
-            page_state_signature=page_state_signature,
-            purpose=purpose,
-            target_text=target_text,
+        entry = VisualDecisionCacheEntry(
+            page_state_signature=_clean_text(page_state_signature),
+            purpose=_clean_text(purpose),
+            target_text=_clean_text(target_text),
+            status="rejected",
             metadata={"reason": _clean_text(reason)},
         )
-        self._items[_cache_key(
-            page_state_signature=page_state_signature,
-            purpose=purpose,
-            target_text=target_text,
-        )].status = "rejected"
+        exact_key = _exact_cache_key(
+            page_state_signature=entry.page_state_signature,
+            purpose=entry.purpose,
+            target_text=entry.target_text,
+        )
+        self._items[exact_key] = entry
 
     def to_payload(self) -> dict[str, Any]:
         return {"items": [entry.to_payload() for entry in self._items.values()]}

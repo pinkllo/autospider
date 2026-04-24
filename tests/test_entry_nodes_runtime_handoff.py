@@ -503,9 +503,11 @@ async def test_chat_history_match_preserves_current_task_description_when_reusin
 
     assert task["task_description"] == "把专业按分类各抓 3 条"
     assert task["matched_registry_id"] == "registry-semantic-001"
-    assert task["semantic_signature"] == "semantic-sig-001"
+    assert task["matched_history_semantic_signature"] == "semantic-sig-001"
+    assert task["semantic_signature"]
     assert task["strategy_payload"]["group_by"] == "category"
     assert handoff["normalized_params"]["semantic_signature"] == build_semantic_signature(task)
+    assert handoff["normalized_params"]["matched_history_semantic_signature"] == "semantic-sig-001"
     assert handoff["normalized_params"]["strategy_payload"]["group_by"] == "category"
     assert handoff["normalized_params"]["task_description"] == "把专业按分类各抓 3 条"
 

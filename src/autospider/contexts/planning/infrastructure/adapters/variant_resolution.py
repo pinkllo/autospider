@@ -174,7 +174,7 @@ class PlannerVariantResolver(PlannerVariantNavigationMixin):
             return []
 
         variants: list = []
-        seen_signatures: set[str] = set()
+        seen_dedup_signatures: set[str] = set()
         base_url = self.page.url
         original_url = self.page.url
 
@@ -300,14 +300,20 @@ class PlannerVariantResolver(PlannerVariantNavigationMixin):
                 continue
 
             page_state_signature = self._build_page_state_signature(resolved_url, variant_nav_steps)
-            if page_state_signature in seen_signatures:
+            dedup_signature = self._planner._build_dedup_signature(
+                current_url=resolved_url,
+                context=child_context,
+                variant_label=self._build_variant_label(child_context)
+                or str(name or "").strip(),
+            )
+            if dedup_signature in seen_dedup_signatures:
                 logger.warning(
                     "[Planner] [%s] 解析结果与已有状态重复，跳过重复子任务: %s",
                     name,
-                    page_state_signature[:80],
+                    dedup_signature[:80],
                 )
                 continue
-            seen_signatures.add(page_state_signature)
+            seen_dedup_signatures.add(dedup_signature)
             variants.append(
                 self.__class__.ResolvedPlannerVariant(
                     resolved_url=resolved_url,

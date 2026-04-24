@@ -49,8 +49,20 @@ def ensure_extraction_config(config: ExtractionConfig | Mapping[str, Any]) -> Ex
 
 
 def build_rule_xpath_chain(rule: FieldRule) -> list[str]:
-    fallback_xpaths = list(rule.xpath_fallbacks) if rule.xpath_fallbacks else None
-    return build_xpath_fallback_chain(rule.xpath or "", fallback_xpaths)
+    fallback_xpaths = list(rule.xpath_fallbacks) if rule.xpath_fallbacks else []
+    candidate_pool = list(rule.xpath_candidate_pool) if rule.xpath_candidate_pool else []
+    merged_fallbacks: list[str] = []
+    seen: set[str] = set()
+    primary = str(rule.xpath or "").strip()
+    if primary:
+        seen.add(primary)
+    for xpath in fallback_xpaths + candidate_pool:
+        normalized = str(xpath or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged_fallbacks.append(normalized)
+    return build_xpath_fallback_chain(primary, merged_fallbacks or None)
 
 
 def resolve_field_definition_value(
