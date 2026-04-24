@@ -25,6 +25,7 @@ from autospider.platform.shared_kernel.types import Action, ActionType
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.llm.protocol import coerce_bool
+from autospider.platform.browser.visual_decision_cache import VisualDecisionCache
 from autospider.platform.shared_kernel.utils.fuzzy_search import FuzzyTextSearcher, TextMatch
 from autospider.platform.llm.decider import LLMDecider
 from autospider.contexts.experience import SkillRepository as ExperienceSkillRepository, SkillRuntime
@@ -93,6 +94,12 @@ class FieldExtractor:
         self.decision_context = dict(decision_context or {})
         self.world_snapshot = dict(world_snapshot or {})
         self.failure_records = [dict(item) for item in list(failure_records or [])]
+        self.page_state_signature = str(
+            self.decision_context.get("page_model", {}).get("metadata", {}).get("page_state_signature")
+            or ""
+        )
+        site_profile = dict(self.world_snapshot.get("site_profile") or {})
+        self.visual_cache = VisualDecisionCache(site_profile.get("visual_decision_cache"))
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +125,8 @@ class FieldExtractor:
             selected_skills_context=self.selected_skills_context,
             selected_skills=self.selected_skills,
             decision_context=self.decision_context,
+            visual_cache=self.visual_cache,
+            page_state_signature=self.page_state_signature,
         )
 
         # 动作执行器

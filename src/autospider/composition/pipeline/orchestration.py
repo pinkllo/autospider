@@ -82,6 +82,7 @@ class PipelineRuntimeContext:
     task_plan_snapshot: dict[str, Any] = field(default_factory=dict)
     plan_journal: list[dict[str, Any]] = field(default_factory=list)
     initial_nav_steps: list[dict[str, Any]] = field(default_factory=list)
+    initial_collection_config: dict[str, Any] = field(default_factory=dict)
     decision_context: dict[str, Any] = field(default_factory=dict)
     world_snapshot: dict[str, Any] = field(default_factory=dict)
     failure_records: tuple[dict[str, Any], ...] = ()
@@ -127,6 +128,14 @@ class ProducerService:
                 skill_runtime=self.context.skill_runtime,
                 selected_skills=self.context.selected_skills,
                 initial_nav_steps=list(self.context.initial_nav_steps or []),
+                initial_collection_config=dict(
+                    self.context.runtime_state.collection_config
+                    or self.context.initial_collection_config
+                    or {}
+                ),
+                anchor_url=str(self.context.anchor_url or ""),
+                page_state_signature=str(self.context.page_state_signature or ""),
+                variant_label=str(self.context.variant_label or ""),
                 decision_context=dict(self.context.decision_context or {}),
             )
             result = await collector.run()
@@ -136,6 +145,13 @@ class ProducerService:
                 common_detail_xpath = str(common_detail_xpath).strip() or None
             self.context.runtime_state.collection_config = {
                 "nav_steps": list(getattr(collector, "nav_steps", []) or []),
+                "profile_key": str(getattr(collector, "profile_key", "") or ""),
+                "profile_validation_status": str(
+                    getattr(collector, "profile_validation_status", "") or ""
+                ),
+                "profile_reject_reason": str(
+                    getattr(collector, "profile_reject_reason", "") or ""
+                ),
                 "common_detail_xpath": common_detail_xpath,
                 "pagination_xpath": (
                     str(

@@ -8,6 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from autospider.platform.shared_kernel.knowledge_contracts import (
+    JumpWidgetProfile,
+    ListPageProfile,
+    coerce_list_page_profile,
+)
 from autospider.platform.observability.logger import get_logger
 from autospider.platform.persistence.files.idempotent_io import (
     load_json_if_exists,
@@ -17,6 +22,7 @@ from autospider.platform.persistence.files.idempotent_io import (
 logger = get_logger(__name__)
 
 _CONFIG_PAYLOAD_FIELDS = (
+    "profile_key",
     "nav_steps",
     "common_detail_xpath",
     "pagination_xpath",
@@ -26,6 +32,8 @@ _CONFIG_PAYLOAD_FIELDS = (
     "page_state_signature",
     "variant_label",
     "task_description",
+    "profile_validation_status",
+    "profile_reject_reason",
 )
 
 
@@ -35,6 +43,7 @@ class CollectionConfigLoadError(RuntimeError):
 
 @dataclass
 class CollectionConfig:
+    profile_key: str = ""
     nav_steps: list[dict[str, Any]] = field(default_factory=list)
     common_detail_xpath: str | None = None
     pagination_xpath: str | None = None
@@ -44,20 +53,42 @@ class CollectionConfig:
     page_state_signature: str = ""
     variant_label: str = ""
     task_description: str = ""
+    profile_validation_status: str = ""
+    profile_reject_reason: str = ""
     created_at: str = ""
     updated_at: str = ""
 
+    def to_list_page_profile(self) -> ListPageProfile:
+        return ListPageProfile(
+            profile_key=self.profile_key,
+            list_url=self.list_url,
+            anchor_url=self.anchor_url,
+            page_state_signature=self.page_state_signature,
+            variant_label=self.variant_label,
+            task_description=self.task_description,
+            nav_steps=tuple(
+                dict(step) for step in self.nav_steps if isinstance(step, Mapping)
+            ),
+            common_detail_xpath=str(self.common_detail_xpath or ""),
+            pagination_xpath=str(self.pagination_xpath or ""),
+            jump_widget_xpath=JumpWidgetProfile.from_mapping(self.jump_widget_xpath),
+        )
+
     def to_storage_record(self) -> dict[str, Any]:
+        profile = self.to_list_page_profile()
         return {
-            "nav_steps": [dict(step) for step in self.nav_steps if isinstance(step, dict)],
-            "common_detail_xpath": self.common_detail_xpath,
-            "pagination_xpath": self.pagination_xpath,
-            "jump_widget_xpath": dict(self.jump_widget_xpath) if self.jump_widget_xpath else None,
-            "list_url": self.list_url,
-            "anchor_url": self.anchor_url,
-            "page_state_signature": self.page_state_signature,
-            "variant_label": self.variant_label,
-            "task_description": self.task_description,
+            "profile_key": profile.profile_key,
+            "nav_steps": [dict(step) for step in profile.nav_steps],
+            "common_detail_xpath": profile.common_detail_xpath or None,
+            "pagination_xpath": profile.pagination_xpath or None,
+            "jump_widget_xpath": profile.jump_widget_xpath.to_payload(),
+            "list_url": profile.list_url,
+            "anchor_url": profile.anchor_url,
+            "page_state_signature": profile.page_state_signature,
+            "variant_label": profile.variant_label,
+            "task_description": profile.task_description,
+            "profile_validation_status": self.profile_validation_status,
+            "profile_reject_reason": self.profile_reject_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -68,26 +99,22 @@ class CollectionConfig:
 
     @classmethod
     def from_storage_record(cls, data: Mapping[str, Any]) -> "CollectionConfig":
+        profile = coerce_list_page_profile(data)
         return cls(
-            nav_steps=[
-                dict(step)
-                for step in list(data.get("nav_steps") or [])
-                if isinstance(step, Mapping)
-            ],
-            common_detail_xpath=data.get("common_detail_xpath"),
-            pagination_xpath=data.get("pagination_xpath"),
-            jump_widget_xpath=(
-                dict(data.get("jump_widget_xpath"))
-                if isinstance(data.get("jump_widget_xpath"), Mapping)
-                else None
-            ),
-            list_url=data.get("list_url", ""),
-            anchor_url=data.get("anchor_url", ""),
-            page_state_signature=data.get("page_state_signature", ""),
-            variant_label=data.get("variant_label", ""),
-            task_description=data.get("task_description", ""),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
+            profile_key=profile.profile_key,
+            nav_steps=[dict(step) for step in profile.nav_steps],
+            common_detail_xpath=profile.common_detail_xpath or None,
+            pagination_xpath=profile.pagination_xpath or None,
+            jump_widget_xpath=profile.jump_widget_xpath.to_payload(),
+            list_url=profile.list_url,
+            anchor_url=profile.anchor_url,
+            page_state_signature=profile.page_state_signature,
+            variant_label=profile.variant_label,
+            task_description=profile.task_description,
+            profile_validation_status=str(data.get("profile_validation_status") or ""),
+            profile_reject_reason=str(data.get("profile_reject_reason") or ""),
+            created_at=str(data.get("created_at") or ""),
+            updated_at=str(data.get("updated_at") or ""),
         )
 
     @classmethod
@@ -97,6 +124,40 @@ class CollectionConfig:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "CollectionConfig":
         return cls.from_storage_record(data)
+
+    @classmethod
+    def from_list_page_profile(cls, profile: ListPageProfile | Mapping[str, Any]) -> "CollectionConfig":
+        normalized = coerce_list_page_profile(profile)
+        return cls(
+            profile_key=normalized.profile_key,
+            nav_steps=[dict(step) for step in normalized.nav_steps],
+            common_detail_xpath=normalized.common_detail_xpath or None,
+            pagination_xpath=normalized.pagination_xpath or None,
+            jump_widget_xpath=normalized.jump_widget_xpath.to_payload(),
+            list_url=normalized.list_url,
+            anchor_url=normalized.anchor_url,
+            page_state_signature=normalized.page_state_signature,
+            variant_label=normalized.variant_label,
+            task_description=normalized.task_description,
+            profile_validation_status=str(
+                getattr(profile, "profile_validation_status", "")
+                if not isinstance(profile, Mapping)
+                else profile.get("profile_validation_status") or ""
+            ),
+            profile_reject_reason=str(
+                getattr(profile, "profile_reject_reason", "")
+                if not isinstance(profile, Mapping)
+                else profile.get("profile_reject_reason") or ""
+            ),
+        )
+
+    @classmethod
+    def from_skill_rules(cls, rules: Any) -> "CollectionConfig":
+        if hasattr(rules, "to_list_page_profile"):
+            return cls.from_list_page_profile(rules.to_list_page_profile())
+        if isinstance(rules, Mapping):
+            return cls.from_mapping(rules)
+        return cls()
 
 
 class ConfigPersistence:

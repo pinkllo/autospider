@@ -49,7 +49,7 @@ async def prepare_explore_skill_context(
     task_context: dict[str, Any],
     llm: Any,
     preselected_skills: list[dict] | None,
-) -> tuple[list[dict[str, str]], str]:
+) -> tuple[list[dict[str, str]], str, list[Any]]:
     selected = await skill_runtime.get_or_select(
         phase=phase,
         url=url,
@@ -57,9 +57,11 @@ async def prepare_explore_skill_context(
         llm=llm,
         preselected_skills=preselected_skills,
     )
+    loaded = skill_runtime.load_selected_bodies(selected)
     return (
         _serialize_selected_skills(selected),
-        skill_runtime.format_selected_skills_context(skill_runtime.load_selected_bodies(selected)),
+        skill_runtime.format_selected_skills_context(loaded),
+        loaded,
     )
 
 

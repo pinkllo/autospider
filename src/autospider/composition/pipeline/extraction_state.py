@@ -19,6 +19,10 @@ def _normalize_field_config(raw_field: Any) -> tuple[str, dict[str, Any]] | None
         return None
     normalized = dict(raw_field)
     normalized["xpath_fallbacks"] = _normalize_xpath_fallbacks(raw_field.get("xpath_fallbacks"))
+    normalized["detail_template_signature"] = str(
+        raw_field.get("detail_template_signature") or ""
+    ).strip()
+    normalized["field_signature"] = str(raw_field.get("field_signature") or "").strip()
     return name, normalized
 
 

@@ -128,7 +128,7 @@ def _build_document(candidate: SkillCandidate) -> SkillDocument:
         status=str(candidate.status or _DEFAULT_STATUS),
         success_rate=_build_success_rate(candidate.summary),
         success_rate_text=_build_success_rate_text(candidate.summary),
-        detail_xpath=str(candidate.collection_config.get("detail_xpath") or ""),
+        detail_xpath=_collection_detail_xpath(candidate.collection_config),
         pagination_xpath=str(candidate.collection_config.get("pagination_xpath") or ""),
         jump_input_selector=str(candidate.collection_config.get("jump_input_selector") or ""),
         jump_button_selector=str(candidate.collection_config.get("jump_button_selector") or ""),
@@ -166,6 +166,14 @@ def _build_success_rate_text(summary: dict[str, Any]) -> str:
         return ""
     rate = _build_success_rate(summary)
     return f"{rate * 100:.0f}% ({success_count}/{total_urls})"
+
+
+def _collection_detail_xpath(collection_config: dict[str, Any]) -> str:
+    return str(
+        collection_config.get("common_detail_xpath")
+        or collection_config.get("detail_xpath")
+        or ""
+    ).strip()
 
 
 def _has_usable_rules(extraction_config: dict[str, Any]) -> bool:

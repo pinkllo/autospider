@@ -16,6 +16,7 @@ from autospider.platform.persistence.files.idempotent_io import (
     write_json_idempotent,
     write_text_if_changed,
 )
+from autospider.platform.shared_kernel.knowledge_contracts import build_list_profile_key
 from autospider.contexts.collection.application.use_cases.explore_site import (
     build_detail_visit,
     extract_mark_id_text_map,
@@ -24,6 +25,10 @@ from autospider.contexts.collection.application.use_cases.explore_site import (
 )
 from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
+)
+from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
+    SkillDocumentParseError,
+    parse_skill_document,
 )
 from autospider.contexts.collection.infrastructure.crawler.base.base_collector import BaseCollector
 from autospider.contexts.collection.infrastructure.crawler.collector import (
@@ -51,6 +56,9 @@ logger = get_logger(__name__)
 URL_RULE_MIN_PRECISION = 0.8
 URL_RULE_MIN_RECALL = 0.8
 URL_RULE_MIN_SAMPLE = 3
+PROFILE_STATUS_VALIDATED = "validated"
+PROFILE_STATUS_REJECTED = "rejected"
+PROFILE_STATUS_MISS = "miss"
 
 
 class URLCollector(BaseCollector):
@@ -73,6 +81,10 @@ class URLCollector(BaseCollector):
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         initial_nav_steps: list[dict] | None = None,
+        initial_collection_config: CollectionConfig | dict | None = None,
+        anchor_url: str = "",
+        page_state_signature: str = "",
+        variant_label: str = "",
         decision_context: dict | None = None,
         explore_dependencies: CollectionExploreDependencies | None = None,
     ):
@@ -100,7 +112,22 @@ class URLCollector(BaseCollector):
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.initial_nav_steps = list(initial_nav_steps or [])
+        if isinstance(initial_collection_config, dict) and initial_collection_config:
+            self.initial_collection_config = CollectionConfig.from_mapping(initial_collection_config)
+        else:
+            self.initial_collection_config = initial_collection_config or None
         self.decision_context = dict(decision_context or {})
+        self.anchor_url = str(anchor_url or "")
+        self.page_state_signature = str(page_state_signature or "")
+        self.variant_label = str(variant_label or "")
+        self.profile_key = build_list_profile_key(
+            page_state_signature=self.page_state_signature,
+            anchor_url=self.anchor_url,
+            variant_label=self.variant_label,
+            task_description=task_description,
+        )
+        self.profile_validation_status = PROFILE_STATUS_MISS
+        self.profile_reject_reason = "missing_key"
 
         self.detail_visits: list[DetailPageVisit] = []
         self.step_index = 0
@@ -123,36 +150,17 @@ class URLCollector(BaseCollector):
         await asyncio.sleep(1)
         self._initialize_handlers()
 
-        if self.initial_nav_steps:
-            logger.info("\n[Phase 1] 重放 planner 导航路径...")
-            nav_success = await self.navigation_handler.replay_nav_steps(self.initial_nav_steps)
-            replay_succeeded = (
-                bool(getattr(nav_success, "success"))
-                if getattr(nav_success, "success", None) is not None
-                else bool(nav_success)
-            )
-            if not replay_succeeded:
-                failure_reason = str(getattr(nav_success, "failure_reason", "") or "").strip()
-                if failure_reason:
-                    raise RuntimeError(f"planner_nav_steps_replay_failed:{failure_reason}")
-                raise RuntimeError("planner_nav_steps_replay_failed")
-            self.nav_steps = list(self.initial_nav_steps)
-            logger.info("[URLCollector] ✓ planner 导航路径重放完成，共 %s 步", len(self.nav_steps))
+        if await self._try_apply_initial_collection_config():
+            logger.info("\n[Phase 2] profile_hit: 已验证列表页配置，跳过 LLM 样本采集")
         else:
-            logger.info("\n[Phase 1] 导航阶段：根据任务描述进行筛选操作...")
-            nav_success = await self.navigation_handler.run_navigation_phase()
-            if not nav_success:
-                logger.info("[URLCollector] 导航阶段未完全完成，将在当前页面继续采集")
-            self.nav_steps = self.navigation_handler.nav_steps
+            await self._run_navigation_phase()
+            logger.info("[URLCollector] profile_miss: 继续现有 LLM 样本采集路径")
 
-        if self.navigation_handler and self.navigation_handler.page is not self.page:
-            new_page = self.navigation_handler.page
-            new_list_url = self.navigation_handler.list_url or new_page.url
-            self._sync_page_references(new_page, list_url=new_list_url)
+        self._sync_navigation_page()
 
         validation_pages = max(1, int(config.field_extractor.validate_count))
 
-        while self.pagination_handler.current_page_num <= self.max_pages:
+        while not self.common_detail_xpath and self.pagination_handler.current_page_num <= self.max_pages:
             logger.info(
                 "\n[Phase 2] manual_sample: 第 %s 页，已收集 %s 条 URL",
                 self.pagination_handler.current_page_num,
@@ -239,8 +247,42 @@ class URLCollector(BaseCollector):
             screenshots_dir=self.screenshots_dir,
         )
 
+    async def _run_navigation_phase(self) -> None:
+        if self.initial_nav_steps:
+            logger.info("\n[Phase 1] 重放 planner 导航路径...")
+            await self._replay_initial_nav_steps()
+            return
+        logger.info("\n[Phase 1] 导航阶段：根据任务描述进行筛选操作...")
+        nav_success = await self.navigation_handler.run_navigation_phase()
+        if not nav_success:
+            logger.info("[URLCollector] 导航阶段未完全完成，将在当前页面继续采集")
+        self.nav_steps = self.navigation_handler.nav_steps
+
+    async def _replay_initial_nav_steps(self) -> None:
+        nav_success = await self.navigation_handler.replay_nav_steps(self.initial_nav_steps)
+        replay_succeeded = bool(getattr(nav_success, "success", nav_success))
+        if replay_succeeded:
+            self.nav_steps = list(self.initial_nav_steps)
+            logger.info("[URLCollector] ✓ planner 导航路径重放完成，共 %s 步", len(self.nav_steps))
+            return
+        failure_reason = str(getattr(nav_success, "failure_reason", "") or "").strip()
+        if failure_reason:
+            raise RuntimeError(f"planner_nav_steps_replay_failed:{failure_reason}")
+        raise RuntimeError("planner_nav_steps_replay_failed")
+
+    def _sync_navigation_page(self) -> None:
+        if self.navigation_handler and self.navigation_handler.page is not self.page:
+            new_page = self.navigation_handler.page
+            new_list_url = self.navigation_handler.list_url or new_page.url
+            self._sync_page_references(new_page, list_url=new_list_url)
+
     async def _prepare_skill_context(self) -> None:
-        self.selected_skills, self.selected_skills_context = await prepare_explore_skill_context(
+        loaded_skills = []
+        (
+            self.selected_skills,
+            self.selected_skills_context,
+            loaded_skills,
+        ) = await prepare_explore_skill_context(
             skill_runtime=self.skill_runtime,
             phase="url_collector",
             url=self.list_url,
@@ -251,6 +293,59 @@ class URLCollector(BaseCollector):
             llm=self.decider.llm,
             preselected_skills=self.selected_skills,
         )
+        if self.initial_collection_config:
+            return
+        self.initial_collection_config = _collection_config_from_loaded_skills(loaded_skills)
+
+    async def _try_apply_initial_collection_config(self) -> bool:
+        candidate = self.initial_collection_config
+        if not candidate:
+            self._mark_profile_rejected("missing_key")
+            return False
+        detail_xpath = str(candidate.common_detail_xpath or "").strip()
+        if not detail_xpath:
+            self._mark_profile_rejected("missing_common_detail_xpath")
+            return False
+        if not self._matches_initial_profile_key(candidate):
+            self._mark_profile_rejected("stale_page_state")
+            return False
+        if candidate.nav_steps:
+            replay = await self.navigation_handler.replay_nav_steps(candidate.nav_steps)
+            replay_succeeded = bool(getattr(replay, "success", replay))
+            if not replay_succeeded:
+                reason = str(getattr(replay, "failure_reason", "") or "replay_failed")
+                self._mark_profile_rejected(f"nav_replay_failed:{reason}")
+                return False
+            self.nav_steps = [dict(step) for step in candidate.nav_steps]
+        self.common_detail_xpath = detail_xpath
+        preview_urls = await self._preview_urls_with_xpath()
+        if not preview_urls:
+            self.common_detail_xpath = None
+            self._mark_profile_rejected("xpath_no_match")
+            return False
+        self._apply_initial_pagination_config(candidate)
+        self.profile_validation_status = PROFILE_STATUS_VALIDATED
+        self.profile_reject_reason = ""
+        logger.info("[URLCollector] profile_hit: preview_urls=%s", len(preview_urls))
+        return True
+
+    def _mark_profile_rejected(self, reason: str) -> None:
+        self.profile_validation_status = PROFILE_STATUS_REJECTED
+        self.profile_reject_reason = str(reason or "profile_rejected")
+        logger.info("[URLCollector] profile_reject: %s", self.profile_reject_reason)
+
+    def _matches_initial_profile_key(self, candidate: CollectionConfig) -> bool:
+        if not candidate.profile_key:
+            return True
+        return candidate.profile_key == self.profile_key
+
+    def _apply_initial_pagination_config(self, candidate: CollectionConfig) -> None:
+        if not self.pagination_handler:
+            return
+        if candidate.pagination_xpath:
+            self.pagination_handler.pagination_xpath = candidate.pagination_xpath
+        if candidate.jump_widget_xpath:
+            self.pagination_handler.jump_widget_xpath = dict(candidate.jump_widget_xpath)
 
     async def _collect_current_page_with_llm(self) -> tuple[list[str], list[DetailPageVisit]]:
         if not self.llm_decision_maker:
@@ -442,6 +537,7 @@ class URLCollector(BaseCollector):
 
     def _save_config(self) -> None:
         collection_config = CollectionConfig(
+            profile_key=self.profile_key,
             nav_steps=self.nav_steps,
             common_detail_xpath=self.common_detail_xpath,
             pagination_xpath=(
@@ -451,7 +547,12 @@ class URLCollector(BaseCollector):
                 self.pagination_handler.jump_widget_xpath if self.pagination_handler else None
             ),
             list_url=self.list_url,
+            anchor_url=self.anchor_url,
+            page_state_signature=self.page_state_signature,
+            variant_label=self.variant_label,
             task_description=self.task_description,
+            profile_validation_status=self.profile_validation_status,
+            profile_reject_reason=self.profile_reject_reason,
         )
         self.config_persistence.save(collection_config)
         logger.info("[URLCollector] 配置已持久化")
@@ -537,6 +638,10 @@ async def collect_detail_urls(
     persist_progress: bool = True,
     skill_runtime: SkillRuntimeLike | None = None,
     selected_skills: list[dict] | None = None,
+    initial_collection_config: CollectionConfig | dict | None = None,
+    anchor_url: str = "",
+    page_state_signature: str = "",
+    variant_label: str = "",
     explore_dependencies: CollectionExploreDependencies | None = None,
 ) -> URLCollectorResult:
     collector = URLCollector(
@@ -550,6 +655,23 @@ async def collect_detail_urls(
         persist_progress=persist_progress,
         skill_runtime=skill_runtime,
         selected_skills=selected_skills,
+        initial_collection_config=initial_collection_config,
+        anchor_url=anchor_url,
+        page_state_signature=page_state_signature,
+        variant_label=variant_label,
         explore_dependencies=explore_dependencies,
     )
     return await collector.run()
+
+
+def _collection_config_from_loaded_skills(loaded_skills: list[object]) -> CollectionConfig | None:
+    for skill in loaded_skills:
+        try:
+            document = parse_skill_document(str(getattr(skill, "content", "") or ""))
+        except SkillDocumentParseError as exc:
+            logger.info("[URLCollector] profile_reject: skill_parse_failed:%s", exc)
+            continue
+        config = CollectionConfig.from_skill_rules(document.rules)
+        if config.common_detail_xpath:
+            return config
+    return None

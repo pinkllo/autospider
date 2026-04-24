@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from autospider.platform.shared_kernel.knowledge_contracts import normalize_profile_metadata
+
 from .control_types import (
     DispatchDecision,
     PlanSpec,
@@ -132,7 +134,7 @@ def summarize_page_model(page_model: PageModel) -> dict[str, Any]:
         "page_type": page_model.page_type,
         "links": page_model.links,
         "depth": page_model.depth,
-        "metadata": dict(page_model.metadata),
+        "metadata": normalize_profile_metadata(page_model.metadata),
     }
 
 

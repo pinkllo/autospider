@@ -16,7 +16,12 @@ from ..recovery import REPLAN_ACTION
 from ..state_access import subtask_results as select_subtask_results
 from ..state_access import request_params as select_request_params
 from ..workflow_access import coerce_workflow_state
-from ..world_model import build_initial_world_model, world_model_to_payload
+from ..world_model import (
+    build_initial_world_model,
+    merge_detail_field_profiles,
+    merge_validated_list_profile,
+    world_model_to_payload,
+)
 
 AGGREGATE_ROUTE = "aggregate"
 DISPATCH_AGGREGATE_REASON = "dispatch_ready_for_aggregation"
@@ -208,9 +213,38 @@ def update_world_model_node(state: dict[str, Any]) -> dict[str, Any]:
     request_params["failure_records"] = list(failure_records)
     world["request_params"] = dict(request_params)
     world["failure_records"] = list(failure_records)
-    world["world_model"] = _normalize_world_model(
+    normalized = _normalize_world_model(
         world=world,
         request_params=request_params,
         failure_records=failure_records,
     )
+    typed_world = build_initial_world_model(
+        request_params=normalized.get("request_params"),
+        page_models=normalized.get("page_models"),
+        failure_records=normalized.get("failure_records"),
+        success_criteria=normalized.get("success_criteria"),
+    )
+    for result in select_subtask_results(state):
+        payload = _subtask_result_payload(result)
+        collection_config = _as_dict(payload.get("collection_config"))
+        effective_subtask = _as_dict(payload.get("effective_subtask"))
+        page_id = str(
+            effective_subtask.get("plan_node_id")
+            or payload.get("page_id")
+            or payload.get("subtask_id")
+            or ""
+        )
+        if not page_id:
+            continue
+        typed_world = merge_validated_list_profile(
+            typed_world,
+            page_id=page_id,
+            collection_config=collection_config,
+        )
+        typed_world = merge_detail_field_profiles(
+            typed_world,
+            page_id=page_id,
+            extraction_evidence=list(payload.get("extraction_evidence") or []),
+        )
+    world["world_model"] = world_model_to_payload(typed_world)
     return {"world": world}

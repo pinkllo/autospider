@@ -28,6 +28,8 @@ from autospider.platform.llm.protocol import (
 )
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
+from autospider.platform.browser.visual_decision_cache import VisualDecisionCache
+from autospider.platform.shared_kernel.knowledge_contracts import build_field_semantic_signature
 from autospider.contexts.collection.domain.fields import FieldDefinition
 
 if TYPE_CHECKING:
@@ -54,6 +56,8 @@ class FieldDecider:
         selected_skills_context: str = "",
         selected_skills: list[dict] | None = None,
         decision_context: dict | None = None,
+        visual_cache: VisualDecisionCache | None = None,
+        page_state_signature: str = "",
     ):
         """
         初始化字段决策器
@@ -67,6 +71,8 @@ class FieldDecider:
         self.selected_skills_context = str(selected_skills_context or "")
         self.selected_skills = list(selected_skills or [])
         self.decision_context = dict(decision_context or {})
+        self.visual_cache = visual_cache
+        self.page_state_signature = str(page_state_signature or "")
 
     def _parse_response_json(self, response_payload: object) -> dict | None:
         # 修改原因：解析逻辑统一收口到 common.protocol，避免各处重复补丁。
@@ -636,6 +642,25 @@ class FieldDecider:
         Returns:
             是否可能包含目标字段
         """
+        cache_key = build_field_semantic_signature(
+            field_name=field.name,
+            description=field.description,
+            data_type=field.data_type,
+            extraction_source=str(field.extraction_source or ""),
+        )
+        if self.visual_cache is not None:
+            cached = self.visual_cache.get(
+                page_state_signature=self.page_state_signature,
+                purpose="field_value",
+                target_text=cache_key,
+            )
+            if str(cached.get("status") or "") == "success":
+                candidate_text = str(cached.get("candidate_text") or "").strip().lower()
+                if candidate_text and candidate_text in str(page_text or "").lower():
+                    logger.info("[FieldDecider] cache_hit: purpose=field_value field=%s", field.name)
+                    return True
+                logger.info("[FieldDecider] cache_reject: purpose=field_value reason=missing_dom field=%s", field.name)
+
         # 简单的关键词匹配
         keywords = [field.name]
         if field.description:
@@ -651,6 +676,21 @@ class FieldDecider:
         page_text_lower = cleaned_text.lower()
         for keyword in keywords:
             if keyword.lower() in page_text_lower:
+                if self.visual_cache is not None:
+                    self.visual_cache.put_success(
+                        page_state_signature=self.page_state_signature,
+                        purpose="field_value",
+                        target_text=cache_key,
+                        candidate_text=keyword,
+                        confidence=1.0,
+                    )
                 return True
 
+        if self.visual_cache is not None:
+            self.visual_cache.put_reject(
+                page_state_signature=self.page_state_signature,
+                purpose="field_value",
+                target_text=cache_key,
+                reason="missing_dom",
+            )
         return False

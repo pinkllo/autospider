@@ -6,6 +6,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from autospider.platform.shared_kernel.knowledge_contracts import normalize_profile_metadata
+from autospider.platform.shared_kernel.knowledge_contracts import (
+    DETAIL_FIELD_PROFILES_KEY,
+    LIST_PAGE_PROFILE_KEY,
+    build_list_profile_key,
+    coerce_detail_field_profile,
+    coerce_list_page_profile,
+)
+
 DEFAULT_TARGET_URL_COUNT = 0
 
 
@@ -50,7 +59,7 @@ def _coerce_page_model(page_id: str, value: Any) -> PageModel:
         page_type=str(payload.get("page_type") or ""),
         links=int(payload.get("links", 0) or 0),
         depth=int(payload.get("depth", 0) or 0),
-        metadata=dict(payload.get("metadata") or {}),
+        metadata=normalize_profile_metadata(payload.get("metadata")),
     )
 
 
@@ -117,13 +126,142 @@ def upsert_page_model(
         page_type=str(page_type or ""),
         links=int(links or 0),
         depth=int(depth or 0),
-        metadata=dict(metadata or {}),
+        metadata=normalize_profile_metadata(metadata),
     )
     return WorldModel(
         request_params=dict(world_model.request_params),
         page_models=page_models,
         failure_records=tuple(world_model.failure_records),
         success_criteria=world_model.success_criteria,
+    )
+
+
+def merge_validated_list_profile(
+    world_model: WorldModel,
+    *,
+    page_id: str,
+    collection_config: Mapping[str, Any],
+) -> WorldModel:
+    config = dict(collection_config or {})
+    if str(config.get("profile_validation_status") or "") != "validated":
+        return world_model
+    profile = coerce_list_page_profile(config)
+    if not profile.common_detail_xpath:
+        return world_model
+    profile_key = str(config.get("profile_key") or profile.profile_key or "") or build_list_profile_key(
+        page_state_signature=profile.page_state_signature,
+        anchor_url=profile.anchor_url,
+        variant_label=profile.variant_label,
+        task_description=profile.task_description,
+    )
+    payload = dict(profile.to_payload())
+    payload["profile_key"] = profile_key
+    page = world_model.page_models.get(page_id) or PageModel(page_id=page_id)
+    metadata = dict(page.metadata or {})
+    profiles = dict(metadata.get(LIST_PAGE_PROFILE_KEY) or {})
+    profiles[profile_key] = payload
+    metadata[LIST_PAGE_PROFILE_KEY] = profiles
+    return upsert_page_model(
+        world_model,
+        page_id=page_id,
+        url=page.url or profile.list_url,
+        page_type=page.page_type or "list_page",
+        links=page.links,
+        depth=page.depth,
+        metadata=metadata,
+    )
+
+
+def resolve_list_profile_from_world(
+    world_snapshot: Mapping[str, Any] | None,
+    *,
+    page_id: str = "",
+    page_state_signature: str = "",
+    anchor_url: str = "",
+    variant_label: str = "",
+    task_description: str = "",
+) -> dict[str, Any]:
+    world = dict(world_snapshot or {})
+    raw_model = dict(world.get("world_model") or {})
+    raw_pages = dict(raw_model.get("page_models") or {})
+    page = dict(raw_pages.get(page_id) or {}) if page_id else {}
+    metadata = normalize_profile_metadata(page.get("metadata"))
+    profiles = metadata.get(LIST_PAGE_PROFILE_KEY)
+    if not isinstance(profiles, Mapping):
+        return {}
+    if "common_detail_xpath" in profiles:
+        return dict(profiles)
+    key = build_list_profile_key(
+        page_state_signature=page_state_signature,
+        anchor_url=anchor_url,
+        variant_label=variant_label,
+        task_description=task_description,
+    )
+    candidate = profiles.get(key)
+    if isinstance(candidate, Mapping):
+        return dict(candidate)
+    if len(profiles) == 1:
+        only = next(iter(profiles.values()))
+        return dict(only) if isinstance(only, Mapping) else {}
+    return {}
+
+
+def merge_detail_field_profiles(
+    world_model: WorldModel,
+    *,
+    page_id: str,
+    extraction_evidence: list[dict[str, Any]],
+) -> WorldModel:
+    page = world_model.page_models.get(page_id) or PageModel(page_id=page_id)
+    metadata = dict(page.metadata or {})
+    existing = [
+        coerce_detail_field_profile(item).to_payload()
+        for item in list(metadata.get(DETAIL_FIELD_PROFILES_KEY) or [])
+        if isinstance(item, Mapping)
+    ]
+    index = {
+        (
+            str(item.get("detail_template_signature") or ""),
+            str(item.get("field_signature") or ""),
+        ): dict(item)
+        for item in existing
+    }
+    for evidence in list(extraction_evidence or []):
+        if not bool(evidence.get("success")):
+            continue
+        config = dict(evidence.get("extraction_config") or {})
+        for raw_field in list(config.get("fields") or []):
+            if not isinstance(raw_field, Mapping):
+                continue
+            profile = coerce_detail_field_profile(
+                {
+                    "field_name": raw_field.get("name"),
+                    "xpath": raw_field.get("xpath"),
+                    "xpath_fallbacks": raw_field.get("xpath_fallbacks"),
+                    "extraction_source": raw_field.get("extraction_source"),
+                    "validated": raw_field.get("xpath_validated"),
+                    "detail_template_signature": raw_field.get("detail_template_signature"),
+                    "field_signature": raw_field.get("field_signature"),
+                }
+            ).to_payload()
+            if not str(profile.get("xpath") or "").strip():
+                continue
+            key = (
+                str(profile.get("detail_template_signature") or ""),
+                str(profile.get("field_signature") or ""),
+            )
+            if not all(key):
+                continue
+            index[key] = profile
+    metadata[DETAIL_FIELD_PROFILES_KEY] = list(index.values())
+    return upsert_page_model(
+        world_model,
+        page_id=page_id,
+        url=page.url,
+        page_type=page.page_type,
+        links=page.links,
+        depth=page.depth,
+        metadata=metadata,
     )
 
 
@@ -134,7 +272,7 @@ def page_model_to_payload(page_model: PageModel) -> dict[str, Any]:
         "page_type": page_model.page_type,
         "links": page_model.links,
         "depth": page_model.depth,
-        "metadata": dict(page_model.metadata),
+        "metadata": normalize_profile_metadata(page_model.metadata),
     }
 
 

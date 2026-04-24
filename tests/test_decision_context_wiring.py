@@ -211,6 +211,56 @@ async def test_producer_service_passes_decision_context_to_collector() -> None:
     assert captured["decision_context"] == {"page_model": {"page_type": "list_page"}}
 
 
+def test_subtask_worker_resolves_initial_collection_config_from_world_snapshot() -> None:
+    from autospider.contexts.planning.domain import ExecutionBrief, SubTask
+    from autospider.contexts.planning.domain import SubTaskMode
+    from autospider.composition.pipeline.worker import SubTaskWorker
+
+    subtask = SubTask(
+        id="subtask_001",
+        name="采购公告",
+        list_url="https://example.com/list",
+        anchor_url="https://example.com/root",
+        page_state_signature="sig-list",
+        variant_label="采购公告",
+        task_description="采集详情链接",
+        mode=SubTaskMode.COLLECT,
+        execution_brief=ExecutionBrief(objective="collect urls"),
+        plan_node_id="node_001",
+    )
+    worker = SubTaskWorker(
+        subtask=subtask,
+        fields=[],
+        output_dir="output",
+        world_snapshot={
+            "world_model": {
+                "page_models": {
+                    "node_001": {
+                        "page_id": "node_001",
+                        "metadata": {
+                            "list_page_profile": {
+                                "profile-1": {
+                                    "profile_key": "profile-1",
+                                    "anchor_url": "https://example.com/root",
+                                    "page_state_signature": "sig-list",
+                                    "variant_label": "采购公告",
+                                    "task_description": "采集详情链接",
+                                    "common_detail_xpath": "//a[@class='detail']",
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    )
+
+    resolved = worker._resolve_initial_collection_config(subtask)
+
+    assert resolved["profile_key"] == "profile-1"
+    assert resolved["common_detail_xpath"] == "//a[@class='detail']"
+
+
 @pytest.mark.asyncio
 async def test_consumer_pool_passes_decision_payloads_to_detail_worker() -> None:
     captured: dict[str, object] = {}

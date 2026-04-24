@@ -16,6 +16,11 @@ from autospider.composition.graph.decision_context import (
 )
 from autospider.composition.graph.nodes.capability_nodes import build_planning_runtime_payload
 from autospider.composition.graph.world_model import build_initial_world_model, upsert_page_model
+from autospider.platform.shared_kernel.knowledge_contracts import (
+    DETAIL_FIELD_PROFILES_KEY,
+    LIST_PAGE_PROFILE_KEY,
+    VISUAL_DECISION_HINTS_KEY,
+)
 
 
 def test_build_default_policies_expose_control_contract_defaults() -> None:
@@ -219,6 +224,48 @@ def test_build_decision_context_includes_structured_page_metadata_and_current_pl
     assert context["page_model"]["metadata"]["shared_fields"] == [{"name": "title"}]
     assert context["current_plan"]["page_id"] == "entry"
     assert context["current_plan"]["goal"] == "进入新闻列表页"
+
+
+def test_build_decision_context_normalizes_reusable_profile_metadata() -> None:
+    workflow = {
+        "world": {
+            "world_model": {
+                "request_params": {},
+                "page_models": {
+                    "entry": {
+                        "page_id": "entry",
+                        "page_type": "list_page",
+                        "metadata": {
+                            LIST_PAGE_PROFILE_KEY: {
+                                "detail_xpath": "//a[@class='detail']",
+                                "jump_input_selector": "//input[@type='number']",
+                                "jump_button_selector": "//button[@type='submit']",
+                            },
+                            DETAIL_FIELD_PROFILES_KEY: [
+                                {"name": "title", "primary_xpath": "//h1/text()"}
+                            ],
+                            VISUAL_DECISION_HINTS_KEY: [
+                                {"purpose": "paginate", "xpath": "//a[@rel='next']"}
+                            ],
+                        },
+                    }
+                },
+                "failure_records": [],
+            }
+        }
+    }
+
+    context = build_decision_context(workflow, page_id="entry")
+    metadata = context["page_model"]["metadata"]
+
+    assert metadata[LIST_PAGE_PROFILE_KEY]["common_detail_xpath"] == "//a[@class='detail']"
+    assert metadata[LIST_PAGE_PROFILE_KEY]["jump_widget_xpath"] == {
+        "input": "//input[@type='number']",
+        "button": "//button[@type='submit']",
+    }
+    assert metadata[DETAIL_FIELD_PROFILES_KEY][0]["field_name"] == "title"
+    assert metadata[DETAIL_FIELD_PROFILES_KEY][0]["xpath"] == "//h1/text()"
+    assert metadata[VISUAL_DECISION_HINTS_KEY][0]["resolved_xpath"] == "//a[@rel='next']"
 
 
 def test_build_planning_runtime_payload_enriches_request_params_with_execution_context() -> None:

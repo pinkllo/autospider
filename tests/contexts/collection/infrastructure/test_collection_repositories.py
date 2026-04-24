@@ -48,6 +48,34 @@ def test_config_persistence_round_trip() -> None:
     assert coerce_collection_config(loaded).to_payload()["list_url"] == config.list_url
 
 
+def test_collection_config_supports_list_page_profile_contract_aliases() -> None:
+    config = CollectionConfig.from_mapping(
+        {
+            "list_url": "https://example.com/list",
+            "anchor_url": "https://example.com",
+            "page_state_signature": "sig-list",
+            "variant_label": "采购公告",
+            "task_description": "collect items",
+            "nav_steps": [{"action": "click", "target_text": "采购公告"}],
+            "detail_xpath": "//a[@class='detail']",
+            "pagination_xpath": "//a[@rel='next']",
+            "jump_input_selector": "//input[@type='number']",
+            "jump_button_selector": "//button[@type='submit']",
+        }
+    )
+
+    profile = config.to_list_page_profile()
+    restored = CollectionConfig.from_list_page_profile(profile)
+
+    assert config.common_detail_xpath == "//a[@class='detail']"
+    assert config.jump_widget_xpath == {
+        "input": "//input[@type='number']",
+        "button": "//button[@type='submit']",
+    }
+    assert profile.common_detail_xpath == "//a[@class='detail']"
+    assert restored.jump_widget_xpath == config.jump_widget_xpath
+
+
 def test_progress_persistence_round_trip() -> None:
     persistence = ProgressPersistence(output_dir=_workspace_tmp("progress"))
     progress = CollectionProgress(

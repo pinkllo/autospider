@@ -17,6 +17,7 @@ from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.domain.fields import FieldDefinition
 from autospider.contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
+from ..graph.world_model import resolve_list_profile_from_world
 from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
@@ -159,6 +160,16 @@ class SubTaskWorker:
             world["world_model"] = world_model
         return world
 
+    def _resolve_initial_collection_config(self, subtask: SubTask) -> dict:
+        return resolve_list_profile_from_world(
+            self._build_runtime_world_snapshot(),
+            page_id=str(subtask.plan_node_id or ""),
+            page_state_signature=str(subtask.page_state_signature or ""),
+            anchor_url=str(subtask.anchor_url or ""),
+            variant_label=str(subtask.variant_label or ""),
+            task_description=str(subtask.task_description or ""),
+        )
+
     def _normalize_runtime_journal_entries(self, entries: tuple[dict[str, str], ...]) -> list[dict]:
         created_at = datetime.now().isoformat(timespec="seconds")
         normalized: list[dict] = []
@@ -245,6 +256,7 @@ class SubTaskWorker:
         concurrency = self._resolved_concurrency()
         world_snapshot = dict(self.world_snapshot or {})
         decision_context = self._resolve_decision_context(working_subtask)
+        initial_collection_config = self._resolve_initial_collection_config(working_subtask)
         request = ExecutionRequest(
             list_url=working_subtask.list_url,
             task_description=working_subtask.task_description,
@@ -266,6 +278,7 @@ class SubTaskWorker:
             task_plan_snapshot=self.task_plan_snapshot,
             plan_journal=list(self.plan_journal or []),
             initial_nav_steps=list(working_subtask.nav_steps or []),
+            initial_collection_config=initial_collection_config,
             decision_context=decision_context,
             world_snapshot=world_snapshot,
             failure_records=[dict(item) for item in list(self.failure_records or [])],

@@ -269,6 +269,12 @@ class BaseCollector(ABC):
             logger.info("返回列表页开始位置...")
             await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(1)
+            if self.nav_steps and self.navigation_handler:
+                replay = await self.navigation_handler.replay_nav_steps(self.nav_steps)
+                replay_succeeded = bool(getattr(replay, "success", replay))
+                if not replay_succeeded:
+                    reason = str(getattr(replay, "failure_reason", "") or "replay_failed")
+                    raise RuntimeError(f"xpath_rule_nav_replay_failed:{reason}")
 
         max_pages = self.max_pages
         target_url_count = self.target_url_count

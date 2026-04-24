@@ -24,6 +24,7 @@ from autospider.platform.llm.protocol import (
 )
 from autospider.platform.shared_kernel.utils.prompt_template import render_template
 from autospider.platform.shared_kernel.utils.paths import get_prompt_path
+from autospider.platform.browser.visual_decision_cache import VisualDecisionCache
 from .mark_id_validator import MarkIdValidator
 from .api import capture_screenshot_with_custom_marks
 
@@ -76,6 +77,8 @@ async def resolve_mark_ids_from_map(
     snapshot: "SoMSnapshot",
     mark_id_text_map: dict[str, str],
     max_retries: int | None = None,
+    visual_cache: VisualDecisionCache | None = None,
+    page_state_signature: str = "",
 ) -> list[int]:
     """解析 LLM 返回的 mark_id_text_map（文本优先）
 
@@ -109,6 +112,8 @@ async def resolve_mark_ids_from_map(
                 candidates=candidates,
                 target_text=r.llm_text,
                 max_retries=retries,
+                visual_cache=visual_cache,
+                page_state_signature=page_state_signature,
             )
             if selected is None:
                 if allow_partial:
@@ -152,6 +157,8 @@ async def resolve_single_mark_id(
     mark_id: int | None,
     target_text: str,
     max_retries: int | None = None,
+    visual_cache: VisualDecisionCache | None = None,
+    page_state_signature: str = "",
 ) -> int:
     """解析单个 mark_id（文本优先）
 
@@ -165,6 +172,8 @@ async def resolve_single_mark_id(
         snapshot=snapshot,
         mark_id_text_map={key: target_text},
         max_retries=max_retries,
+        visual_cache=visual_cache,
+        page_state_signature=page_state_signature,
     )
     if not resolved:
         raise ValueError(f"无法解析目标文本对应的元素: '{target_text}'")
@@ -178,9 +187,18 @@ async def disambiguate_mark_id_by_text(
     candidates: list["ElementMark"],
     target_text: str,
     max_retries: int = 1,
+    visual_cache: VisualDecisionCache | None = None,
+    page_state_signature: str = "",
 ) -> int | None:
     """当同一文本命中多个候选元素时，截图让 LLM 重选（只给候选截图+新 mark）"""
     if not candidates:
+        if visual_cache is not None:
+            visual_cache.put_reject(
+                page_state_signature=page_state_signature,
+                purpose="mark_text",
+                target_text=target_text,
+                reason="missing_dom",
+            )
         return None
 
     overlay_marks = [
@@ -188,6 +206,20 @@ async def disambiguate_mark_id_by_text(
         for i, c in enumerate(candidates[:20])  # 防止候选过多影响可读性
     ]
     candidate_preview = _candidate_trace_preview(candidates)
+
+    if visual_cache is not None:
+        cached = visual_cache.get(
+            page_state_signature=page_state_signature,
+            purpose="mark_text",
+            target_text=target_text,
+        )
+        candidate_text = str(cached.get("candidate_text") or "").strip()
+        if candidate_text:
+            for candidate in candidates:
+                if str(candidate.text or "").strip() == candidate_text:
+                    logger.info("[TextFirst] cache_hit: purpose=mark_text target=%s", target_text[:60])
+                    return candidate.mark_id
+            logger.info("[TextFirst] cache_reject: purpose=mark_text reason=missing_dom target=%s", target_text[:60])
 
     system_prompt = render_template(PROMPT_TEMPLATE_PATH, section="system_prompt")
     user_message = render_template(
@@ -288,6 +320,21 @@ async def disambiguate_mark_id_by_text(
             continue
 
         if resolved_mark_id is not None:
+            if visual_cache is not None:
+                visual_cache.put_success(
+                    page_state_signature=page_state_signature,
+                    purpose="mark_text",
+                    target_text=target_text,
+                    candidate_text=str(candidates[selected_index - 1].text or "") if selected_index else "",
+                    confidence=1.0,
+                )
             return resolved_mark_id
 
+    if visual_cache is not None:
+        visual_cache.put_reject(
+            page_state_signature=page_state_signature,
+            purpose="mark_text",
+            target_text=target_text,
+            reason="missing_dom",
+        )
     return None

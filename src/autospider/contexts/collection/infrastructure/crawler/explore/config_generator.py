@@ -255,7 +255,11 @@ class ConfigGenerator:
                 self.pagination_handler.list_url = list_url
 
     async def _prepare_skill_context(self) -> None:
-        self.selected_skills, self.selected_skills_context = await prepare_explore_skill_context(
+        (
+            self.selected_skills,
+            self.selected_skills_context,
+            _,
+        ) = await prepare_explore_skill_context(
             skill_runtime=self.skill_runtime,
             phase="url_collector",
             url=self.list_url,

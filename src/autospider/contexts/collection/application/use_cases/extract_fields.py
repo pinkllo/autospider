@@ -53,7 +53,13 @@ class DetailPageWorker:
 
     async def extract(self, url: str) -> DetailPageWorkerResult:
         extraction_config = ensure_extraction_config(
-            {"fields": self.xpath_query_service.build_fields_config(url, self.fields)}
+            {
+                "fields": self.xpath_query_service.build_fields_config(
+                    url,
+                    self.fields,
+                    world_snapshot=self.world_snapshot,
+                )
+            }
         )
         mode = "xpath" if self._has_rule_candidates(extraction_config.fields) else "llm"
         logger.info("[DetailWorker] 开始处理: %s | mode=%s", url, mode)
