@@ -40,6 +40,20 @@ class SkillRepository:
         path.write_text(render_skill_document(final_document), encoding="utf-8")
         return str(path)
 
+    def save_markdown(
+        self,
+        domain: str,
+        content: str,
+        *,
+        overwrite_existing: bool = True,
+    ) -> str:
+        path = skill_document_path(self.skills_dir, domain)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and not overwrite_existing:
+            raise FileExistsError(f"skill already exists: {path}")
+        path.write_text(str(content or "").strip() + "\n", encoding="utf-8")
+        return str(path)
+
     def load_by_path(self, path: str) -> str:
         candidate = Path(path)
         if not candidate.exists():

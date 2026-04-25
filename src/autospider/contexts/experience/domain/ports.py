@@ -14,6 +14,14 @@ class SkillRepository(Protocol):
         overwrite_existing: bool = False,
     ) -> str: ...
 
+    def save_markdown(
+        self,
+        domain: str,
+        content: str,
+        *,
+        overwrite_existing: bool = True,
+    ) -> str: ...
+
     def load_by_path(self, path: str) -> str: ...
 
     def list_by_url(self, url: str) -> list[SkillMetadata]: ...

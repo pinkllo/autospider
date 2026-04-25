@@ -11,6 +11,10 @@ from autospider.contexts.experience.domain.model import (
 )
 from autospider.contexts.experience.domain.policies import extract_domain
 from autospider.contexts.experience.domain.ports import SkillRepository
+from autospider.contexts.experience.application.skill_guide import (
+    build_skill_guide,
+    render_skill_guide_markdown,
+)
 
 _DEFAULT_STATUS = "validated"
 _SUCCESS_COUNT_KEY = "success_count"
@@ -72,14 +76,15 @@ class SkillSedimenter:
         *,
         overwrite_existing: bool = False,
     ) -> Path | None:
+        del overwrite_existing
         candidate = _build_candidate(payload)
         if candidate is None:
             return None
-        document = _build_document(candidate)
-        path = self._repository.save_document(
+        guide = build_skill_guide(candidate)
+        path = self._repository.save_markdown(
             candidate.domain,
-            document,
-            overwrite_existing=overwrite_existing,
+            render_skill_guide_markdown(guide),
+            overwrite_existing=True,
         )
         return Path(path)
 

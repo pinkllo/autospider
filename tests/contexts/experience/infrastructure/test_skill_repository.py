@@ -52,6 +52,34 @@ def test_skill_repository_round_trips_skill_document() -> None:
         shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_skill_repository_reads_lightweight_guide_metadata() -> None:
+    workspace = _create_local_test_dir()
+    try:
+        repository = SkillRepository(skills_dir=workspace)
+        path = repository.save_markdown(
+            "example.com",
+            """---
+name: example.com 采集指导
+description: example.com 的轻量采集指导。
+---
+
+# example.com 采集指导
+
+## 适用范围
+
+- 适用于 `https://example.com/list`。
+""",
+        )
+
+        assert repository.load_by_path(path).startswith("---")
+        metadata = repository.list_by_url("https://example.com/list")
+        assert metadata[0].name == "example.com 采集指导"
+        assert metadata[0].description == "example.com 的轻量采集指导。"
+        assert metadata[0].domain == "example.com"
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def test_parse_skill_document_rejects_unclosed_frontmatter() -> None:
     content = "---\nname: example.com 站点采集\ndescription: 示例技能\n# example.com 采集指南\n"
 
