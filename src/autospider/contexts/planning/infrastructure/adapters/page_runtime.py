@@ -177,6 +177,7 @@ class PlannerPageRuntime:
             depth=int(parent_subtask.depth or 0),
             mode=SubTaskMode.EXPAND,
             parent_id=parent_subtask.id,
+            parent_node_id=str(parent_subtask.plan_node_id or parent_subtask.id or ""),
             parent_execution_brief=parent_subtask.execution_brief,
         )
         if max_children is not None and max_children > 0:

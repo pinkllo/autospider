@@ -84,3 +84,4 @@ agent-*/
 .claude/worktrees/
 /.mypy*/
 /refactor/
+/frontend/

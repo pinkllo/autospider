@@ -38,6 +38,7 @@ class SubTaskRuntimeState(BaseModel):
     mode: str = ""
     execution_brief: dict[str, Any] = Field(default_factory=dict)
     parent_id: str = ""
+    parent_node_id: str = ""
     depth: int = 0
     context: dict[str, str] = Field(default_factory=dict)
     status: str = ""

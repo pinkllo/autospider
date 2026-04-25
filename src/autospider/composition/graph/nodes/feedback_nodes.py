@@ -227,11 +227,9 @@ def update_world_model_node(state: dict[str, Any]) -> dict[str, Any]:
     for result in select_subtask_results(state):
         payload = _subtask_result_payload(result)
         collection_config = _as_dict(payload.get("collection_config"))
-        effective_subtask = _as_dict(payload.get("effective_subtask"))
         page_id = str(
-            effective_subtask.get("plan_node_id")
+            payload.get("parent_node_id")
             or payload.get("page_id")
-            or payload.get("subtask_id")
             or ""
         )
         if not page_id:

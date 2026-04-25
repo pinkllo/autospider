@@ -196,6 +196,7 @@ class SubTask(BaseModel):
     mode: SubTaskMode = SubTaskMode.COLLECT
     execution_brief: ExecutionBrief = Field(default_factory=ExecutionBrief)
     plan_node_id: str | None = None
+    parent_node_id: str | None = None
     status: SubTaskStatus = SubTaskStatus.PENDING
     retry_count: int = 0
     error: str | None = None

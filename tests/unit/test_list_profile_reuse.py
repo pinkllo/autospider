@@ -14,6 +14,23 @@ from autospider.contexts.experience.application.skill_promotion import (
 )
 
 
+def _build_collector_shell() -> URLCollector:
+    collector = URLCollector.__new__(URLCollector)
+    collector.list_url = "https://example.com/list"
+    collector.task_description = "collect urls"
+    collector.anchor_url = "https://example.com/root"
+    collector.page_state_signature = "sig-list"
+    collector.variant_label = "采购公告"
+    collector.profile_key = "profile-1"
+    collector.profile_validation_status = "miss"
+    collector.profile_reject_reason = ""
+    collector.common_detail_xpath = None
+    collector.nav_steps = []
+    collector.pagination_handler = None
+    collector.navigation_handler = SimpleNamespace()
+    return collector
+
+
 def test_skill_promotion_maps_common_detail_xpath_to_skill_rule() -> None:
     payload = SkillSedimentationPayload(
         list_url="https://example.com/list",
@@ -50,7 +67,7 @@ def test_collection_config_accepts_legacy_detail_xpath_alias() -> None:
 
 @pytest.mark.asyncio
 async def test_url_collector_rejects_empty_initial_profile() -> None:
-    collector = URLCollector.__new__(URLCollector)
+    collector = _build_collector_shell()
     collector.initial_collection_config = CollectionConfig(common_detail_xpath="")
     collector.initial_collection_config_candidates = [collector.initial_collection_config]
 
@@ -59,13 +76,9 @@ async def test_url_collector_rejects_empty_initial_profile() -> None:
 
 @pytest.mark.asyncio
 async def test_url_collector_rejects_profile_without_preview_hits() -> None:
-    collector = URLCollector.__new__(URLCollector)
+    collector = _build_collector_shell()
     collector.initial_collection_config = CollectionConfig(common_detail_xpath="//a")
     collector.initial_collection_config_candidates = [collector.initial_collection_config]
-    collector.common_detail_xpath = None
-    collector.nav_steps = []
-    collector.pagination_handler = None
-    collector.navigation_handler = SimpleNamespace()
 
     async def preview_urls() -> list[str]:
         return []
@@ -78,17 +91,11 @@ async def test_url_collector_rejects_profile_without_preview_hits() -> None:
 
 @pytest.mark.asyncio
 async def test_url_collector_tries_multiple_initial_profile_candidates() -> None:
-    collector = URLCollector.__new__(URLCollector)
+    collector = _build_collector_shell()
     first = CollectionConfig(common_detail_xpath="//bad")
     second = CollectionConfig(common_detail_xpath="//good", profile_key="candidate-2")
     collector.initial_collection_config = first
     collector.initial_collection_config_candidates = [first, second]
-    collector.common_detail_xpath = None
-    collector.nav_steps = []
-    collector.profile_validation_status = "miss"
-    collector.profile_reject_reason = ""
-    collector.pagination_handler = None
-    collector.navigation_handler = SimpleNamespace()
 
     async def preview_urls() -> list[str]:
         if collector.common_detail_xpath == "//good":
@@ -106,7 +113,7 @@ async def test_url_collector_tries_multiple_initial_profile_candidates() -> None
 
 @pytest.mark.asyncio
 async def test_url_collector_restores_nav_steps_after_failed_candidate_preview() -> None:
-    collector = URLCollector.__new__(URLCollector)
+    collector = _build_collector_shell()
     first = CollectionConfig(
         common_detail_xpath="//bad",
         nav_steps=[{"action": "click", "target_text": "tab-a"}],
@@ -131,9 +138,6 @@ async def test_url_collector_restores_nav_steps_after_failed_candidate_preview()
     collector.initial_collection_config_candidates = [first, second]
     collector.common_detail_xpath = "//existing"
     collector.nav_steps = [{"action": "click", "target_text": "existing"}]
-    collector.profile_validation_status = "miss"
-    collector.profile_reject_reason = ""
-    collector.pagination_handler = None
     collector.navigation_handler = SimpleNamespace(replay_nav_steps=replay_nav_steps)
     collector._preview_urls_with_xpath = preview_urls
     collector._apply_initial_pagination_config = lambda candidate: None

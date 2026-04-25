@@ -211,7 +211,7 @@ async def test_producer_service_passes_decision_context_to_collector() -> None:
     assert captured["decision_context"] == {"page_model": {"page_type": "list_page"}}
 
 
-def test_subtask_worker_resolves_initial_collection_config_from_world_snapshot() -> None:
+def test_subtask_worker_resolves_initial_collection_config_from_validated_sibling_subtask() -> None:
     from autospider.contexts.planning.domain import ExecutionBrief, SubTask
     from autospider.contexts.planning.domain import SubTaskMode
     from autospider.composition.pipeline.worker import SubTaskWorker
@@ -227,30 +227,29 @@ def test_subtask_worker_resolves_initial_collection_config_from_world_snapshot()
         mode=SubTaskMode.COLLECT,
         execution_brief=ExecutionBrief(objective="collect urls"),
         plan_node_id="node_001",
+        parent_node_id="node_001",
     )
     worker = SubTaskWorker(
         subtask=subtask,
         fields=[],
         output_dir="output",
         world_snapshot={
-            "world_model": {
-                "page_models": {
-                    "node_001": {
-                        "page_id": "node_001",
-                        "metadata": {
-                            "list_page_profile": {
-                                "profile-1": {
-                                    "profile_key": "profile-1",
-                                    "anchor_url": "https://example.com/root",
-                                    "page_state_signature": "sig-list",
-                                    "variant_label": "采购公告",
-                                    "task_description": "采集详情链接",
-                                    "common_detail_xpath": "//a[@class='detail']",
-                                }
-                            }
+            "execution": {
+                "subtask_results": [
+                    {
+                        "subtask_id": "subtask_prev",
+                        "parent_node_id": "node_001",
+                        "collection_config": {
+                            "profile_key": "profile-1",
+                            "profile_validation_status": "validated",
+                            "anchor_url": "https://example.com/root",
+                            "page_state_signature": "sig-list",
+                            "variant_label": "采购公告",
+                            "task_description": "采集详情链接",
+                            "common_detail_xpath": "//a[@class='detail']",
                         },
                     }
-                }
+                ]
             }
         },
     )

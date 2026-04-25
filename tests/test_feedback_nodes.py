@@ -139,7 +139,7 @@ def test_update_world_model_node_merges_validated_profiles_by_variant() -> None:
             "subtask_results": [
                 {
                     "subtask_id": "subtask_001",
-                    "effective_subtask": {"plan_node_id": "node_001"},
+                    "parent_node_id": "node_001",
                     "collection_config": {
                         "profile_key": "key-a",
                         "profile_validation_status": "validated",
@@ -152,7 +152,7 @@ def test_update_world_model_node_merges_validated_profiles_by_variant() -> None:
                 },
                 {
                     "subtask_id": "subtask_002",
-                    "effective_subtask": {"plan_node_id": "node_001"},
+                    "parent_node_id": "node_001",
                     "collection_config": {
                         "profile_key": "key-b",
                         "profile_validation_status": "validated",
@@ -187,7 +187,7 @@ def test_update_world_model_node_ignores_rejected_profile() -> None:
             "subtask_results": [
                 {
                     "subtask_id": "subtask_001",
-                    "effective_subtask": {"plan_node_id": "node_001"},
+                    "parent_node_id": "node_001",
                     "collection_config": {
                         "profile_key": "reject-a",
                         "profile_validation_status": "rejected",
@@ -219,7 +219,7 @@ def test_update_world_model_node_merges_detail_field_profiles_from_success_evide
             "subtask_results": [
                 {
                     "subtask_id": "subtask_001",
-                    "effective_subtask": {"plan_node_id": "node_001"},
+                    "parent_node_id": "node_001",
                     "extraction_evidence": [
                         {
                             "url": "https://example.com/detail/1",
@@ -264,7 +264,7 @@ def test_update_world_model_node_skips_failed_detail_field_evidence() -> None:
             "subtask_results": [
                 {
                     "subtask_id": "subtask_001",
-                    "effective_subtask": {"plan_node_id": "node_001"},
+                    "parent_node_id": "node_001",
                     "extraction_evidence": [
                         {
                             "url": "https://example.com/detail/1",

@@ -151,6 +151,7 @@ def build_runtime_state(
                 mode="python"
             ),
             "parent_id": str(subtask.parent_id or ""),
+            "parent_node_id": str(subtask.parent_node_id or ""),
             "depth": int(subtask.depth or 0),
             "context": dict(subtask.context or {}),
             "status": status.value,

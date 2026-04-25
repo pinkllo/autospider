@@ -26,10 +26,6 @@ from autospider.contexts.collection.application.use_cases.explore_site import (
 from autospider.contexts.collection.infrastructure.repositories.config_repository import (
     CollectionConfig,
 )
-from autospider.contexts.experience.infrastructure.repositories.skill_document_codec import (
-    SkillDocumentParseError,
-    parse_skill_document,
-)
 from autospider.contexts.collection.infrastructure.crawler.base.base_collector import BaseCollector
 from autospider.contexts.collection.infrastructure.crawler.collector import (
     CommonPattern,
@@ -308,15 +304,26 @@ class URLCollector(BaseCollector):
             llm=self.decider.llm,
             preselected_skills=self.selected_skills,
         )
-        if self.initial_collection_config:
-            return
-        self.initial_collection_config = _collection_config_from_loaded_skills(loaded_skills)
 
     async def _try_apply_initial_collection_config(self) -> bool:
         candidates = list(self.initial_collection_config_candidates)
         if not candidates and self.initial_collection_config:
             candidates = [self.initial_collection_config]
+        logger.info(
+            "[URLCollector] profile_candidate_check: profile_key=%s, candidates=%s, initial_config_type=%s, anchor_url=%s, page_state_signature=%s, variant_label=%s",
+            str(self.profile_key or "") or "<empty>",
+            len(candidates),
+            type(self.initial_collection_config).__name__ if self.initial_collection_config is not None else "None",
+            str(self.anchor_url or "") or "<empty>",
+            str(self.page_state_signature or "") or "<empty>",
+            str(self.variant_label or "") or "<empty>",
+        )
         if not candidates:
+            logger.info(
+                "[URLCollector] profile_candidate_miss: reason=no_initial_collection_config, task_description=%s, list_url=%s",
+                self.task_description,
+                self.list_url,
+            )
             self._mark_profile_rejected("missing_key")
             return False
         for candidate in candidates:
@@ -327,11 +334,20 @@ class URLCollector(BaseCollector):
 
     async def _try_validate_initial_collection_candidate(self, candidate: CollectionConfig) -> bool:
         detail_xpath = str(candidate.common_detail_xpath or "").strip()
+        previous_detail_xpath = str(self.common_detail_xpath or "").strip()
+        previous_nav_steps = [dict(step) for step in getattr(self, "nav_steps", [])]
+        logger.info(
+            "[URLCollector] profile_validate_start: candidate_profile_key=%s, previous_xpath=%s, candidate_xpath=%s, previous_nav_steps=%s, candidate_nav_steps=%s",
+            str(candidate.profile_key or ""),
+            previous_detail_xpath or "<empty>",
+            detail_xpath or "<empty>",
+            len(previous_nav_steps),
+            len(candidate.nav_steps),
+        )
         if not detail_xpath:
             self._mark_profile_rejected("missing_common_detail_xpath")
             return False
-        previous_nav_steps = [dict(step) for step in getattr(self, "nav_steps", [])]
-        previous_detail_xpath = self.common_detail_xpath
+        previous_detail_xpath_value = self.common_detail_xpath
         if candidate.nav_steps:
             replay = await self.navigation_handler.replay_nav_steps(candidate.nav_steps)
             replay_succeeded = bool(getattr(replay, "success", replay))
@@ -342,9 +358,21 @@ class URLCollector(BaseCollector):
             self.nav_steps = [dict(step) for step in candidate.nav_steps]
         self.common_detail_xpath = detail_xpath
         preview_urls = await self._preview_urls_with_xpath()
+        logger.info(
+            "[URLCollector] profile_validate_preview: candidate_profile_key=%s, applied_xpath=%s, preview_urls=%s, preview_sample=%s",
+            str(candidate.profile_key or ""),
+            detail_xpath,
+            len(preview_urls),
+            preview_urls[:5],
+        )
         if not preview_urls:
             self.nav_steps = previous_nav_steps
-            self.common_detail_xpath = previous_detail_xpath
+            self.common_detail_xpath = previous_detail_xpath_value
+            logger.info(
+                "[URLCollector] profile_validate_restore: restore_xpath=%s, restore_nav_steps=%s, reject_reason=xpath_no_match",
+                previous_detail_xpath or "<empty>",
+                len(previous_nav_steps),
+            )
             self._mark_profile_rejected("xpath_no_match")
             return False
         self._apply_initial_pagination_config(candidate)
@@ -360,7 +388,12 @@ class URLCollector(BaseCollector):
     def _mark_profile_rejected(self, reason: str) -> None:
         self.profile_validation_status = PROFILE_STATUS_REJECTED
         self.profile_reject_reason = str(reason or "profile_rejected")
-        logger.info("[URLCollector] profile_reject: %s", self.profile_reject_reason)
+        logger.info(
+            "[URLCollector] profile_reject: reason=%s, current_xpath=%s, profile_key=%s",
+            self.profile_reject_reason,
+            str(self.common_detail_xpath or "") or "<empty>",
+            str(self.profile_key or "") or "<empty>",
+        )
 
     def _apply_initial_pagination_config(self, candidate: CollectionConfig) -> None:
         if not self.pagination_handler:
@@ -686,15 +719,3 @@ async def collect_detail_urls(
     )
     return await collector.run()
 
-
-def _collection_config_from_loaded_skills(loaded_skills: list[object]) -> CollectionConfig | None:
-    for skill in loaded_skills:
-        try:
-            document = parse_skill_document(str(getattr(skill, "content", "") or ""))
-        except SkillDocumentParseError as exc:
-            logger.info("[URLCollector] profile_reject: skill_parse_failed:%s", exc)
-            continue
-        config = CollectionConfig.from_skill_rules(document.rules)
-        if config.common_detail_xpath:
-            return config
-    return None

@@ -166,6 +166,7 @@ def build_runtime_context(
         task_plan_snapshot=dict(context.task_plan_snapshot or {}),
         plan_journal=list(context.plan_journal or []),
         initial_nav_steps=list(context.initial_nav_steps or []),
+        initial_collection_config=dict(context.initial_collection_config or {}),
         decision_context=dict(context.decision_context or {}),
         world_snapshot=dict(context.world_snapshot or {}),
         failure_records=tuple(list(context.failure_records or ())),

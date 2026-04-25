@@ -11,6 +11,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from autospider.composition.pipeline.helpers import build_execution_context
+from autospider.composition.pipeline.runtime_setup import (
+    build_runtime_context,
+    resolve_pipeline_run,
+)
 from autospider.composition.pipeline.runner import run_pipeline
 from autospider.composition.pipeline.types import ExecutionRequest
 from autospider.composition.pipeline.worker import SubTaskWorker
@@ -151,30 +155,29 @@ def test_subtask_worker_initial_collection_config_is_mapping_for_execution_reque
         mode=SubTaskMode.COLLECT,
         execution_brief=ExecutionBrief(objective="collect urls"),
         plan_node_id="node_001",
+        parent_node_id="node_001",
     )
     worker = SubTaskWorker(
         subtask=subtask,
         fields=[],
         output_dir="output",
         world_snapshot={
-            "world_model": {
-                "page_models": {
-                    "node_001": {
-                        "page_id": "node_001",
-                        "metadata": {
-                            "list_page_profile": {
-                                "profile-1": {
-                                    "profile_key": "profile-1",
-                                    "anchor_url": "https://example.com/root",
-                                    "page_state_signature": "sig-list",
-                                    "variant_label": "采购公告",
-                                    "task_description": "采集详情链接",
-                                    "common_detail_xpath": "//a[@class='detail']",
-                                }
-                            }
+            "execution": {
+                "subtask_results": [
+                    {
+                        "subtask_id": "subtask_prev",
+                        "parent_node_id": "node_001",
+                        "collection_config": {
+                            "profile_key": "profile-1",
+                            "profile_validation_status": "validated",
+                            "anchor_url": "https://example.com/root",
+                            "page_state_signature": "sig-list",
+                            "variant_label": "采购公告",
+                            "task_description": "采集详情链接",
+                            "common_detail_xpath": "//a[@class='detail']",
                         },
                     }
-                }
+                ]
             }
         },
     )
@@ -191,6 +194,41 @@ def test_subtask_worker_initial_collection_config_is_mapping_for_execution_reque
 
     assert request.initial_collection_config["profile_key"] == "profile-1"
     assert request.initial_collection_config["common_detail_xpath"] == "//a[@class='detail']"
+
+
+def test_build_runtime_context_keeps_initial_collection_config() -> None:
+    request = ExecutionRequest.from_params(
+        {
+            "list_url": "https://example.com/list",
+            "task_description": "collect urls",
+            "output_dir": "output/runtime-context-config",
+            "initial_collection_config": {
+                "profile_key": "profile-1",
+                "profile_validation_status": "validated",
+                "common_detail_xpath": "//a[@class='detail']",
+            },
+        },
+        thread_id="thread-1",
+    )
+    context = build_execution_context(request)
+
+    runtime_context = build_runtime_context(
+        context,
+        resolved=resolve_pipeline_run(
+            context,
+            explore_count_default=3,
+            validate_count_default=2,
+        ),
+        channel=SimpleNamespace(),
+        run_records={},
+        summary={},
+        tracker=SimpleNamespace(),
+        skill_runtime=SimpleNamespace(),
+        sessions=SimpleNamespace(),
+    )
+
+    assert runtime_context.initial_collection_config["profile_key"] == "profile-1"
+    assert runtime_context.initial_collection_config["common_detail_xpath"] == "//a[@class='detail']"
 
 
 def test_runtime_context_prefers_workflow_payloads_over_legacy_compat_fields() -> None:

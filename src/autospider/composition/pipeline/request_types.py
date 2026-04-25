@@ -180,6 +180,7 @@ class ExecutionRequest(BaseModel):
             task_plan_snapshot=dict(payload.get("task_plan_snapshot") or {}),
             plan_journal=list(payload.get("plan_journal") or []),
             initial_nav_steps=list(payload.get("initial_nav_steps") or []),
+            initial_collection_config=_mapping_payload(payload.get("initial_collection_config")),
             decision_context=_resolve_runtime_decision_context(payload, world_snapshot),
             world_snapshot=world_snapshot,
             failure_records=_resolve_runtime_failure_records(payload, world_snapshot),

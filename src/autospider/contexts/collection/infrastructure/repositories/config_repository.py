@@ -151,14 +151,6 @@ class CollectionConfig:
             ),
         )
 
-    @classmethod
-    def from_skill_rules(cls, rules: Any) -> "CollectionConfig":
-        if hasattr(rules, "to_list_page_profile"):
-            return cls.from_list_page_profile(rules.to_list_page_profile())
-        if isinstance(rules, Mapping):
-            return cls.from_mapping(rules)
-        return cls()
-
 
 class ConfigPersistence:
     def __init__(self, config_dir: str | Path = "output"):

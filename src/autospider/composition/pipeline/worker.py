@@ -12,12 +12,12 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from autospider.platform.config.runtime import config
 from autospider.platform.observability.logger import get_logger
 from autospider.contexts.collection.domain.fields import FieldDefinition
 from autospider.contexts.planning.domain import SubTask, SubTaskMode, format_execution_brief
-from ..graph.world_model import resolve_list_profile_from_world
 from ..graph.decision_context import build_decision_context
 from ..pipeline.helpers import build_execution_context
 from ..pipeline.subtask_runtime import restore_subtask, subtask_to_payload
@@ -27,6 +27,21 @@ from .runtime_controls import resolve_concurrency_settings
 from .worker_fields import prepare_subtask_fields
 
 logger = get_logger(__name__)
+
+
+def _is_reusable_collection_config(config: dict[str, Any]) -> bool:
+    if not config:
+        return False
+    return bool(
+        str(config.get("profile_validation_status") or "").strip() == "validated"
+        and str(config.get("common_detail_xpath") or "").strip()
+    )
+
+
+def _runtime_result_payload(item: Any) -> dict[str, Any]:
+    if hasattr(item, "model_dump"):
+        return item.model_dump(mode="python")
+    return dict(item or {})
 
 
 def _resolve_runtime_replan_max_children(raw_value: object | None) -> int:
@@ -160,15 +175,51 @@ class SubTaskWorker:
             world["world_model"] = world_model
         return world
 
-    def _resolve_initial_collection_config(self, subtask: SubTask) -> dict[str, Any]:
-        return resolve_list_profile_from_world(
-            self._build_runtime_world_snapshot(),
-            page_id=str(subtask.plan_node_id or ""),
-            page_state_signature=str(subtask.page_state_signature or ""),
-            anchor_url=str(subtask.anchor_url or ""),
-            variant_label=str(subtask.variant_label or ""),
-            task_description=str(subtask.task_description or ""),
+    def _resolve_previous_subtask_collection_config(self, subtask: SubTask) -> dict[str, Any]:
+        execution = dict(self.world_snapshot.get("execution") or {})
+        result_items = list(execution.get("subtask_results") or [])
+        current_subtask_id = str(subtask.id or "")
+        current_parent_node_id = str(subtask.parent_node_id or "")
+        if not current_parent_node_id:
+            logger.info(
+                "[Worker:%s] sibling_subtask_config_miss: reason=missing_parent_node_id",
+                current_subtask_id,
+            )
+            return {}
+        for item in reversed(result_items):
+            payload = _runtime_result_payload(item)
+            if str(payload.get("subtask_id") or "") == current_subtask_id:
+                continue
+            if str(payload.get("parent_node_id") or "") != current_parent_node_id:
+                continue
+            collection_config = dict(payload.get("collection_config") or {})
+            if not _is_reusable_collection_config(collection_config):
+                logger.info(
+                    "[Worker:%s] sibling_subtask_config_skip: source_subtask=%s, reason=not_validated, profile_validation_status=%s, common_detail_xpath=%s",
+                    current_subtask_id,
+                    str(payload.get("subtask_id") or "<unknown>"),
+                    str(collection_config.get("profile_validation_status") or "") or "<empty>",
+                    str(collection_config.get("common_detail_xpath") or "") or "<empty>",
+                )
+                continue
+            logger.info(
+                "[Worker:%s] reuse_sibling_subtask_config: source_subtask=%s, parent_node_id=%s, profile_key=%s, common_detail_xpath=%s",
+                current_subtask_id,
+                str(payload.get("subtask_id") or "<unknown>"),
+                current_parent_node_id,
+                str(collection_config.get("profile_key") or "") or "<empty>",
+                str(collection_config.get("common_detail_xpath") or "") or "<empty>",
+            )
+            return collection_config
+        logger.info(
+            "[Worker:%s] sibling_subtask_config_miss: reason=no_validated_sibling_config, parent_node_id=%s",
+            current_subtask_id,
+            current_parent_node_id,
         )
+        return {}
+
+    def _resolve_initial_collection_config(self, subtask: SubTask) -> dict[str, Any]:
+        return self._resolve_previous_subtask_collection_config(subtask)
 
     def _normalize_runtime_journal_entries(self, entries: tuple[dict[str, str], ...]) -> list[dict]:
         created_at = datetime.now().isoformat(timespec="seconds")

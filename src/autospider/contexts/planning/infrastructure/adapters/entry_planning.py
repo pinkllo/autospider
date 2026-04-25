@@ -79,6 +79,7 @@ class PlannerEntryPlanningRuntime(Protocol):
         analysis: dict,
         depth: int,
         mode: SubTaskMode = SubTaskMode.COLLECT,
+        parent_node_id: str | None = None,
     ) -> list[SubTask]: ...
 
 
@@ -278,6 +279,7 @@ class PlannerEntryPlanner:
             analysis=analysis,
             depth=0,
             mode=SubTaskMode.EXPAND,
+            parent_node_id=node_id,
         )
         if not subtasks:
             return self._mark_entry_without_subtasks(

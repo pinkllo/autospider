@@ -300,6 +300,7 @@ class TaskPlanner(
         depth: int,
         mode,
         parent_id: str | None = None,
+        parent_node_id: str | None = None,
         parent_execution_brief=None,
     ) -> list:
         return self._get_subtask_builder()._build_subtasks_from_variants(
@@ -308,6 +309,7 @@ class TaskPlanner(
             depth=depth,
             mode=mode,
             parent_id=parent_id,
+            parent_node_id=parent_node_id,
             parent_execution_brief=parent_execution_brief,
         )
 

@@ -42,6 +42,7 @@ class PlannerSubtaskBuilder:
         depth: int,
         mode: SubTaskMode = SubTaskMode.COLLECT,
         parent_id: str | None = None,
+        parent_node_id: str | None = None,
         parent_execution_brief: ExecutionBrief | None = None,
     ) -> list[SubTask]:
         subtasks: list[SubTask] = []
@@ -96,6 +97,7 @@ class PlannerSubtaskBuilder:
                     fixed_fields=self._build_subtask_fixed_fields(scope),
                     per_subtask_target_count=self._resolve_grouped_target_count(),
                     parent_id=parent_id,
+                    parent_node_id=parent_node_id,
                     depth=depth + 1,
                     mode=mode,
                     execution_brief=execution_brief,

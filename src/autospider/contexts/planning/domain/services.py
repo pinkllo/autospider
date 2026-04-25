@@ -191,6 +191,7 @@ class PlannerSubtaskBuilderMixin:
         depth: int,
         mode: SubTaskMode = SubTaskMode.COLLECT,
         parent_id: str | None = None,
+        parent_node_id: str | None = None,
         parent_execution_brief: ExecutionBrief | None = None,
     ) -> list[SubTask]:
         return self._get_subtask_builder()._build_subtasks_from_variants(
@@ -199,6 +200,7 @@ class PlannerSubtaskBuilderMixin:
             depth=depth,
             mode=mode,
             parent_id=parent_id,
+            parent_node_id=parent_node_id,
             parent_execution_brief=parent_execution_brief,
         )
 
