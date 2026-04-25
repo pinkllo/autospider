@@ -114,6 +114,14 @@ class ProducerService:
     async def run(self) -> None:
         try:
             await _set_runtime_stage(self.context.tracker, stage="collecting")
+            logger.info(
+                "[Pipeline] collect_start: list=%s | target=%s | sample=%s | nav_steps=%s | initial_profile=%s",
+                self.context.list_url,
+                self.context.target_url_count if self.context.target_url_count is not None else "<none>",
+                self.context.explore_count,
+                len(self.context.initial_nav_steps or []),
+                "yes" if self.context.initial_collection_config else "no",
+            )
             collector = self.deps.collector_cls(
                 page=self.context.sessions.list_session.page,
                 list_url=self.context.list_url,
@@ -175,7 +183,17 @@ class ProducerService:
                 "variant_label": str(self.context.variant_label or ""),
                 "task_description": self.context.task_description,
             }
-            logger.info("[Pipeline] URL 收集完成: collected_urls=%s", len(result.collected_urls))
+            logger.info(
+                "[Pipeline] collect_complete: urls=%s | profile=%s | xpath=%s | nav_steps=%s | reject=%s",
+                len(result.collected_urls),
+                str(self.context.runtime_state.collection_config.get("profile_validation_status") or "")
+                or "<empty>",
+                str(self.context.runtime_state.collection_config.get("common_detail_xpath") or "")
+                or "<empty>",
+                len(self.context.runtime_state.collection_config.get("nav_steps") or []),
+                str(self.context.runtime_state.collection_config.get("profile_reject_reason") or "")
+                or "<empty>",
+            )
             await self._release_list_session()
             await self.context.tracker.set_total(len(result.collected_urls))
             await self.context.channel.seal()
@@ -206,10 +224,14 @@ class ConsumerPool:
         self._entered_consuming = False
 
     async def run(self) -> None:
-        logger.info("[Pipeline] Consumer workers: %s", self.context.consumer_workers)
         queue_size = max(
             self.context.consumer_workers * 2,
             self.context.consumer_workers * config.pipeline.batch_flush_size,
+        )
+        logger.info(
+            "[Pipeline] consumer_pool_start: workers=%s | queue_size=%s",
+            self.context.consumer_workers,
+            queue_size,
         )
         task_queue: asyncio.Queue[URLTask | None] = asyncio.Queue(maxsize=queue_size)
         summary_lock = asyncio.Lock()

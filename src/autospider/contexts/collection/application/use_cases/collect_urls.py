@@ -150,11 +150,56 @@ class URLCollector(BaseCollector):
         self.config_persistence = resolved_dependencies.config_persistence
         self.xpath_extractor = resolved_dependencies.xpath_extractor
 
+    def _log_run_start(self) -> None:
+        initial_config = self.initial_collection_config
+        config_type = type(initial_config).__name__ if initial_config is not None else "None"
+        logger.info(
+            "[URLCollector] start: task=%s | list=%s | target=%s | sample=%s | max_pages=%s | initial_config=%s | nav_steps=%s | profile_key=%s",
+            self.task_description,
+            self.list_url,
+            self.target_url_count if self.target_url_count is not None else "<none>",
+            self.explore_count,
+            self.max_pages if self.max_pages is not None else "<none>",
+            config_type,
+            len(self.initial_nav_steps or []),
+            self.profile_key or "<empty>",
+        )
+
+    def _log_page_summary(self, *, new_urls: list[str], new_visits: list[DetailPageVisit]) -> None:
+        logger.info(
+            "[URLCollector] page=%s summary: mode=%s | new_urls=%s | total_urls=%s | new_visits=%s | detail_visits=%s | xpath=%s",
+            self.pagination_handler.current_page_num,
+            "xpath" if self.common_detail_xpath else "llm",
+            len(new_urls),
+            len(self.collected_urls),
+            len(new_visits),
+            len(self.detail_visits),
+            str(self.common_detail_xpath or "") or "<empty>",
+        )
+
+    def _log_stop(self, reason: str) -> None:
+        logger.info(
+            "[URLCollector] stop: reason=%s | total_urls=%s | detail_visits=%s | xpath=%s | profile=%s | reject=%s",
+            reason,
+            len(self.collected_urls),
+            len(self.detail_visits),
+            str(self.common_detail_xpath or "") or "<empty>",
+            self.profile_validation_status or "<empty>",
+            self.profile_reject_reason or "<empty>",
+        )
+
+    def _log_run_end(self) -> None:
+        logger.info(
+            "[URLCollector] completed: urls=%s | detail_visits=%s | xpath=%s | profile=%s | reject=%s",
+            len(self.collected_urls),
+            len(self.detail_visits),
+            str(self.common_detail_xpath or "") or "<empty>",
+            self.profile_validation_status or "<empty>",
+            self.profile_reject_reason or "<empty>",
+        )
+
     async def run(self) -> URLCollectorResult:
-        logger.info("\n[URLCollector] ===== 开始在线收集详情页 URL =====")
-        logger.info(f"[URLCollector] 任务描述: {self.task_description}")
-        logger.info(f"[URLCollector] 列表页: {self.list_url}")
-        logger.info(f"[URLCollector] 样本目标: {self.explore_count}")
+        self._log_run_start()
         await self._prepare_skill_context()
 
         await self.page.goto(self.list_url, wait_until="domcontentloaded", timeout=30000)
@@ -162,10 +207,15 @@ class URLCollector(BaseCollector):
         self._initialize_handlers()
 
         if await self._try_apply_initial_collection_config():
-            logger.info("\n[Phase 2] profile_hit: 已验证列表页配置，跳过 LLM 样本采集")
+            logger.info(
+                "[URLCollector] profile=hit: validated list profile | xpath=%s | pagination=%s | jump=%s",
+                str(self.common_detail_xpath or "") or "<empty>",
+                str(getattr(self.pagination_handler, "pagination_xpath", "") or "") or "<empty>",
+                "yes" if getattr(self.pagination_handler, "jump_widget_xpath", None) else "no",
+            )
         else:
+            logger.info("[URLCollector] profile=miss: fallback=llm_sample")
             await self._run_navigation_phase()
-            logger.info("[URLCollector] profile_miss: 继续现有 LLM 样本采集路径")
 
         self._sync_navigation_page()
 
@@ -173,23 +223,28 @@ class URLCollector(BaseCollector):
 
         while not self.common_detail_xpath and self.pagination_handler.current_page_num <= self.max_pages:
             logger.info(
-                "\n[Phase 2] manual_sample: 第 %s 页，已收集 %s 条 URL",
+                "[URLCollector] page=%s collect_start: urls=%s | detail_visits=%s | target=%s",
                 self.pagination_handler.current_page_num,
                 len(self.collected_urls),
+                len(self.detail_visits),
+                self.target_url_count if self.target_url_count is not None else "<none>",
             )
 
             page_urls, new_visits = await self._collect_current_page_with_llm()
-            if new_visits:
-                logger.info("[URLCollector] 本页新增样本 %s 条", len(new_visits))
+            self._log_page_summary(new_urls=page_urls, new_visits=new_visits)
 
             self.save_running_progress()
 
             if len(self.collected_urls) >= self.target_url_count:
-                logger.info("[URLCollector] 已达到目标 URL 数量")
+                self._log_stop("target_url_count_reached")
                 break
 
             if len(self.detail_visits) >= self.explore_count and not self.common_detail_xpath:
-                logger.info("\n[Phase 3] build_rule: 从真实样本生成公共详情 XPath")
+                logger.info(
+                    "[URLCollector] xpath_build: visits=%s | sample_target=%s",
+                    len(self.detail_visits),
+                    self.explore_count,
+                )
                 candidate_xpath = self.xpath_extractor.extract_common_xpath(self.detail_visits)
                 if candidate_xpath:
                     self.common_detail_xpath = candidate_xpath
@@ -202,16 +257,21 @@ class URLCollector(BaseCollector):
                     logger.info("\n[Phase 4] validate_rule: 使用后续页面验证公共详情 XPath")
                     validated = await self._validate_xpath_rule_on_next_pages(validation_pages)
                     if validated:
-                        logger.info("[URLCollector] 公共详情 XPath 验证通过，切换到规则执行")
-                        logger.info("\n[Phase 4.1] 提取分页控件 XPath...")
+                        logger.info(
+                            "[URLCollector] xpath_validated: xpath=%s",
+                            self.common_detail_xpath,
+                        )
                         pagination_xpath = await self.pagination_handler.extract_pagination_xpath()
                         if pagination_xpath:
-                            logger.info("[URLCollector] ✓ 分页控件 XPath: %s", pagination_xpath)
+                            logger.info(
+                                "[URLCollector] pagination_xpath=%s",
+                                pagination_xpath,
+                            )
                         jump_widget_xpath = (
                             await self.pagination_handler.extract_jump_widget_xpath()
                         )
                         if jump_widget_xpath:
-                            logger.info("[URLCollector] ✓ 跳转控件已提取")
+                            logger.info("[URLCollector] jump_widget=enabled")
                         self._save_config()
                         break
 
@@ -220,16 +280,21 @@ class URLCollector(BaseCollector):
                     self.common_pattern = None
 
             if not await self._advance_to_next_page():
-                logger.info("[URLCollector] 无法继续翻页，结束手动采集")
+                self._log_stop("no_next_page")
                 break
 
         if self.common_detail_xpath and len(self.collected_urls) < self.target_url_count:
-            logger.info("\n[Phase 5] rule_run: 使用公共 XPath 批量收集剩余 URL")
+            logger.info(
+                "[URLCollector] rule_run: xpath=%s | remaining=%s",
+                self.common_detail_xpath,
+                self.target_url_count - len(self.collected_urls),
+            )
             await self._collect_phase_with_xpath()
 
         crawler_script = await self._generate_crawler_script()
         result = self._create_result()
         await self._save_result(result, crawler_script)
+        self._log_run_end()
         self.save_progress_status(status="COMPLETED")
         return result
 

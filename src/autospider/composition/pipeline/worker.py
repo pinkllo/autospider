@@ -186,7 +186,9 @@ class SubTaskWorker:
                 current_subtask_id,
             )
             return {}
+        scanned = 0
         for item in reversed(result_items):
+            scanned += 1
             payload = _runtime_result_payload(item)
             if str(payload.get("subtask_id") or "") == current_subtask_id:
                 continue
@@ -212,9 +214,11 @@ class SubTaskWorker:
             )
             return collection_config
         logger.info(
-            "[Worker:%s] sibling_subtask_config_miss: reason=no_validated_sibling_config, parent_node_id=%s",
+            "[Worker:%s] sibling_subtask_config_miss: reason=no_validated_sibling_config | parent_node_id=%s | scanned=%s | results=%s",
             current_subtask_id,
             current_parent_node_id,
+            scanned,
+            len(result_items),
         )
         return {}
 
@@ -276,10 +280,14 @@ class SubTaskWorker:
         journal_entries: list[dict] = []
 
         logger.info(
-            "[Worker:%s] 开始执行: %s -> %s",
+            "[Worker:%s] start: name=%s | parent_node_id=%s | mode=%s | list=%s | target=%s | pages=%s",
             self.subtask.id,
             self.subtask.name,
+            str(self.subtask.parent_node_id or "") or "<root>",
+            self.subtask.mode.value,
             self.subtask.list_url[:80],
+            self.subtask.target_url_count if self.subtask.target_url_count is not None else "<none>",
+            self.subtask.max_pages if self.subtask.max_pages is not None else "<none>",
         )
         if self.subtask.mode == SubTaskMode.EXPAND:
             runtime_result = await self._expand_runtime_subtask()
@@ -341,10 +349,11 @@ class SubTaskWorker:
         )
         context = build_execution_context(request, fields=self._prepare_fields())
         logger.info(
-            "[Worker:%s] pipeline_mode=%s, execution_id=%s",
+            "[Worker:%s] runtime_request: pipeline_mode=%s | execution_id=%s | initial_collection_config=%s",
             self.subtask.id,
             context.pipeline_mode.value,
             context.execution_id,
+            "yes" if initial_collection_config else "no",
         )
         pipeline_result = await run_pipeline(context)
         result = pipeline_result.to_payload()
@@ -352,10 +361,13 @@ class SubTaskWorker:
         pipeline_result = PipelineRunResult.from_raw(result)
 
         logger.info(
-            "[Worker:%s] 执行完成: 采集 %d 条, 成功 %d 条",
+            "[Worker:%s] done: urls=%d | success=%d | outcome=%s | profile=%s | xpath=%s",
             self.subtask.id,
             pipeline_result.summary.total_urls,
             pipeline_result.summary.success_count,
+            result.get("outcome_type") or "<empty>",
+            str(dict(result.get("collection_config") or {}).get("profile_validation_status") or "") or "<empty>",
+            str(dict(result.get("collection_config") or {}).get("common_detail_xpath") or "") or "<empty>",
         )
         result["journal_entries"] = journal_entries
         pipeline_result = PipelineRunResult.from_raw(result)

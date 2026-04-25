@@ -95,7 +95,7 @@ class UrlPublishService:
         if payload:
             payload += "\n"
         write_text_if_changed(self._urls_file, payload)
-        logger.info(f"[Save] URL 列表已保存到: {self._urls_file}")
+        logger.debug("[Save] URL 列表已保存到: %s", self._urls_file)
 
     @staticmethod
     def _dedupe_urls(urls: list[str]) -> list[str]:
